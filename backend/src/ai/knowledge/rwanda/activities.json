@@ -1,0 +1,31 @@
+// src/ai/knowledge/rwanda/activities.json
+export const activities = {
+  gorillaTrekking: {
+    name: "Gorilla Trekking",
+    location: "Volcanoes National Park",
+    description: "Once in a lifetime experience with mountain gorillas",
+    duration: "2-6 hours",
+    price: "$1500",
+    bestTime: "June-September",
+    requirements: ["Permit required", "Physical fitness", "Age 15+"]
+  },
+  canopyWalk: {
+    name: "Canopy Walk",
+    location: "Nyungwe Forest",
+    description: "Walk above the rainforest canopy",
+    duration: "1-2 hours",
+    price: "$60",
+    bestTime: "June-September"
+  },
+  cityTour: {
+    name: "Kigali City Tour",
+    location: "Kigali",
+    description: "Explore the cleanest city in Africa",
+    duration: "4-6 hours",
+    price: "$100",
+    bestTime: "All year round",
+    highlights: ["Genocide Memorial", "Local Markets", "Arts Center"]
+  }
+};
+
+export default activities;

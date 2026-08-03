@@ -1,0 +1,378 @@
+// src/config/listingConfigs.js
+import {
+  Compass,
+  User,
+  Building2,
+  Home,
+  Utensils,
+  Coffee,
+  Car,
+  Calendar,
+  ShoppingBag,
+  Sparkles,
+  Globe,
+  Star,
+  Shield,
+  Zap,
+  FileText,
+  AlertCircle,
+  MapPin,
+  CheckCircle,
+} from "lucide-react";
+
+
+
+// ================================================================
+// BUSINESS TYPE CONFIGURATION
+// Each businessType → its own categories, sections, field labels
+// ================================================================
+export const BIZ_CONFIG = {
+  tour_operator: {
+    label: "Tour Operator",
+    icon: Compass,
+    accent: "#0D9488",
+    categories: [
+      "Wildlife Safari",
+      "Gorilla Trekking",
+      "Mountain Hiking",
+      "Cultural Tour",
+      "City Tour",
+      "Eco Tourism",
+      "Adventure",
+      "Photography Tour",
+      "Family Tour",
+      "Honeymoon Package",
+    ],
+    listingTypes: ["Tour", "Package", "Experience"],
+    pricingLabel: "Starting Price (USD per person)",
+    durationLabel: "Tour Duration",
+    capacityLabel: "Max Group Size",
+    meetingLabel: "Meeting / Pickup Point",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "highlights",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Describe the full tour experience — rangers, permits, accommodation included.",
+  },
+  guide: {
+    label: "Tour Guide",
+    icon: User,
+    accent: "#0D9488",
+    categories: [
+      "Gorilla Trek Guide",
+      "Birding Guide",
+      "City Walking Guide",
+      "Cultural Interpreter",
+      "Mountain Guide",
+      "Photography Guide",
+      "Night Tour Guide",
+      "Custom Private Guide",
+    ],
+    listingTypes: ["Guide Service", "Private Guide", "Birding Guide", "Walking Tour"],
+    pricingLabel: "Guide Fee (USD per day)",
+    durationLabel: "Service Duration",
+    capacityLabel: "Max Clients per Session",
+    meetingLabel: "Where Clients Meet You",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "highlights",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Highlight your certifications, languages spoken, and specializations.",
+  },
+  hotel: {
+    label: "Hotel",
+    icon: Building2,
+    accent: "#8B5CF6",
+    categories: [
+      "Luxury Hotel",
+      "Boutique Hotel",
+      "Business Hotel",
+      "Airport Hotel",
+      "City Center Hotel",
+      "Resort",
+      "Serviced Apartment",
+    ],
+    listingTypes: ["Accommodation", "Room", "Conference Package", "Weekend Package"],
+    pricingLabel: "Starting Room Price (USD per night)",
+    durationLabel: "Minimum Stay",
+    capacityLabel: "Max Guests per Room",
+    meetingLabel: "Hotel Address / Check-in Point",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "amenities",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Describe room types, amenities, and nearby attractions.",
+  },
+  lodge: {
+    label: "Lodge / Eco-Camp",
+    icon: Home,
+    accent: "#16A34A",
+    categories: [
+      "Eco Lodge",
+      "Safari Camp",
+      "Mountain Lodge",
+      "Forest Lodge",
+      "Lake Lodge",
+      "Luxury Camp",
+      "Budget Camp",
+    ],
+    listingTypes: ["Accommodation", "Eco-Lodge", "Safari Lodge", "Camp"],
+    pricingLabel: "Starting Rate (USD per night)",
+    durationLabel: "Minimum Stay",
+    capacityLabel: "Max Guests",
+    meetingLabel: "Lodge Entrance / Pickup",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "amenities",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Emphasize nature immersion, sustainability, and wildlife proximity.",
+  },
+  restaurant: {
+    label: "Restaurant",
+    icon: Utensils,
+    accent: "#EA580C",
+    categories: [
+      "Fine Dining",
+      "Local Rwandan Cuisine",
+      "Rooftop Restaurant",
+      "Farm to Table",
+      "Buffet",
+      "Brunch Spot",
+      "Cultural Dining Experience",
+      "Chef's Table",
+    ],
+    listingTypes: ["Dining Experience", "Reservation", "Chef Table"],
+    pricingLabel: "Average Price per Person (USD)",
+    durationLabel: "Average Dining Duration",
+    capacityLabel: "Max Guests per Booking",
+    meetingLabel: "Restaurant Location",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "menu",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Describe signature dishes, ambiance, and any cultural dining experience.",
+  },
+  cafe: {
+    label: "Café / Coffee Shop",
+    icon: Coffee,
+    accent: "#B45309",
+    categories: [
+      "Specialty Coffee",
+      "Brunch Café",
+      "Work-Friendly Café",
+      "Rooftop Café",
+      "Cultural Café",
+      "Bakery & Café",
+    ],
+    listingTypes: ["Coffee Experience", "Pastry", "Breakfast"],
+    pricingLabel: "Average Spend per Person (USD)",
+    durationLabel: "Typical Visit Duration",
+    capacityLabel: "Max Guests",
+    meetingLabel: "Café Address",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "menu",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Highlight your coffee origin, atmosphere, WiFi, and food offerings.",
+  },
+  transport: {
+    label: "Transport / Transfer",
+    icon: Car,
+    accent: "#0EA5E9",
+    categories: [
+      "Airport Transfer",
+      "Safari Vehicle",
+      "Luxury Car Hire",
+      "Minibus Transfer",
+      "Motorcycle Tour",
+      "Boat Transfer",
+      "Helicopter Tour",
+      "4x4 Safari",
+    ],
+    listingTypes: ["Airport Transfer", "Vehicle Rental", "Safari Vehicle"],
+    pricingLabel: "Price (USD per trip/day)",
+    durationLabel: "Service Duration / Route Time",
+    capacityLabel: "Max Passengers",
+    meetingLabel: "Pickup Location",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "highlights",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "List vehicle type, capacity, air conditioning, and routes covered.",
+  },
+  events: {
+    label: "Events & Activities",
+    icon: Calendar,
+    accent: "#7C3AED",
+    categories: [
+      "Cultural Show",
+      "Music Festival",
+      "Team Building",
+      "Corporate Event",
+      "Wedding Package",
+      "Cooking Class",
+      "Craft Workshop",
+      "Sports Event",
+      "Boat Party",
+    ],
+    listingTypes: ["Event", "Workshop", "Tournament", "Festival"],
+    pricingLabel: "Ticket / Package Price (USD per person)",
+    durationLabel: "Event Duration",
+    capacityLabel: "Max Participants",
+    meetingLabel: "Event Venue / Location",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "highlights",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Describe the event experience, entertainment, and what participants will learn or enjoy.",
+  },
+  shop: {
+    label: "Souvenir / Craft Shop",
+    icon: ShoppingBag,
+    accent: "#BE185D",
+    categories: [
+      "Handcraft Shop",
+      "Art Gallery",
+      "Jewelry",
+      "Clothing & Fashion",
+      "Organic Products",
+      "Musical Instruments",
+      "Photography Prints",
+    ],
+    listingTypes: ["Product", "Workshop", "Experience"],
+    pricingLabel: "Starting Price (USD)",
+    durationLabel: "Shop Visit Duration",
+    capacityLabel: "Max Visitors",
+    meetingLabel: "Shop Location",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "highlights",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Describe artisan stories, product authenticity, and custom order options.",
+  },
+  other: {
+    label: "Other",
+    icon: Sparkles,
+    accent: "#0D9488",
+    categories: [
+      "Unique Experience",
+      "Community Tourism",
+      "Wellness Retreat",
+      "Volunteer Tourism",
+      "Photography Expedition",
+      "Research Tour",
+    ],
+    listingTypes: ["Service", "Experience", "Consultation"],
+    pricingLabel: "Price (USD per person)",
+    durationLabel: "Duration",
+    capacityLabel: "Max Participants",
+    meetingLabel: "Meeting Point",
+    sections: [
+      "basic",
+      "media",
+      "description",
+      "highlights",
+      "included",
+      "requirements",
+      "logistics",
+      "policy",
+    ],
+    tip: "Describe your unique offering clearly so travelers know what to expect.",
+  },
+};
+
+// ================================================================
+// SECTION CONFIGURATION
+// ================================================================
+export const SECTION_LABELS = {
+  basic: { label: "Basic Information", icon: Globe },
+  media: { label: "Photos & Videos", icon: Zap },
+  description: { label: "Description", icon: FileText },
+  highlights: { label: "Highlights", icon: Star },
+  amenities: { label: "Amenities & Features", icon: Shield },
+  menu: { label: "Menu / Offerings", icon: Utensils },
+  included: { label: "What's Included", icon: CheckCircle },
+  requirements: { label: "Requirements & Notes", icon: AlertCircle },
+  logistics: { label: "Meeting & Logistics", icon: MapPin },
+  policy: { label: "Policies", icon: Shield },
+};
+
+// ================================================================
+// HELPERS
+// ================================================================
+export const getBusinessConfig = (businessType) => {
+  return BIZ_CONFIG[businessType] || BIZ_CONFIG.other;
+};
+
+export const getBusinessTypeFromProvider = (providerProfile) => {
+  return providerProfile?.businessType || "other";
+};
+
+export const getDefaultListingType = (businessType) => {
+  const config = getBusinessConfig(businessType);
+  return config.listingTypes?.[0] || "Service";
+};
+
+export const getCategories = (businessType) => {
+  const config = getBusinessConfig(businessType);
+  return config.categories || [];
+};
+
+export const getSections = (businessType) => {
+  const config = getBusinessConfig(businessType);
+  return config.sections || ["basic", "media", "description", "included", "policy"];
+};

@@ -1,0 +1,442 @@
+### ============================================================
+### AI TOUR RWANDA - API TEST FILE
+### Server: http://localhost:5000
+### ============================================================
+
+@baseUrl = http://localhost:5000/api
+@contentType = application/json
+
+### ============================================================
+### 1. AUTHENTICATION - PUBLIC ROUTES
+### ============================================================
+
+### 1.1 Register User
+GET  http://localhost:5000/api/provider-profiles/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTYzM2M4NmIxYTYyMmU5MDM3NDRmMTkiLCJlbWFpbCI6InJlcG9uc2VkZXZAZ21haWwuY29tIiwicm9sZSI6InByb3ZpZGVyIiwidmVyc2lvbiI6MSwiaWF0IjoxNzg0OTYwNjg5LCJleHAiOjE3ODQ5NjE1ODksImF1ZCI6ImFpdG91ci1hcGkiLCJpc3MiOiJhaXRvdXIucnciLCJqdGkiOiJiODRmMjA4NDk5ZjQyYmVlM2Y5ZDgyODg2MjlmZWVkNCJ9.F0LUKjBKVlzspr4ZlTq6FJu9yHrXeBcNNDfYRywxxdU
+
+
+
+### 1.2 Login User
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "test@example.com",
+  "password": "password123"
+}
+
+### 1.3 Refresh Token
+POST {{baseUrl}}/auth/refresh-token
+Content-Type: {{contentType}}
+
+{
+  "refreshToken": "YOUR_REFRESH_TOKEN_HERE"
+}
+
+### 1.4 Verify Email
+GET {{baseUrl}}/auth/verify-email/YOUR_VERIFICATION_TOKEN
+
+### 1.5 Resend Verification Email
+POST {{baseUrl}}/auth/resend-verification
+Content-Type: {{contentType}}
+
+{
+  "email": "test@example.com"
+}
+
+### 1.6 Forgot Password
+POST {{baseUrl}}/auth/forgot-password
+Content-Type: {{contentType}}
+
+{
+  "email": "test@example.com"
+}
+
+### 1.7 Reset Password
+POST {{baseUrl}}/auth/reset-password/YOUR_RESET_TOKEN
+Content-Type: {{contentType}}
+
+{
+  "password": "newpassword123",
+  "confirmPassword": "newpassword123"
+}
+
+### ============================================================
+### 2. AUTHENTICATION - PROTECTED ROUTES
+### ============================================================
+
+### 2.1 Get Current User
+GET {{baseUrl}}/auth/me
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 2.2 Update Profile
+PUT {{baseUrl}}/auth/profile
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+Content-Type: {{contentType}}
+
+{
+  "name": "Updated User Name",
+  "phone": "+250788999999",
+  "country": "Rwanda",
+  "bio": "Travel enthusiast exploring Rwanda!"
+}
+
+### 2.3 Change Password
+PUT {{baseUrl}}/auth/change-password
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+Content-Type: {{contentType}}
+
+{
+  "currentPassword": "password123",
+  "newPassword": "newpassword123",
+  "confirmPassword": "newpassword123"
+}
+
+### 2.4 Logout
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### ============================================================
+### 3. AI PUBLIC ENDPOINTS
+### ============================================================
+
+### 3.1 Get AI Provider Status
+GET {{baseUrl}}/ai/provider-info
+
+### 3.2 Chat - Basic
+POST {{baseUrl}}/ai/chat
+Content-Type: {{contentType}}
+
+{
+  "message": "Hello! What experiences do you recommend in Rwanda?",
+  "language": "English"
+}
+
+### 3.3 Chat - Trip Planning
+POST {{baseUrl}}/ai/chat
+Content-Type: {{contentType}}
+
+{
+  "message": "I want to plan a 5-day trip to Rwanda with my family",
+  "language": "English"
+}
+
+### 3.4 Chat in French
+POST {{baseUrl}}/ai/chat
+Content-Type: {{contentType}}
+
+{
+  "message": "Quelles sont les meilleures expériences au Rwanda?",
+  "language": "French"
+}
+
+### 3.5 Chat in Kinyarwanda
+POST {{baseUrl}}/ai/chat
+Content-Type: {{contentType}}
+
+{
+  "message": "Ni ibiki byiza ushobora gukora mu Rwanda?",
+  "language": "Kinyarwanda"
+}
+
+### ============================================================
+### 4. AI PLANNER
+### ============================================================
+
+### 4.1 Basic Trip Plan
+POST {{baseUrl}}/ai/planner
+Content-Type: {{contentType}}
+
+{
+  "destination": "Kigali",
+  "days": 3,
+  "budget": 500,
+  "travelers": 2,
+  "preferences": ["culture", "food"],
+  "travelStyle": "balanced"
+}
+
+### 4.2 Adventure Trip
+POST {{baseUrl}}/ai/planner
+Content-Type: {{contentType}}
+
+{
+  "destination": "Volcanoes National Park",
+  "days": 5,
+  "budget": 1500,
+  "travelers": 1,
+  "interests": ["hiking", "wildlife", "photography"],
+  "travelStyle": "adventure"
+}
+
+### 4.3 Luxury Trip
+POST {{baseUrl}}/ai/planner
+Content-Type: {{contentType}}
+
+{
+  "destination": "Rwanda",
+  "days": 7,
+  "budget": 5000,
+  "travelers": 2,
+  "preferences": ["luxury", "relaxation"],
+  "travelStyle": "luxury"
+}
+
+### 4.4 Budget Trip
+POST {{baseUrl}}/ai/planner
+Content-Type: {{contentType}}
+
+{
+  "destination": "Lake Kivu",
+  "days": 4,
+  "budget": 300,
+  "travelers": 3,
+  "travelStyle": "budget"
+}
+
+### ============================================================
+### 5. AI RECOMMENDATIONS & SEARCH
+### ============================================================
+
+### 5.1 Get Recommendations (Public)
+GET {{baseUrl}}/ai/recommendations?query=best experiences in Rwanda&limit=5
+
+### 5.2 Get Recommendations by Location
+GET {{baseUrl}}/ai/recommendations?query=Kigali&limit=5
+
+### 5.3 Get Recommendations with Price Filter
+GET {{baseUrl}}/ai/recommendations?query=safari&minPrice=100&maxPrice=500&limit=5
+
+### 5.4 Get Trending Experiences (Protected)
+GET {{baseUrl}}/ai/trending?limit=5
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 5.5 Get Featured Experiences (Protected)
+GET {{baseUrl}}/ai/featured?limit=5
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 5.6 Search Experiences
+GET {{baseUrl}}/ai/search?query=gorilla trekking&limit=10
+
+### 5.7 Search with Filters
+GET {{baseUrl}}/ai/search?query=hotel&filters={"minPrice":50,"maxPrice":200}&limit=10
+
+### ============================================================
+### 6. ADMIN ROUTES
+### ============================================================
+
+### 6.1 Switch AI Provider (Admin Only)
+POST {{baseUrl}}/ai/switch-provider
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+Content-Type: {{contentType}}
+
+{
+  "provider": "openai"
+}
+
+### 6.2 Get Dashboard Stats (Admin Only)
+GET {{baseUrl}}/admin/dashboard
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 6.3 Get All Users (Admin Only)
+GET {{baseUrl}}/admin/users
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### ============================================================
+### 7. LISTING MANAGEMENT
+### ============================================================
+
+### 7.1 Get All Listings
+GET {{baseUrl}}/listings
+
+### 7.2 Get Listing by ID
+GET {{baseUrl}}/listings/YOUR_LISTING_ID
+
+### 7.3 Get Featured Listings
+GET {{baseUrl}}/listings/featured
+
+### 7.4 Search Listings
+GET {{baseUrl}}/listings/search?query=Kigali
+
+### ============================================================
+### 8. BOOKING MANAGEMENT
+### ============================================================
+
+### 8.1 Create Booking (Protected)
+POST {{baseUrl}}/bookings
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+Content-Type: {{contentType}}
+
+{
+  "listingId": "YOUR_LISTING_ID",
+  "startDate": "2026-08-01",
+  "endDate": "2026-08-03",
+  "numberOfPeople": 2,
+  "specialRequests": "Window seat preferred"
+}
+
+### 8.2 Get My Bookings (Protected)
+GET {{baseUrl}}/bookings/my-bookings
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 8.3 Get Booking by ID (Protected)
+GET {{baseUrl}}/bookings/YOUR_BOOKING_ID
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 8.4 Cancel Booking (Protected)
+PUT {{baseUrl}}/bookings/YOUR_BOOKING_ID/cancel
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+Content-Type: {{contentType}}
+
+{
+  "reason": "Change of plans"
+}
+
+### ============================================================
+### 9. REVIEW MANAGEMENT
+### ============================================================
+
+### 9.1 Create Review (Protected)
+POST {{baseUrl}}/reviews
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+Content-Type: {{contentType}}
+
+{
+  "listingId": "YOUR_LISTING_ID",
+  "bookingId": "YOUR_BOOKING_ID",
+  "rating": 5,
+  "title": "Amazing Experience!",
+  "comment": "This was an unforgettable experience. Highly recommended!"
+}
+
+### 9.2 Get Reviews for Listing
+GET {{baseUrl}}/reviews/listing/YOUR_LISTING_ID
+
+### 9.3 Get My Reviews (Protected)
+GET {{baseUrl}}/reviews/my-reviews
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### ============================================================
+### 10. ERROR TESTING
+### ============================================================
+
+### 10.1 Invalid Login
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "wrong@example.com",
+  "password": "wrongpassword"
+}
+
+### 10.2 No Token (Should return 401)
+GET {{baseUrl}}/auth/me
+
+### 10.3 Invalid Token (Should return 401)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer invalid-token-here
+
+### 10.4 Admin Route with Non-Admin Token
+GET {{baseUrl}}/admin/dashboard
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### 10.5 Chat with Empty Message
+POST {{baseUrl}}/ai/chat
+Content-Type: {{contentType}}
+
+{
+  "message": ""
+}
+
+### 10.6 Planner with Missing Fields
+POST {{baseUrl}}/ai/planner
+Content-Type: {{contentType}}
+
+{
+  "destination": "Kigali"
+}
+
+### ============================================================
+### 11. QUICK TEST SEQUENCE
+### ============================================================
+
+### Step 1: Check server status
+GET {{baseUrl}}/../
+
+### Step 2: Check AI provider status
+GET {{baseUrl}}/ai/provider-info
+
+### Step 3: Register a new user
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "name": "Quick Test User",
+  "email": "quick@example.com",
+  "password": "password123"
+}
+
+### Step 4: Login (copy token from response)
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "quick@example.com",
+  "password": "password123"
+}
+
+### Step 5: Get current user (use token from login)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
+
+### Step 6: Test AI Chat
+POST {{baseUrl}}/ai/chat
+Content-Type: {{contentType}}
+
+{
+  "message": "Hello! Can you help me plan a trip to Rwanda?"
+}
+
+### Step 7: Get recommendations
+GET {{baseUrl}}/ai/recommendations?query=Kigali&limit=3
+
+### Step 8: Generate a trip plan
+POST {{baseUrl}}/ai/planner
+Content-Type: {{contentType}}
+
+{
+  "destination": "Kigali",
+  "days": 2,
+  "budget": 300,
+  "travelers": 1
+}
+
+### ============================================================
+### 12. CURL COMMANDS (Alternative)
+### ============================================================
+
+# Register
+# curl -X POST http://localhost:5000/api/auth/register \
+#   -H "Content-Type: application/json" \
+#   -d '{"name":"Test User","email":"test@example.com","password":"password123"}'
+
+# Login
+# curl -X POST http://localhost:5000/api/auth/login \
+#   -H "Content-Type: application/json" \
+#   -d '{"email":"test@example.com","password":"password123"}'
+
+# Chat
+# curl -X POST http://localhost:5000/api/ai/chat \
+#   -H "Content-Type: application/json" \
+#   -d '{"message":"Hello! What experiences do you recommend?"}'
+
+# Planner
+# curl -X POST http://localhost:5000/api/ai/planner \
+#   -H "Content-Type: application/json" \
+#   -d '{"destination":"Kigali","days":3,"budget":500}'
+
+# Recommendations
+# curl -X GET "http://localhost:5000/api/ai/recommendations?query=Kigali&limit=5"
+
+# Provider Info
+# curl -X GET http://localhost:5000/api/ai/provider-info

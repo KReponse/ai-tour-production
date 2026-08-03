@@ -1,0 +1,30 @@
+// src/ai/knowledge/rwanda/cities.json
+export const cities = {
+  kigali: {
+    name: "Kigali",
+    description: "Capital city, cleanest city in Africa",
+    attractions: ["Genocide Memorial", "Kigali City Tower", "Kimironko Market", "Inema Arts Center"],
+    neighborhoods: ["Kimihurura", "Remera", "Nyarutarama", "Kacyiru"],
+    hotels: ["Kigali Marriott", "Radisson Blu", "The Manor", "Ubumwe Grande"],
+    restaurants: ["Heaven", "Fusion", "Repub Lounge", "Bourbon Cafe"],
+    bestTime: "June-September"
+  },
+  musanze: {
+    name: "Musanze",
+    description: "Gateway to Volcanoes National Park",
+    attractions: ["Volcanoes National Park", "Iby'Iwacu Cultural Village", "Bisoke Hike"],
+    hotels: ["Virunga Inn", "La Palme Hotel", "Five Volcanoes"],
+    restaurants: ["Hotel Muhabura", "Gorilla's Nest"],
+    bestTime: "June-September"
+  },
+  rubavu: {
+    name: "Rubavu (Gisenyi)",
+    description: "Lake Kivu resort town",
+    attractions: ["Lake Kivu", "Boat Tours", "Beaches", "Sunset Views"],
+    hotels: ["Paradis Malahide", "Lake Kivu Serena", "Gisenyi Beach Hotel"],
+    restaurants: ["Lake Kivu Lounge", "The Fish Place"],
+    bestTime: "May-October"
+  }
+};
+
+export default cities;

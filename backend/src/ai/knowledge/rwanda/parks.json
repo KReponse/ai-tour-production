@@ -1,0 +1,32 @@
+// src/ai/knowledge/rwanda/parks.json
+export const parks = {
+  volcanoes: {
+    name: "Volcanoes National Park",
+    location: "Musanze, Northern Province",
+    description: "Home to mountain gorillas and golden monkeys",
+    activities: ["Gorilla Trekking", "Golden Monkey Tracking", "Bisoke Hike", "Diane Fossey Tomb"],
+    bestTime: "June-September",
+    price: "$1500 permit",
+    animals: ["Mountain Gorillas", "Golden Monkeys", "Birds"]
+  },
+  akagera: {
+    name: "Akagera National Park",
+    location: "Eastern Province",
+    description: "Savannah park with Big Five",
+    activities: ["Game Drive", "Boat Safari", "Bird Watching", "Night Drive"],
+    bestTime: "June-September",
+    price: "$200",
+    animals: ["Lions", "Elephants", "Buffalo", "Rhinos", "Leopards"]
+  },
+  nyungwe: {
+    name: "Nyungwe Forest",
+    location: "Southern Province",
+    description: "Montane rainforest, chimpanzee trekking",
+    activities: ["Chimpanzee Trekking", "Canopy Walk", "Hiking", "Bird Watching"],
+    bestTime: "June-September",
+    price: "$150",
+    animals: ["Chimpanzees", "Colobus Monkeys", "Birds"]
+  }
+};
+
+export default parks;

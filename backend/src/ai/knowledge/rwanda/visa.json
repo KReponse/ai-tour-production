@@ -1,0 +1,28 @@
+// src/ai/knowledge/rwanda/visa.json
+export const visa = {
+  requirements: {
+    "East African Tourist Visa": {
+      countries: ["USA", "UK", "Canada", "Germany", "France", "Australia"],
+      validity: "90 days",
+      cost: "$50",
+      allowedEntry: "Multiple entries"
+    },
+    "Visa on Arrival": {
+      countries: ["Most countries"],
+      validity: "30 days",
+      cost: "$50",
+      allowedEntry: "Single entry"
+    },
+    "No Visa": {
+      countries: ["Kenya", "Uganda", "Tanzania", "Burundi", "DRC"],
+      validity: "90 days"
+    }
+  },
+  application: {
+    online: "https://irembo.gov.rw",
+    processing: "2-3 days",
+    documents: ["Passport valid 6 months", "Passport photo", "Travel itinerary", "Hotel booking"]
+  }
+};
+
+export default visa;
