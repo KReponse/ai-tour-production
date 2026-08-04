@@ -5,6 +5,9 @@
 // ✅ Dark mode support preserved
 // ✅ FIXED: Videos now display correctly with proper poster images
 // ✅ FIXED: Uses new /api/hero/active endpoint
+// ✅ FIXED: Mobile responsiveness - Quick actions 2 columns on mobile
+// ✅ FIXED: Hero section height responsive on mobile
+// ✅ FIXED: Grid minmax reduced for small screens
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -421,6 +424,69 @@ const Home = () => {
         input:focus { outline: none; }
         * { box-sizing: border-box; }
 
+        /* ✅ FIXED: Mobile responsiveness - Quick Actions grid */
+        .quick-actions-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+        }
+        @media (min-width: 640px) {
+          .quick-actions-grid {
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+          }
+        }
+
+        /* ✅ FIXED: Mobile responsiveness - Hero section */
+        .hero-section {
+          position: relative;
+          height: 100vh;
+          min-height: 500px;
+          max-height: 700px;
+          overflow: hidden;
+          border-radius: 16px;
+          margin-bottom: 0;
+        }
+        @media (min-width: 640px) {
+          .hero-section {
+            min-height: 600px;
+            max-height: 800px;
+            border-radius: 24px;
+          }
+        }
+        @media (min-width: 1024px) {
+          .hero-section {
+            min-height: 600px;
+            max-height: 900px;
+            border-radius: 28px;
+          }
+        }
+
+        /* ✅ FIXED: Mobile responsiveness - Trending grid */
+        .trending-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 10px;
+        }
+        @media (min-width: 640px) {
+          .trending-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+          }
+        }
+        @media (min-width: 1024px) {
+          .trending-grid {
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+          }
+        }
+        @media (min-width: 1280px) {
+          .trending-grid {
+            grid-template-columns: repeat(6, 1fr);
+            gap: 14px;
+          }
+        }
+
         :root {
           --bg-body: #F8FAFC;
           --card-bg: #ffffff;
@@ -445,6 +511,23 @@ const Home = () => {
           background: var(--bg-body);
           color: var(--text-primary);
         }
+
+        /* ✅ FIXED: Container padding on mobile */
+        .home-container {
+          max-width: 1280px;
+          margin: 0 auto;
+          padding: 0 16px;
+        }
+        @media (min-width: 640px) {
+          .home-container {
+            padding: 0 20px;
+          }
+        }
+        @media (min-width: 1024px) {
+          .home-container {
+            padding: 0 20px;
+          }
+        }
       `}</style>
 
       <div style={{
@@ -452,20 +535,14 @@ const Home = () => {
         background: 'var(--bg-body)',
         minHeight: '100vh',
         transition: 'background .3s ease',
+        overflow: 'hidden',
       }}>
 
         {/* ============================================================
             PREMIUM HERO — Full viewport with cinematic video
+            ✅ FIXED: Mobile responsive
         ============================================================ */}
-        <section style={{
-          position: 'relative',
-          height: '100vh',
-          minHeight: 600,
-          maxHeight: 900,
-          overflow: 'hidden',
-          borderRadius: 28,
-          marginBottom: 0,
-        }}>
+        <section className="hero-section">
 
           {/* ── Background ── */}
           {hasHeroVideos ? (
@@ -496,7 +573,7 @@ const Home = () => {
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            padding: '40px 24px',
+            padding: '20px 16px',
             textAlign: 'center',
           }}>
 
@@ -510,27 +587,27 @@ const Home = () => {
               WebkitBackdropFilter: 'blur(12px)',
               border: '1px solid rgba(255,255,255,.2)',
               borderRadius: 30,
-              padding: '6px 16px',
-              marginBottom: 20,
+              padding: '4px 12px',
+              marginBottom: 16,
               color: '#fff',
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 700,
               letterSpacing: '.06em',
               textTransform: 'uppercase',
             }}>
-              <Sparkles size={12} style={{ color: GOLD }} />
-              AI-Powered Tourism Platform
+              <Sparkles size={11} style={{ color: GOLD }} />
+              AI-Powered Tourism
             </div>
 
             {/* Heading */}
             <h1 className="fade-up-1" style={{
               maxWidth: 700,
-              fontSize: 'clamp(38px, 6.5vw, 76px)',
+              fontSize: 'clamp(28px, 5.5vw, 76px)',
               fontWeight: 900,
               color: '#fff',
               lineHeight: 1.08,
-              marginBottom: 12,
-              letterSpacing: '-1.5px',
+              marginBottom: 10,
+              letterSpacing: '-1px',
               textShadow: '0 2px 24px rgba(0,0,0,.4)',
             }}>
               Discover Rwanda
@@ -540,12 +617,13 @@ const Home = () => {
             {/* Description */}
             <p className="fade-up-2" style={{
               maxWidth: 520,
-              fontSize: 16,
+              fontSize: 'clamp(13px, 1.4vw, 16px)',
               color: 'rgba(255,255,255,.8)',
               lineHeight: 1.65,
-              marginBottom: 32,
+              marginBottom: 24,
               fontWeight: 400,
               textShadow: '0 1px 8px rgba(0,0,0,.3)',
+              padding: '0 8px',
             }}>
               Smart travel planning powered by artificial intelligence.
               Personalized experiences across Rwanda and beyond.
@@ -558,22 +636,22 @@ const Home = () => {
               background: 'rgba(255,255,255,.92)',
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: 24,
-              padding: 14,
+              borderRadius: 20,
+              padding: 10,
               boxShadow: '0 20px 60px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.4)',
               display: 'flex',
-              gap: 10,
+              gap: 8,
             }}>
               <div style={{
                 flex: 1,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 10,
+                gap: 8,
                 background: '#F1F5F9',
-                borderRadius: 14,
-                padding: '0 16px',
+                borderRadius: 12,
+                padding: '0 12px',
               }}>
-                <Search size={17} style={{ color: '#9CA3AF', flexShrink: 0 }} />
+                <Search size={16} style={{ color: '#9CA3AF', flexShrink: 0 }} />
                 <input
                   type="text"
                   placeholder="Search experiences, locations..."
@@ -584,23 +662,23 @@ const Home = () => {
                     background: 'transparent',
                     border: 'none',
                     width: '100%',
-                    fontSize: 14,
+                    fontSize: 'clamp(13px, 1.2vw, 14px)',
                     color: '#374151',
-                    height: 48,
+                    height: 44,
                     fontFamily: 'inherit',
                   }}
                 />
               </div>
               <button onClick={handleSearch} style={{
-                height: 48,
-                padding: '0 24px',
+                height: 44,
+                padding: '0 16px',
                 border: 'none',
-                borderRadius: 14,
+                borderRadius: 12,
                 cursor: 'pointer',
                 background: `linear-gradient(135deg, ${TEAL} 0%, #0f766e 100%)`,
                 color: '#fff',
-                fontWeight: 800,
-                fontSize: 14,
+                fontWeight: 700,
+                fontSize: 'clamp(12px, 1.1vw, 14px)',
                 whiteSpace: 'nowrap',
                 boxShadow: `0 4px 16px ${TEAL}50`,
                 transition: 'transform .2s',
@@ -616,8 +694,8 @@ const Home = () => {
             {/* Stats */}
             <div className="fade-up-4" style={{
               display: 'flex',
-              gap: 24,
-              marginTop: 24,
+              gap: 16,
+              marginTop: 20,
               flexWrap: 'wrap',
               justifyContent: 'center',
             }}>
@@ -627,12 +705,12 @@ const Home = () => {
                 { emoji: '🤖', label: 'AI Recommendations' },
               ].map(({ emoji, label }) => (
                 <span key={label} style={{
-                  fontSize: 12,
+                  fontSize: 'clamp(10px, 1.1vw, 12px)',
                   color: 'rgba(255,255,255,.85)',
                   fontWeight: 600,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 6,
+                  gap: 5,
                   textShadow: '0 1px 6px rgba(0,0,0,.3)',
                 }}>
                   {emoji} {label}
@@ -647,56 +725,56 @@ const Home = () => {
             bottom: 0,
             left: 0,
             right: 0,
-            height: 80,
+            height: 60,
             zIndex: 11,
             background: 'linear-gradient(to bottom, transparent, var(--bg-body))',
           }} />
         </section>
 
         {/* ============================================================
-            REST OF PAGE — Unchanged
+            REST OF PAGE — With responsive container
         ============================================================ */}
-        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 20px' }}>
+        <div className="home-container">
 
-          {/* QUICK ACTIONS */}
-          <section style={{ marginTop: 40, marginBottom: 56 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          {/* QUICK ACTIONS - ✅ FIXED: Responsive grid */}
+          <section style={{ marginTop: 32, marginBottom: 40 }}>
+            <div className="quick-actions-grid">
               {quickActions.map(({ title, icon: Icon, link, color }) => (
                 <Link key={link} to={link} style={{ textDecoration: 'none' }}>
                   <div className="qa-card" style={{
                     background: 'var(--card-bg, #fff)',
-                    borderRadius: 20,
+                    borderRadius: 16,
                     border: '1.5px solid var(--border-color, #F3F4F6)',
-                    padding: '24px 16px',
+                    padding: '16px 12px',
                     textAlign: 'center',
                     transition: 'box-shadow .25s, transform .25s, background .25s, border-color .25s',
                   }}>
                     <div style={{
-                      width: 56, height: 56, borderRadius: 16, margin: '0 auto 14px',
+                      width: 44, height: 44, borderRadius: 14, margin: '0 auto 10px',
                       background: `${color}12`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <Icon size={26} color={color} />
+                      <Icon size={22} color={color} />
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary, #374151)' }}>{title}</div>
+                    <div style={{ fontSize: 'clamp(12px, 1.2vw, 14px)', fontWeight: 700, color: 'var(--text-primary, #374151)' }}>{title}</div>
                   </div>
                 </Link>
               ))}
             </div>
           </section>
 
-          {/* TRENDING EXPERIENCES */}
-          <section id="trending-section" style={{ marginBottom: 64 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 28 }}>
+          {/* TRENDING EXPERIENCES - ✅ FIXED: Responsive grid */}
+          <section id="trending-section" style={{ marginBottom: 48 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 10, background: `${GOLD}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Flame size={17} color={GOLD} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: `${GOLD}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Flame size={15} color={GOLD} />
                   </div>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: GOLD, textTransform: 'uppercase', letterSpacing: '.08em' }}>Trending</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: GOLD, textTransform: 'uppercase', letterSpacing: '.08em' }}>Trending</span>
                 </div>
                 <h2 style={{
-                  fontSize: 'clamp(22px, 3vw, 30px)',
+                  fontSize: 'clamp(20px, 2.8vw, 30px)',
                   fontWeight: 900,
                   color: 'var(--text-primary, #111827)',
                   margin: 0,
@@ -704,20 +782,20 @@ const Home = () => {
                 }}>
                   Trending Adventures
                 </h2>
-                <p style={{ fontSize: 14, color: 'var(--text-secondary, #6B7280)', margin: '6px 0 0' }}>
+                <p style={{ fontSize: 'clamp(12px, 1.1vw, 14px)', color: 'var(--text-secondary, #6B7280)', margin: '4px 0 0' }}>
                   Experiences loved by travelers right now
                 </p>
               </div>
               <Link to="/explore" style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                fontSize: 13, fontWeight: 700, color: TEAL, textDecoration: 'none',
-                padding: '8px 16px', borderRadius: 10, border: `1.5px solid ${TEAL}25`,
+                display: 'flex', alignItems: 'center', gap: 4,
+                fontSize: 'clamp(12px, 1vw, 13px)', fontWeight: 700, color: TEAL, textDecoration: 'none',
+                padding: '6px 12px', borderRadius: 8, border: `1.5px solid ${TEAL}25`,
                 background: `${TEAL}08`, transition: 'all .2s',
               }}
                 onMouseEnter={e => { e.currentTarget.style.background = TEAL; e.currentTarget.style.color = '#fff'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = `${TEAL}08`; e.currentTarget.style.color = TEAL; }}
               >
-                View All <ArrowRight size={14} />
+                View All <ArrowRight size={12} />
               </Link>
             </div>
 
@@ -727,28 +805,23 @@ const Home = () => {
             ) : trendingExperiences.length === 0 ? (
               <div style={{
                 background: 'var(--card-bg, #fff)',
-                borderRadius: 24,
+                borderRadius: 20,
                 border: '1.5px solid var(--border-color, #F3F4F6)',
-                padding: '64px 24px',
+                padding: '40px 20px',
                 textAlign: 'center',
               }}>
-                <div style={{ width: 72, height: 72, borderRadius: 20, background: `${TEAL}10`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                  <Compass size={32} color={TEAL} />
+                <div style={{ width: 60, height: 60, borderRadius: 16, background: `${TEAL}10`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                  <Compass size={28} color={TEAL} />
                 </div>
-                <h3 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary, #374151)', margin: '0 0 8px' }}>No Experiences Yet</h3>
-                <p style={{ fontSize: 14, color: 'var(--text-muted, #9CA3AF)', margin: 0 }}>Check back soon for trending adventures.</p>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary, #374151)', margin: '0 0 6px' }}>No Experiences Yet</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-muted, #9CA3AF)', margin: 0 }}>Check back soon for trending adventures.</p>
               </div>
             ) : (
               <div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-                  gap: 14,
-                }}>
+                <div className="trending-grid">
                   {trendingExperiences.map((listing) => {
                     const coverType = getCoverMediaType(listing);
                     const videoUrl = coverType === 'video' ? getCoverVideo(listing) : null;
-                    // ✅ FIXED: Use proper poster image for video cards
                     const posterImage = getListingImage(listing);
                     
                     return (
@@ -772,65 +845,65 @@ const Home = () => {
                 </div>
 
                 {!isEmpty && hasMore && (
-                  <div ref={sentinelRef} style={{ height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 16 }}>
+                  <div ref={sentinelRef} style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
                     {loadingMore && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-muted, #9CA3AF)', fontSize: 13 }}>
-                        <div style={{ width: 18, height: 18, border: `2px solid ${TEAL}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
-                        Loading more experiences...
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted, #9CA3AF)', fontSize: 12 }}>
+                        <div style={{ width: 16, height: 16, border: `2px solid ${TEAL}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
+                        Loading more...
                       </div>
                     )}
                   </div>
                 )}
 
                 {showLoadMore && hasMore && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
                     <button
                       onClick={loadMore}
                       disabled={loadingMore}
                       style={{
-                        padding: '12px 28px', borderRadius: 14, border: 'none',
+                        padding: '10px 24px', borderRadius: 12, border: 'none',
                         background: loadingMore ? 'var(--border-color, #E5E7EB)' : TEAL,
                         color: loadingMore ? 'var(--text-muted, #9CA3AF)' : '#fff',
-                        fontWeight: 700, fontSize: 14, cursor: loadingMore ? 'not-allowed' : 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'inherit',
+                        fontWeight: 600, fontSize: 'clamp(12px, 1vw, 14px)', cursor: loadingMore ? 'not-allowed' : 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit',
                         transition: 'all .2s',
                       }}>
                       {loadingMore ? (
-                        <><div style={{ width: 16, height: 16, border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} /> Loading...</>
+                        <><div style={{ width: 14, height: 14, border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} /> Loading...</>
                       ) : 'Load More Experiences'}
                     </button>
                   </div>
                 )}
 
                 {!hasMore && trendingExperiences.length > 0 && (
-                  <div style={{ textAlign: 'center', paddingTop: 16, fontSize: 13, color: 'var(--text-muted, #9CA3AF)' }}>
+                  <div style={{ textAlign: 'center', paddingTop: 12, fontSize: 12, color: 'var(--text-muted, #9CA3AF)' }}>
                     You've seen all trending experiences 🎉
                   </div>
                 )}
 
                 {error && (
-                  <div style={{ textAlign: 'center', paddingTop: 24 }}>
-                    <p style={{ color: '#EF4444', fontSize: 14, marginBottom: 12 }}>{error}</p>
-                    <button onClick={refresh} style={{ padding: '10px 22px', borderRadius: 12, border: 'none', background: TEAL, color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <div style={{ textAlign: 'center', paddingTop: 20 }}>
+                    <p style={{ color: '#EF4444', fontSize: 13, marginBottom: 10 }}>{error}</p>
+                    <button onClick={refresh} style={{ padding: '8px 18px', borderRadius: 10, border: 'none', background: TEAL, color: '#fff', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Try Again
                     </button>
                   </div>
                 )}
 
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 28 }}>
                   <Link to="/explore" style={{ textDecoration: 'none' }}>
                     <button style={{
-                      padding: '14px 36px', borderRadius: 16, border: 'none',
+                      padding: '12px 28px', borderRadius: 14, border: 'none',
                       background: `linear-gradient(135deg, ${TEAL} 0%, ${GOLD} 100%)`,
-                      color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 8,
+                      color: '#fff', fontWeight: 700, fontSize: 'clamp(13px, 1.1vw, 15px)', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 6,
                       boxShadow: `0 6px 24px ${TEAL}40`, fontFamily: 'inherit',
                       transition: 'transform .2s, box-shadow .2s',
                     }}
                       onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = `0 10px 32px ${TEAL}50`; }}
                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = `0 6px 24px ${TEAL}40`; }}
                     >
-                      View All Listings <ArrowRight size={18} />
+                      View All Listings <ArrowRight size={16} />
                     </button>
                   </Link>
                 </div>
@@ -838,39 +911,39 @@ const Home = () => {
             )}
           </section>
 
-          <div style={{ height: 1, background: 'linear-gradient(to right, transparent, var(--border-color, #E5E7EB), transparent)', marginBottom: 56 }} />
+          <div style={{ height: 1, background: 'linear-gradient(to right, transparent, var(--border-color, #E5E7EB), transparent)', marginBottom: 40 }} />
 
           {/* AI BANNER */}
-          <section style={{ marginBottom: 64, borderRadius: 28, overflow: 'hidden', position: 'relative' }}>
+          <section style={{ marginBottom: 48, borderRadius: 24, overflow: 'hidden', position: 'relative' }}>
             <div style={{
               background: `linear-gradient(135deg, ${TEAL} 0%, #0f766e 40%, ${GOLD} 100%)`,
-              padding: '56px 40px', textAlign: 'center', position: 'relative',
+              padding: '40px 24px', textAlign: 'center', position: 'relative',
             }}>
-              <div style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'rgba(255,255,255,.08)', pointerEvents: 'none' }} />
-              <div style={{ position: 'absolute', bottom: -60, left: -60, width: 260, height: 260, borderRadius: '50%', background: 'rgba(255,255,255,.05)', pointerEvents: 'none' }} />
+              <div style={{ position: 'absolute', top: -30, right: -30, width: 160, height: 160, borderRadius: '50%', background: 'rgba(255,255,255,.08)', pointerEvents: 'none' }} />
+              <div style={{ position: 'absolute', bottom: -50, left: -50, width: 200, height: 200, borderRadius: '50%', background: 'rgba(255,255,255,.05)', pointerEvents: 'none' }} />
 
               <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ width: 60, height: 60, borderRadius: 18, background: 'rgba(255,255,255,.18)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
-                  <Bot size={28} color="#fff" />
+                <div style={{ width: 50, height: 50, borderRadius: 14, background: 'rgba(255,255,255,.18)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <Bot size={24} color="#fff" />
                 </div>
-                <h2 style={{ fontSize: 'clamp(22px,4vw,34px)', fontWeight: 900, color: '#fff', margin: '0 0 12px', letterSpacing: '-.5px' }}>
+                <h2 style={{ fontSize: 'clamp(20px, 3.5vw, 34px)', fontWeight: 900, color: '#fff', margin: '0 0 10px', letterSpacing: '-.5px' }}>
                   Meet Your AI Travel Assistant
                 </h2>
-                <p style={{ maxWidth: 480, margin: '0 auto 28px', fontSize: 15, color: 'rgba(255,255,255,.85)', lineHeight: 1.65 }}>
+                <p style={{ maxWidth: 480, margin: '0 auto 24px', fontSize: 'clamp(13px, 1.2vw, 15px)', color: 'rgba(255,255,255,.85)', lineHeight: 1.65, padding: '0 8px' }}>
                   Get personalized itineraries and smart recommendations tailored to your interests.
                 </p>
                 <Link to="/ai-planner" style={{ textDecoration: 'none' }}>
                   <button style={{
-                    padding: '14px 32px', borderRadius: 14, border: 'none',
-                    background: '#fff', color: TEAL, fontWeight: 800, fontSize: 15,
-                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '12px 28px', borderRadius: 12, border: 'none',
+                    background: '#fff', color: TEAL, fontWeight: 700, fontSize: 'clamp(13px, 1.1vw, 15px)',
+                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
                     boxShadow: '0 6px 20px rgba(0,0,0,.15)', fontFamily: 'inherit',
                     transition: 'transform .2s',
                   }}
                     onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.04)'}
                     onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                   >
-                    Start Planning <Sparkles size={16} color={GOLD} />
+                    Start Planning <Sparkles size={14} color={GOLD} />
                   </button>
                 </Link>
               </div>
@@ -878,17 +951,17 @@ const Home = () => {
           </section>
 
           {/* COMMUNITY REVIEWS */}
-          <section style={{ marginBottom: 64 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 28 }}>
+          <section style={{ marginBottom: 48 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 10, background: `${TEAL}12`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <MessageCircle size={16} color={TEAL} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: `${TEAL}12`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <MessageCircle size={14} color={TEAL} />
                   </div>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: TEAL, textTransform: 'uppercase', letterSpacing: '.08em' }}>Community</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: TEAL, textTransform: 'uppercase', letterSpacing: '.08em' }}>Community</span>
                 </div>
                 <h2 style={{
-                  fontSize: 'clamp(22px,3vw,30px)',
+                  fontSize: 'clamp(20px, 2.8vw, 30px)',
                   fontWeight: 900,
                   color: 'var(--text-primary, #111827)',
                   margin: 0,
@@ -896,55 +969,55 @@ const Home = () => {
                 }}>
                   What Travelers Say
                 </h2>
-                <p style={{ fontSize: 14, color: 'var(--text-secondary, #6B7280)', margin: '6px 0 0' }}>Real experiences from our community</p>
+                <p style={{ fontSize: 'clamp(12px, 1.1vw, 14px)', color: 'var(--text-secondary, #6B7280)', margin: '4px 0 0' }}>Real experiences from our community</p>
               </div>
               <Link to="/reviews" style={{
-                display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 700,
-                color: TEAL, textDecoration: 'none', padding: '8px 16px', borderRadius: 10,
+                display: 'flex', alignItems: 'center', gap: 4, fontSize: 'clamp(12px, 1vw, 13px)', fontWeight: 700,
+                color: TEAL, textDecoration: 'none', padding: '6px 12px', borderRadius: 8,
                 border: `1.5px solid ${TEAL}25`, background: `${TEAL}08`, transition: 'all .2s',
               }}
                 onMouseEnter={e => { e.currentTarget.style.background = TEAL; e.currentTarget.style.color = '#fff'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = `${TEAL}08`; e.currentTarget.style.color = TEAL; }}
               >
-                View All <ArrowRight size={14} />
+                View All <ArrowRight size={12} />
               </Link>
             </div>
 
             {loadingReviews ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
-                <div style={{ width: 36, height: 36, border: `3px solid ${TEAL}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+                <div style={{ width: 32, height: 32, border: `3px solid ${TEAL}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
               </div>
             ) : reviews.length === 0 ? (
               <div style={{
                 background: 'var(--card-bg, #fff)',
-                borderRadius: 24,
+                borderRadius: 20,
                 border: '1.5px solid var(--border-color, #F3F4F6)',
-                padding: '64px 24px',
+                padding: '40px 20px',
                 textAlign: 'center',
               }}>
-                <MessageCircle size={40} color="#D1D5DB" style={{ marginBottom: 12 }} />
-                <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary, #374151)', margin: '0 0 6px' }}>No Reviews Yet</h3>
-                <p style={{ fontSize: 14, color: 'var(--text-muted, #9CA3AF)', margin: 0 }}>Be the first to share your experience!</p>
+                <MessageCircle size={32} color="#D1D5DB" style={{ marginBottom: 10 }} />
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary, #374151)', margin: '0 0 4px' }}>No Reviews Yet</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-muted, #9CA3AF)', margin: 0 }}>Be the first to share your experience!</p>
               </div>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
                   {reviews.map(r => <ReviewCard key={r._id} review={r} />)}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 28 }}>
                   <Link to="/reviews" style={{ textDecoration: 'none' }}>
                     <button style={{
-                      padding: '13px 32px', borderRadius: 14, cursor: 'pointer', fontFamily: 'inherit',
+                      padding: '10px 28px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit',
                       background: 'var(--card-bg, #fff)',
-                      color: TEAL, fontWeight: 800, fontSize: 14,
+                      color: TEAL, fontWeight: 700, fontSize: 'clamp(12px, 1vw, 14px)',
                       border: `2px solid ${TEAL}`,
-                      display: 'flex', alignItems: 'center', gap: 8,
+                      display: 'flex', alignItems: 'center', gap: 6,
                       transition: 'all .2s',
                     }}
                       onMouseEnter={e => { e.currentTarget.style.background = TEAL; e.currentTarget.style.color = '#fff'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = 'var(--card-bg, #fff)'; e.currentTarget.style.color = TEAL; }}
                     >
-                      View All Reviews <ArrowRight size={16} />
+                      View All Reviews <ArrowRight size={14} />
                     </button>
                   </Link>
                 </div>

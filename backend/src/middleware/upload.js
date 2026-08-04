@@ -1,5 +1,5 @@
 // backend/src/middleware/upload.js
-// ✅ FIXED - Dynamic storage based on file type
+// ✅ FIXED - Increased hero video limits
 // ✅ Videos go to uploads/videos/, images to uploads/
 
 import multer from "multer";
@@ -154,12 +154,12 @@ export const uploadLegacy = multer({
   },
 });
 
-// Video-only upload (for hero videos)
+// ✅ INCREASED: Video-only upload (for hero videos) - 100MB limit
 export const videoUpload = multer({
   storage: videoStorage,
   fileFilter: videoFileFilter,
   limits: {
-    fileSize: 20 * 1024 * 1024,
+    fileSize: 100 * 1024 * 1024, // ✅ INCREASED: 100MB for hero videos
     files: 1,
   },
 });
@@ -182,8 +182,9 @@ export const validateVideoDuration = async (filePath) => {
       throw new Error("Invalid video duration");
     }
 
-    if (duration > 20) {
-      throw new Error(`Video duration (${Math.round(duration)}s) exceeds 20 seconds maximum`);
+    // ✅ INCREASED: Allow up to 30 seconds for hero videos
+    if (duration > 30) {
+      throw new Error(`Video duration (${Math.round(duration)}s) exceeds 30 seconds maximum`);
     }
 
     return duration;
@@ -196,12 +197,13 @@ export const validateVideoDuration = async (filePath) => {
       const fileSizeInMB = fileStats.size / (1024 * 1024);
       const estimatedDuration = fileSizeInMB * 5;
       
-      if (estimatedDuration > 25) {
-        throw new Error(`Video appears to be too long (estimated ${Math.round(estimatedDuration)}s). Maximum is 20 seconds.`);
+      // ✅ INCREASED: Allow up to 35 seconds estimated
+      if (estimatedDuration > 35) {
+        throw new Error(`Video appears to be too long (estimated ${Math.round(estimatedDuration)}s). Maximum is 30 seconds.`);
       }
       
       console.warn("⚠️ Using estimated duration:", estimatedDuration);
-      return Math.min(estimatedDuration, 20);
+      return Math.min(estimatedDuration, 30);
     } catch (fallbackError) {
       console.warn("⚠️ Could not validate video duration, assuming acceptable");
       return 10;
@@ -264,7 +266,7 @@ export const handleUploadError = (err, req, res, next) => {
       return res.status(400).json({
         success: false,
         message: err.fieldname === "heroVideo" 
-          ? "Video file too large. Maximum size is 20MB."
+          ? "Video file too large. Maximum size is 100MB."
           : "File too large. Maximum size is 500MB.",
       });
     }

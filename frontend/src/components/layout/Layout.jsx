@@ -1,5 +1,6 @@
 // src/components/layout/Layout.jsx
-// ✅ COMPLETE FIXED - Memoized values and optimized re-renders
+// ✅ COMPLETE FIXED - Mobile responsiveness
+// ✅ Added overflow-x-hidden to prevent horizontal scroll
 
 import React, {
   useState,
@@ -49,14 +50,16 @@ const Layout = () => {
     return isSidebarCollapsed ? 'ml-20' : 'ml-64';
   }, [isMobileDevice, isSidebarCollapsed]);
 
-  // ✅ Memoize main content classes
+  // ✅ Memoize main content classes - ADDED overflow-x-hidden
   const mainClasses = useMemo(() => `
     flex-1
     transition-all
     duration-300
     min-h-screen
+    overflow-x-hidden
     ${mainMarginClass}
-    p-4
+    p-3
+    sm:p-4
     md:p-6
     pb-20
     md:pb-6
@@ -73,10 +76,11 @@ const Layout = () => {
     onMenuClick: toggleSidebar,
   }), [toggleSidebar]);
 
-  // ✅ Memoize layout class
+  // ✅ Memoize layout class - ADDED overflow-x-hidden
   const layoutClass = useMemo(() => `
     w-full
     min-h-screen
+    max-w-full
     overflow-x-hidden
     bg-background
     dark:bg-gray-950

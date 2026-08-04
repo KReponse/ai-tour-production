@@ -1,5 +1,6 @@
 // frontend/src/services/api.js
-// ✅ COMPLETE FIXED - Added media base URL helper and improved error handling
+// ✅ COMPLETE FIXED - Increased timeout for video uploads
+// ✅ Added media base URL helper and improved error handling
 
 import axios from "axios";
 
@@ -11,7 +12,7 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const API = axios.create({
   baseURL: API_URL,
-  timeout: 30000,
+  timeout: 120000, // ✅ INCREASED: 2 minutes for video uploads
   headers: {
     "Content-Type": "application/json",
   },
@@ -59,9 +60,14 @@ API.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // ✅ For multipart/form-data, let the browser set the Content-Type
+    if (config.data instanceof FormData) {
+      delete config.headers["Content-Type"];
+    }
+
     if (import.meta.env.DEV) {
       console.log(`📤 ${config.method?.toUpperCase()} ${config.url}`);
-      if (config.data) {
+      if (config.data && !(config.data instanceof FormData)) {
         const logData = { ...config.data };
         if (logData.password) logData.password = '***';
         if (logData.currentPassword) logData.currentPassword = '***';
@@ -250,6 +256,6 @@ API.interceptors.response.use(
 
 // ===============================
 // ✅ EXPORT
-// ===== e r==========================
+// ===============================
 
 export default API;

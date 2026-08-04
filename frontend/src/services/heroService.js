@@ -1,5 +1,6 @@
 // frontend/src/services/heroService.js
 // ✅ NEW - Hero Video API Service
+// ✅ Added increased timeout for video uploads
 
 import API from "./api";
 
@@ -45,7 +46,7 @@ export const getHeroVideoById = async (id) => {
 };
 
 // ============================================================
-// ✅ CREATE HERO VIDEO
+// ✅ CREATE HERO VIDEO (with increased timeout)
 // ============================================================
 export const createHeroVideo = async (data, onProgress) => {
   try {
@@ -53,6 +54,7 @@ export const createHeroVideo = async (data, onProgress) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 180000, // ✅ 3 minutes for video upload
       onUploadProgress: (progress) => {
         if (typeof onProgress === "function") {
           const percent = Math.round((progress.loaded * 100) / progress.total);
@@ -81,7 +83,7 @@ export const updateHeroVideo = async (id, data) => {
 };
 
 // ============================================================
-// ✅ UPLOAD/REPLACE HERO VIDEO
+// ✅ UPLOAD/REPLACE HERO VIDEO (with increased timeout)
 // ============================================================
 export const uploadHeroVideoFile = async (id, file, onProgress) => {
   try {
@@ -92,6 +94,7 @@ export const uploadHeroVideoFile = async (id, file, onProgress) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 180000, // ✅ 3 minutes for video upload
       onUploadProgress: (progress) => {
         if (typeof onProgress === "function") {
           const percent = Math.round((progress.loaded * 100) / progress.total);

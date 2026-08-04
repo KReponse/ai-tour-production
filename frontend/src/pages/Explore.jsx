@@ -1,5 +1,11 @@
 // src/pages/Explore.jsx
-// ✅ COMPLETE FIXED - Stable rendering with proper keys and memoization
+// ✅ COMPLETE FIXED - Mobile responsiveness
+// ✅ Fixed grid columns for mobile (2 columns on mobile, 3 on tablet, 4 on desktop)
+// ✅ Fixed xs breakpoint - changed to use grid-cols-1 on smallest screens
+// ✅ Added overflow-x-hidden to prevent horizontal scroll
+// ✅ Fixed search input width on mobile
+// ✅ Fixed filter chips overflow
+// ✅ Stable rendering with proper keys and memoization
 // ✅ ENHANCED: Infinite scroll with useInfiniteScroll hook (Strategy A)
 // ✅ FIXED: All cards have stable keys (_id)
 // ✅ FIXED: Uses MediaCard for consistent video rendering
@@ -447,7 +453,7 @@ const Explore = () => {
 
   // ================= RENDER =================
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 overflow-x-hidden">
       {/* HERO / SEARCH SECTION */}
       <div 
         ref={searchRef}
@@ -470,8 +476,8 @@ const Explore = () => {
           )}
 
           <div className={`max-w-3xl mx-auto ${isSticky ? 'w-full' : 'mt-4 sm:mt-6'}`}>
-            <div className="relative bg-white rounded-2xl shadow-2xl">
-              <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 sm:w-5 h-4 sm:h-5 text-gray-400" />
+            <div className="relative bg-white rounded-2xl shadow-2xl overflow-hidden">
+              <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 sm:w-5 h-4 sm:h-5 text-gray-400 flex-shrink-0" />
               <input
                 type="text"
                 placeholder="Search tours, hotels, experiences..."
@@ -484,7 +490,7 @@ const Explore = () => {
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm('')}
-                  className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                  className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition flex-shrink-0"
                 >
                   <X className="w-4 sm:w-5 h-4 sm:h-5" />
                 </button>
@@ -525,7 +531,7 @@ const Explore = () => {
           <div className="flex items-center gap-2 sm:gap-3 mt-1.5 sm:mt-2 overflow-x-auto pb-1 scrollbar-hide">
             <button
               onClick={() => setShowMobileFilters(!showMobileFilters)}
-              className="lg:hidden flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-[#0D9488]/10 text-[#0D9488] font-medium text-xs sm:text-sm whitespace-nowrap"
+              className="lg:hidden flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-[#0D9488]/10 text-[#0D9488] font-medium text-xs sm:text-sm whitespace-nowrap flex-shrink-0"
             >
               <Filter className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
               <span>Filters</span>
@@ -619,7 +625,7 @@ const Explore = () => {
               )}
             </div>
 
-            <div className="hidden lg:flex items-center gap-1 ml-auto bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+            <div className="hidden lg:flex items-center gap-1 ml-auto bg-gray-100 dark:bg-gray-800 rounded-xl p-1 flex-shrink-0">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 xl:p-2 rounded-lg transition ${
@@ -789,7 +795,7 @@ const Explore = () => {
             )}
           </div>
 
-          <div className="flex lg:hidden items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+          <div className="flex lg:hidden items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 flex-shrink-0">
             <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-lg transition ${
@@ -813,7 +819,7 @@ const Explore = () => {
           </div>
         </div>
 
-        {/* Results Grid */}
+        {/* Results Grid - ✅ FIXED: Mobile responsive grid */}
         {filteredItems.length === 0 ? (
           <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 sm:p-16 text-center shadow-lg border border-gray-100 dark:border-gray-800">
             <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-full bg-[#0D9488]/10 flex items-center justify-center mb-4">
@@ -840,7 +846,8 @@ const Explore = () => {
             )}
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+          // ✅ FIXED: grid-cols-1 on smallest, grid-cols-2 on sm, grid-cols-3 on lg, grid-cols-4 on xl
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
             {filteredItems.map((item) => {
               const coverType = getCoverMediaType(item);
               const coverUrl = getCoverMedia(item);
