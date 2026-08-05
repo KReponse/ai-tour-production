@@ -1,54 +1,36 @@
 // backend/src/middleware/upload.js
-// ✅ FIXED - Increased hero video limits
-// ✅ Videos go to uploads/videos/, images to uploads/
+// ✅ FIXED - Memory storage for Cloudinary (no local files)
+// ✅ Videos go to Cloudinary directly via Media Service
+// ✅ Images go to Cloudinary directly via Media Service
+// ✅ No local files are saved on disk
 
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import mediaConfig from "../services/media/config.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ===============================
-// ✅ DYNAMIC STORAGE - Based on file type
+// ✅ MEMORY STORAGE - For Cloudinary (no local files)
 // ===============================
 
-const dynamicStorage = multer.diskStorage({
+const memoryStorage = multer.memoryStorage();
+
+// ===============================
+// LEGACY DISK STORAGE (for backward compatibility)
+// ===============================
+
+const diskStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const isVideo = file.mimetype.startsWith('video/');
-    
-    // Determine upload path based on file type
     const uploadPath = isVideo
       ? path.join(__dirname, "..", "uploads", "videos")
       : path.join(__dirname, "..", "uploads");
     
-    // Ensure directory exists
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-      console.log(`📁 Created directory: ${uploadPath}`);
-    }
-    
-    console.log(`📂 Saving ${isVideo ? 'VIDEO' : 'IMAGE'} to: ${uploadPath}`);
-    cb(null, uploadPath);
-  },
-
-  filename: (req, file, cb) => {
-    // Generate unique filename with timestamp and random number
-    const uniqueName = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const extension = path.extname(file.originalname);
-    cb(null, uniqueName + extension);
-  },
-});
-
-// ===============================
-// LEGACY STORAGE (for backward compatibility)
-// ===============================
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, "..", "uploads");
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -61,7 +43,7 @@ const storage = multer.diskStorage({
 });
 
 // ===============================
-// VIDEO STORAGE (for hero videos)
+// VIDEO STORAGE (for hero videos - legacy)
 // ===============================
 
 const videoStorage = multer.diskStorage({
@@ -134,9 +116,10 @@ const videoFileFilter = (req, file, cb) => {
 // MULTER CONFIGURATIONS
 // ===============================
 
-// ✅ Primary upload middleware - uses dynamic storage
+// ✅ PRIMARY: Memory storage for Cloudinary (recommended)
+// No local files are saved - files go directly to Cloudinary via Media Service
 export const upload = multer({
-  storage: dynamicStorage,
+  storage: memoryStorage,
   fileFilter,
   limits: {
     fileSize: 500 * 1024 * 1024, // 500MB max
@@ -144,9 +127,9 @@ export const upload = multer({
   },
 });
 
-// Legacy upload (for backward compatibility)
+// ✅ Legacy disk storage (for backward compatibility)
 export const uploadLegacy = multer({
-  storage,
+  storage: diskStorage,
   fileFilter,
   limits: {
     fileSize: 500 * 1024 * 1024,
@@ -154,12 +137,12 @@ export const uploadLegacy = multer({
   },
 });
 
-// ✅ INCREASED: Video-only upload (for hero videos) - 100MB limit
+// ✅ Video-only upload (for hero videos)
 export const videoUpload = multer({
-  storage: videoStorage,
+  storage: memoryStorage, // ✅ Memory storage for hero videos too
   fileFilter: videoFileFilter,
   limits: {
-    fileSize: 100 * 1024 * 1024, // ✅ INCREASED: 100MB for hero videos
+    fileSize: 100 * 1024 * 1024, // 100MB for hero videos
     files: 1,
   },
 });
@@ -182,7 +165,7 @@ export const validateVideoDuration = async (filePath) => {
       throw new Error("Invalid video duration");
     }
 
-    // ✅ INCREASED: Allow up to 30 seconds for hero videos
+    // ✅ Allow up to 30 seconds for hero videos
     if (duration > 30) {
       throw new Error(`Video duration (${Math.round(duration)}s) exceeds 30 seconds maximum`);
     }
@@ -197,7 +180,7 @@ export const validateVideoDuration = async (filePath) => {
       const fileSizeInMB = fileStats.size / (1024 * 1024);
       const estimatedDuration = fileSizeInMB * 5;
       
-      // ✅ INCREASED: Allow up to 35 seconds estimated
+      // ✅ Allow up to 35 seconds estimated
       if (estimatedDuration > 35) {
         throw new Error(`Video appears to be too long (estimated ${Math.round(estimatedDuration)}s). Maximum is 30 seconds.`);
       }

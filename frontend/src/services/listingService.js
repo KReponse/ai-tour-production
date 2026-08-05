@@ -1,9 +1,29 @@
 // frontend/src/services/listingService.js
 // ✅ COMPLETE FIXED - Added Cover Media support with API client
-// ✅ FIXED: Proper onProgress type checking
+// ✅ ADDED: Retry logic with exponential backoff
 
 import API from './api';
-// import axios from "axios"; // ✅ REMOVED - Use API client instead
+
+// ===============================
+// ✅ HELPER: Retry with exponential backoff
+// ===============================
+const withRetry = async (fn, maxRetries = 3, delay = 2000) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.log(`⚠️ Attempt ${i + 1} failed:`, error.message);
+      if (i < maxRetries - 1) {
+        const waitTime = delay * (i + 1);
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  throw lastError;
+};
 
 // ===============================
 // ✅ GET ALL LISTINGS (Public - with optional auth)
@@ -16,7 +36,6 @@ export const getListings = async (params = {}) => {
     // If 401, try again without auth (public access)
     if (error.response?.status === 401) {
       try {
-        // Create a new axios instance without auth
         const { default: axios } = await import('axios');
         const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
         const response = await axios.get(`${API_URL}/listings`, { params });
@@ -58,12 +77,10 @@ export const getMyListings = async () => {
 };
 
 // ===============================
-// ✅ CREATE LISTING (Provider - Requires Auth)
-// ✅ Updated: Supports coverMedia and coverMediaType
+// ✅ CREATE LISTING (Provider - Requires Auth) - WITH RETRY
 // ===============================
 export const createListing = async (data, onProgress) => {
-  try {
-    // ✅ If data is FormData, append coverMediaType if not already there
+  return withRetry(async () => {
     if (data instanceof FormData) {
       if (!data.has('coverMediaType')) {
         data.append('coverMediaType', 'image');
@@ -74,28 +91,23 @@ export const createListing = async (data, onProgress) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 300000, // ✅ 5 minutes
       onUploadProgress: (progress) => {
         const percent = Math.round((progress.loaded * 100) / progress.total);
-        // ✅ FIXED: Check if onProgress is a function before calling
         if (typeof onProgress === 'function') {
           onProgress(percent);
         }
       },
     });
     return response.data;
-  } catch (error) {
-    console.error("❌ Create listing error:", error);
-    throw error;
-  }
+  }, 3, 3000); // ✅ 3 retries, 3s initial delay
 };
 
 // ===============================
-// ✅ UPDATE LISTING (Provider - Requires Auth)
-// ✅ Updated: Supports coverMedia and coverMediaType
+// ✅ UPDATE LISTING (Provider - Requires Auth) - WITH RETRY
 // ===============================
 export const updateListing = async (id, data, onProgress) => {
-  try {
-    // ✅ If data is FormData, append coverMediaType if not already there
+  return withRetry(async () => {
     if (data instanceof FormData) {
       if (!data.has('coverMediaType')) {
         data.append('coverMediaType', 'image');
@@ -106,19 +118,16 @@ export const updateListing = async (id, data, onProgress) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 300000, // ✅ 5 minutes
       onUploadProgress: (progress) => {
         const percent = Math.round((progress.loaded * 100) / progress.total);
-        // ✅ FIXED: Check if onProgress is a function before calling
         if (typeof onProgress === 'function') {
           onProgress(percent);
         }
       },
     });
     return response.data;
-  } catch (error) {
-    console.error("❌ Update listing error:", error);
-    throw error;
-  }
+  }, 3, 3000);
 };
 
 // ===============================
@@ -205,7 +214,6 @@ export const getProviderListings = async () => {
 export const buildListingFormData = (formData, coverMediaFile, coverMediaType = 'image') => {
   const data = new FormData();
 
-  // Add all form fields
   Object.keys(formData).forEach((key) => {
     if (key !== 'coverMedia' && key !== 'coverMediaType' && key !== 'galleryImages' && key !== 'videos') {
       if (formData[key] !== null && formData[key] !== undefined) {
@@ -214,22 +222,18 @@ export const buildListingFormData = (formData, coverMediaFile, coverMediaType = 
     }
   });
 
-  // ✅ Add Cover Media with type
   if (coverMediaFile) {
     data.append('coverMedia', coverMediaFile);
     data.append('coverMediaType', coverMediaType);
-    // Keep for backward compatibility
     data.append('coverImage', coverMediaFile);
   }
 
-  // Add gallery images
   if (formData.galleryImages && formData.galleryImages.length > 0) {
     formData.galleryImages.forEach((file) => {
       data.append('galleryImages', file);
     });
   }
 
-  // Add videos
   if (formData.videos && formData.videos.length > 0) {
     formData.videos.forEach((file) => {
       data.append('videos', file);

@@ -12,7 +12,7 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const API = axios.create({
   baseURL: API_URL,
-  timeout: 120000, // ✅ INCREASED: 2 minutes for video uploads
+  timeout: 300000, // ✅ 5 minutes for large video uploads
   headers: {
     "Content-Type": "application/json",
   },

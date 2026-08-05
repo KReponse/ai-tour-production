@@ -1,44 +1,16 @@
 // backend/src/controllers/listingController.js
-// ✅ COMPLETE FIXED - Enhanced pagination with search, filters, sorting
-// ✅ Added text search support
-// ✅ Added comprehensive filter options
-// ✅ Added proper pagination metadata
-// ✅ ADDED: getListingsByProvider - Get listings by provider ID
-// ✅ FIXED: Added provider filter to getListings
-// ✅ FIXED: Gallery media now REPLACES instead of APPENDS
-// ✅ FIXED: Existing media tracking with proper synchronization
-// ✅ ADDED: Orphan file cleanup on update
+// ✅ SIMPLIFIED - No media uploads (only saves URLs from frontend)
+// ✅ All media URLs are already Cloudinary URLs from frontend
+// ✅ Backward compatible with existing local filenames
 
 import Listing from "../models/Listing.js";
 import User from "../models/User.js";
 import ProviderProfile from "../models/ProviderProfile.js";
 import { createNotification } from "../utils/notificationService.js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // ✅ Cache to prevent duplicate requests
 let lastListingsRequestTime = 0;
 let lastListingsResult = null;
-
-// ===============================
-// ✅ HELPER: Delete file from disk
-// ===============================
-const deleteFile = (filename) => {
-  if (!filename) return;
-  try {
-    const filePath = path.join(__dirname, "../../uploads", filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      console.log(`🗑️ Deleted file: ${filename}`);
-    }
-  } catch (error) {
-    console.error(`❌ Failed to delete file ${filename}:`, error.message);
-  }
-};
 
 // ===============================
 // ✅ HELPER: Get existing media from request
@@ -75,14 +47,6 @@ export const createListing = async (req, res) => {
   try {
     console.log("📁 ===== CREATE LISTING =====");
     console.log("📁 Body:", JSON.stringify(req.body, null, 2));
-    console.log("📁 Files:", req.files ? Object.keys(req.files) : "No files");
-    console.log("📁 Content-Type:", req.headers['content-type']);
-    
-    console.log("👤 req.user keys:", Object.keys(req.user || {}));
-    console.log("👤 req.user:", JSON.stringify(req.user, null, 2));
-    console.log("👤 req.user._id:", req.user?._id);
-    console.log("👤 req.user.id:", req.user?.id);
-    console.log("👤 req.userData:", req.userData);
 
     if (!req.body || Object.keys(req.body).length === 0) {
       console.error("❌ Request body is empty!");
@@ -114,18 +78,14 @@ export const createListing = async (req, res) => {
       vehicleType,
       seats,
       dynamicFields,
-      coverMediaType,
+      coverMedia,        // ✅ Already Cloudinary URL
+      coverMediaType,    // ✅ 'image' or 'video'
+      coverImage,        // ✅ Already Cloudinary URL
+      galleryImages,     // ✅ Array of Cloudinary URLs
+      videos,            // ✅ Array of Cloudinary URLs
     } = req.body;
 
-    console.log("📁 Title:", title);
-    console.log("📁 Location:", location);
-    console.log("📁 Price:", price);
-    console.log("📁 Description:", description);
-    console.log("📁 Business Type:", businessType);
-    console.log("📁 Listing Type:", listingType);
-    console.log("📁 Category:", category);
-    console.log("📁 Cover Media Type:", coverMediaType);
-
+    // ✅ Validate required fields
     const missingFields = [];
     if (!title) missingFields.push("title");
     if (!location) missingFields.push("location");
@@ -144,77 +104,36 @@ export const createListing = async (req, res) => {
     }
 
     const validBusinessTypes = [
-      "tour_operator",
-      "guide",
-      "hotel",
-      "lodge",
-      "restaurant",
-      "cafe",
-      "transport",
-      "events",
-      "shop",
-      "other",
+      "tour_operator", "guide", "hotel", "lodge", "restaurant",
+      "cafe", "transport", "events", "shop", "other",
     ];
     
     if (!validBusinessTypes.includes(businessType)) {
-      console.error("❌ Invalid businessType:", businessType);
       return res.status(400).json({
         success: false,
-        message: `Invalid businessType: ${businessType}. Must be one of: ${validBusinessTypes.join(", ")}`,
+        message: `Invalid businessType: ${businessType}`,
       });
     }
 
     const finalCategory = category || businessType;
 
-    let coverImage = "";
-    let coverMedia = "";
-    let finalCoverMediaType = coverMediaType || 'image';
-
-    if (req.files?.coverMedia?.[0]) {
-      coverMedia = req.files.coverMedia[0].filename;
-      coverImage = coverMedia;
-      console.log("✅ Cover Media uploaded:", coverMedia, "Type:", finalCoverMediaType);
-    } else if (req.files?.coverImage?.[0]) {
-      coverImage = req.files.coverImage[0].filename;
-      coverMedia = coverImage;
-      finalCoverMediaType = 'image';
-      console.log("✅ Cover Image uploaded (legacy):", coverImage);
-    }
-
-    const galleryImages = req.files?.galleryImages
-      ? req.files.galleryImages.map((file) => file.filename)
-      : [];
-    const videos = req.files?.videos
-      ? req.files.videos.map((file) => file.filename)
-      : [];
-
-    console.log("✅ Cover Media:", coverMedia);
-    console.log("✅ Cover Media Type:", finalCoverMediaType);
-    console.log("✅ Gallery Images:", galleryImages.length);
-    console.log("✅ Videos:", videos.length);
-
+    // ✅ Parse dynamic fields
     let parsedDynamicFields = {};
     if (dynamicFields) {
       try {
-        parsedDynamicFields =
-          typeof dynamicFields === "string"
-            ? JSON.parse(dynamicFields)
-            : dynamicFields;
+        parsedDynamicFields = typeof dynamicFields === "string"
+          ? JSON.parse(dynamicFields)
+          : dynamicFields;
       } catch (e) {
         parsedDynamicFields = {};
       }
     }
 
-    const providerId = 
-      req.user?._id ||           
-      req.user?.id ||            
-      req.user?.sub ||           
-      req.userData?._id ||       
-      req.userData?.id;          
+    // ✅ Get provider ID
+    const providerId = req.user?._id || req.user?.id || req.user?.sub || req.userData?._id || req.userData?.id;
 
     if (!providerId) {
-      console.error("❌ No provider ID found! req.user:", JSON.stringify(req.user, null, 2));
-      console.error("❌ req.userData:", req.userData);
+      console.error("❌ No provider ID found!");
       return res.status(401).json({
         success: false,
         message: "User not authenticated. Please login again.",
@@ -222,7 +141,11 @@ export const createListing = async (req, res) => {
     }
 
     console.log("✅ Provider ID found:", providerId);
+    console.log("📸 Cover Media URL:", coverMedia || 'None');
+    console.log("📸 Gallery Images:", galleryImages?.length || 0);
+    console.log("🎬 Videos:", videos?.length || 0);
 
+    // ✅ Create listing with Cloudinary URLs (NO uploads)
     const listing = await Listing.create({
       title,
       location,
@@ -245,11 +168,11 @@ export const createListing = async (req, res) => {
       vehicleType: vehicleType || "",
       seats: seats ? Number(seats) : 0,
       dynamicFields: parsedDynamicFields,
-      coverMedia: coverMedia,
-      coverMediaType: finalCoverMediaType,
-      coverImage: coverImage,
-      galleryImages,
-      videos,
+      coverMedia: coverMedia || "",
+      coverMediaType: coverMediaType || 'image',
+      coverImage: coverImage || coverMedia || "",
+      galleryImages: galleryImages || [],
+      videos: videos || [],
       provider: providerId,
       userId: providerId,
       status: "pending",
@@ -257,6 +180,7 @@ export const createListing = async (req, res) => {
 
     console.log("✅ Listing created:", listing._id);
 
+    // ✅ Send notifications to admins
     const admins = await User.find({ role: "admin" });
     for (const admin of admins) {
       await createNotification({
@@ -311,7 +235,7 @@ export const createListing = async (req, res) => {
   }
 };
 
-/* ================= GET PUBLIC LISTINGS - ENHANCED ================= */
+/* ================= GET PUBLIC LISTINGS ================= */
 
 export const getListings = async (req, res) => {
   try {
@@ -333,11 +257,7 @@ export const getListings = async (req, res) => {
 
     const filter = { status: "approved" };
     
-    if (provider) {
-      filter.provider = provider;
-      console.log(`📌 Filtering listings by provider: ${provider}`);
-    }
-    
+    if (provider) filter.provider = provider;
     if (businessType) filter.businessType = businessType;
     if (listingType) filter.listingType = listingType;
     if (category) filter.category = category;
@@ -354,15 +274,11 @@ export const getListings = async (req, res) => {
     }
     
     if (search && search.trim()) {
-      filter.$text = { $search: search };
-      if (sort === 'createdAt' && order === 'desc') {
-        delete filter.$text;
-        filter.$or = [
-          { title: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } },
-          { location: { $regex: search, $options: 'i' } },
-        ];
-      }
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { location: { $regex: search, $options: 'i' } },
+      ];
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -443,7 +359,7 @@ export const getSingleListing = async (req, res) => {
   }
 };
 
-/* ================= GET PROVIDER LISTINGS - ENHANCED ================= */
+/* ================= GET PROVIDER LISTINGS ================= */
 
 export const getProviderListings = async (req, res) => {
   try {
@@ -466,20 +382,14 @@ export const getProviderListings = async (req, res) => {
       }
     }
 
-    console.log('🔍 getProviderListings called');
-    console.log('📋 Request URL:', req.originalUrl);
-
     const userId = req.user?.id || req.user?._id || req.userData?._id;
 
     if (!userId) {
-      console.error('❌ User not authenticated - no user ID found');
       return res.status(401).json({
         success: false,
         message: 'User not authenticated',
       });
     }
-
-    console.log(`🔍 Querying listings for provider: ${userId}`);
 
     const filter = { provider: userId };
     
@@ -511,8 +421,6 @@ export const getProviderListings = async (req, res) => {
       Listing.countDocuments(filter),
     ]);
 
-    console.log(`✅ Found ${listings.length} listings for provider`);
-
     const result = {
       success: true,
       data: listings,
@@ -540,7 +448,6 @@ export const getProviderListings = async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('❌ GET PROVIDER LISTINGS ERROR:', error);
-    console.error('❌ Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to fetch listings',
@@ -548,7 +455,7 @@ export const getProviderListings = async (req, res) => {
   }
 };
 
-/* ================= GET LISTINGS BY PROVIDER ID (Public) ================= */
+/* ================= GET LISTINGS BY PROVIDER ID ================= */
 
 export const getListingsByProvider = async (req, res) => {
   try {
@@ -585,7 +492,6 @@ export const getListingsByProvider = async (req, res) => {
     const [listings, total] = await Promise.all([
       Listing.find(filter)
         .populate('provider', 'name email businessName avatar')
-        .populate('category', 'name slug')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
@@ -614,7 +520,7 @@ export const getListingsByProvider = async (req, res) => {
   }
 };
 
-/* ================= UPDATE LISTING - FIXED ================= */
+/* ================= UPDATE LISTING - SIMPLIFIED ================= */
 
 export const updateListing = async (req, res) => {
   try {
@@ -641,6 +547,10 @@ export const updateListing = async (req, res) => {
       seats,
       dynamicFields,
       coverMediaType,
+      coverMedia,        // ✅ Already Cloudinary URL
+      coverImage,        // ✅ Already Cloudinary URL
+      galleryImages,     // ✅ Array of Cloudinary URLs
+      videos,            // ✅ Array of Cloudinary URLs
     } = req.body;
 
     const listing = await Listing.findById(id);
@@ -659,7 +569,7 @@ export const updateListing = async (req, res) => {
       });
     }
 
-    // ✅ Track old media for cleanup
+    // ✅ Track old media for cleanup (if needed)
     const oldGalleryImages = [...listing.galleryImages];
     const oldVideos = [...listing.videos];
     const oldCoverMedia = listing.coverMedia;
@@ -698,102 +608,47 @@ export const updateListing = async (req, res) => {
 
     if (dynamicFields) {
       try {
-        listing.dynamicFields =
-          typeof dynamicFields === "string"
-            ? JSON.parse(dynamicFields)
-            : dynamicFields;
+        listing.dynamicFields = typeof dynamicFields === "string"
+          ? JSON.parse(dynamicFields)
+          : dynamicFields;
       } catch (e) {
         listing.dynamicFields = {};
       }
     }
 
     // =========================
-    // ✅ UPDATE COVER MEDIA
+    // ✅ UPDATE MEDIA URLs (Direct assignment - NO uploads)
     // =========================
-    if (req.files?.coverMedia?.[0]) {
-      // ✅ New cover uploaded - replace
-      const newCover = req.files.coverMedia[0].filename;
-      listing.coverMedia = newCover;
-      listing.coverImage = newCover;
-      if (coverMediaType) {
-        listing.coverMediaType = coverMediaType;
-      }
-      console.log('✅ Cover media replaced with:', newCover);
-      // Note: oldCoverMedia will be cleaned up below
-    } else if (req.files?.coverImage?.[0]) {
-      // Legacy cover image
-      const newCover = req.files.coverImage[0].filename;
-      listing.coverImage = newCover;
-      listing.coverMedia = newCover;
-      listing.coverMediaType = 'image';
-      console.log('✅ Cover image replaced with:', newCover);
-    } else if (coverMediaType && coverMediaType !== listing.coverMediaType) {
-      // Only type changed, keep existing media
-      listing.coverMediaType = coverMediaType;
+    if (coverMedia !== undefined) {
+      listing.coverMedia = coverMedia || "";
     }
-    // Otherwise, keep existing cover media
+    if (coverImage !== undefined) {
+      listing.coverImage = coverImage || "";
+    }
+    if (coverMediaType !== undefined) {
+      listing.coverMediaType = coverMediaType || 'image';
+    }
 
-    // =========================
-    // ✅ UPDATE GALLERY - REPLACE INSTEAD OF APPEND
-    // =========================
-    
-    // ✅ Build new gallery: Keep existingImages + any newly uploaded files
-    const newGalleryFiles = req.files?.galleryImages
-      ? req.files.galleryImages.map((file) => file.filename)
-      : [];
-    
-    // ✅ The gallery should be: existingImages (from frontend) + new uploads
-    listing.galleryImages = [...existingImages, ...newGalleryFiles];
-    console.log('✅ Gallery replaced with:', listing.galleryImages);
+    // ✅ Gallery: existingImages (from frontend) + any new URLs
+    if (galleryImages !== undefined) {
+      listing.galleryImages = galleryImages;
+      console.log('✅ Gallery updated:', listing.galleryImages.length);
+    } else if (existingImages.length > 0) {
+      listing.galleryImages = existingImages;
+    }
 
-    // =========================
-    // ✅ UPDATE VIDEOS - REPLACE INSTEAD OF APPEND
-    // =========================
-    
-    // ✅ Build new videos: Keep existingVideos + any newly uploaded files
-    const newVideoFiles = req.files?.videos
-      ? req.files.videos.map((file) => file.filename)
-      : [];
-    
-    // ✅ The videos should be: existingVideos (from frontend) + new uploads
-    listing.videos = [...existingVideos, ...newVideoFiles];
-    console.log('✅ Videos replaced with:', listing.videos);
+    // ✅ Videos: existingVideos (from frontend) + any new URLs
+    if (videos !== undefined) {
+      listing.videos = videos;
+      console.log('✅ Videos updated:', listing.videos.length);
+    } else if (existingVideos.length > 0) {
+      listing.videos = existingVideos;
+    }
 
     // =========================
     // ✅ SAVE THE LISTING
     // =========================
     await listing.save();
-
-    // =========================
-    // ✅ CLEAN UP ORPHANED FILES
-    // =========================
-    
-    // Determine which files are no longer referenced
-    const currentGallery = new Set(listing.galleryImages);
-    const currentVideos = new Set(listing.videos);
-    const currentCover = listing.coverMedia;
-
-    // ✅ Delete old gallery images that are no longer referenced
-    for (const oldFile of oldGalleryImages) {
-      if (!currentGallery.has(oldFile) && oldFile !== currentCover) {
-        deleteFile(oldFile);
-      }
-    }
-
-    // ✅ Delete old videos that are no longer referenced
-    for (const oldFile of oldVideos) {
-      if (!currentVideos.has(oldFile) && oldFile !== currentCover) {
-        deleteFile(oldFile);
-      }
-    }
-
-    // ✅ Delete old cover media if it was replaced
-    if (oldCoverMedia && oldCoverMedia !== currentCover) {
-      // Don't delete if it's still in gallery or videos
-      if (!currentGallery.has(oldCoverMedia) && !currentVideos.has(oldCoverMedia)) {
-        deleteFile(oldCoverMedia);
-      }
-    }
 
     console.log('✅ Listing update complete');
     console.log('📸 Current gallery:', listing.galleryImages);
@@ -832,18 +687,6 @@ export const deleteListing = async (req, res) => {
         success: false,
         message: "Not authorized to delete this listing",
       });
-    }
-
-    // ✅ Delete all associated media files
-    const allMedia = [
-      listing.coverMedia,
-      listing.coverImage,
-      ...listing.galleryImages,
-      ...listing.videos,
-    ].filter(Boolean);
-    
-    for (const file of allMedia) {
-      deleteFile(file);
     }
 
     await listing.deleteOne();
@@ -1025,7 +868,7 @@ export const checkLike = async (req, res) => {
   }
 };
 
-/* ================= ADMIN: GET ALL LISTINGS - ENHANCED ================= */
+/* ================= ADMIN FUNCTIONS ================= */
 
 export const getAllListings = async (req, res) => {
   try {
@@ -1114,8 +957,6 @@ export const getAllListings = async (req, res) => {
   }
 };
 
-/* ================= ADMIN: GET PENDING LISTINGS - ENHANCED ================= */
-
 export const getPendingListings = async (req, res) => {
   try {
     const {
@@ -1175,8 +1016,6 @@ export const getPendingListings = async (req, res) => {
   }
 };
 
-/* ================= ADMIN: APPROVE LISTING ================= */
-
 export const approveListing = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
@@ -1226,8 +1065,6 @@ export const approveListing = async (req, res) => {
     });
   }
 };
-
-/* ================= ADMIN: REJECT LISTING ================= */
 
 export const rejectListing = async (req, res) => {
   try {
@@ -1283,8 +1120,6 @@ export const rejectListing = async (req, res) => {
   }
 };
 
-/* ================= ADMIN: SUSPEND LISTING ================= */
-
 export const suspendListing = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
@@ -1339,8 +1174,6 @@ export const suspendListing = async (req, res) => {
   }
 };
 
-/* ================= ADMIN: DELETE LISTING ================= */
-
 export const deleteListingAdmin = async (req, res) => {
   try {
     const listing = await Listing.findById(req.params.id);
@@ -1354,18 +1187,6 @@ export const deleteListingAdmin = async (req, res) => {
 
     const providerId = listing.provider;
     const listingTitle = listing.title;
-
-    // ✅ Delete all associated media files
-    const allMedia = [
-      listing.coverMedia,
-      listing.coverImage,
-      ...listing.galleryImages,
-      ...listing.videos,
-    ].filter(Boolean);
-    
-    for (const file of allMedia) {
-      deleteFile(file);
-    }
 
     await listing.deleteOne();
 

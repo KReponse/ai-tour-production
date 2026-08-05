@@ -1,16 +1,50 @@
 // backend/src/controllers/heroController.js
-// ✅ NEW - Hero Video Controller
-// ✅ Simple CRUD for hero videos
+// ✅ FIXED - Uses Media Service for Cloudinary uploads
+// ✅ All hero videos now stored as Cloudinary URLs (secure_url)
 
 import HeroVideo from "../models/HeroVideo.js";
 import Listing from "../models/Listing.js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { validateVideoDuration, generateVideoThumbnail } from "../middleware/upload.js";
+import { getMediaService } from "../services/media/index.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// ===============================
+// ✅ HELPER: Upload video to Cloudinary
+// ===============================
+const uploadVideo = async (file, options = {}) => {
+  if (!file) return null;
+  try {
+    const mediaService = getMediaService();
+    const result = await mediaService.save(file, { 
+      type: 'video', 
+      category: 'hero-videos',
+      ...options 
+    });
+    return result;
+  } catch (error) {
+    console.error('❌ Failed to upload hero video:', error.message);
+    return null;
+  }
+};
+
+// ===============================
+// ✅ HELPER: Delete file from Cloudinary
+// ===============================
+const deleteFile = async (fileUrl) => {
+  if (!fileUrl) return;
+  try {
+    const mediaService = getMediaService();
+    // Check if it's a Cloudinary URL or local path
+    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+      await mediaService.delete(fileUrl);
+      console.log(`🗑️ Deleted Cloudinary file: ${fileUrl}`);
+    } else {
+      // Legacy local file - try to delete from disk
+      const { deleteLocalFile } = await import('../utils/fileUtils.js');
+      await deleteLocalFile(fileUrl);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to delete file ${fileUrl}:`, error.message);
+  }
+};
 
 // ============================================================
 // ✅ GET ACTIVE HERO VIDEOS (Public - Homepage)
@@ -113,13 +147,11 @@ export const getHeroVideoById = async (req, res) => {
 };
 
 // ============================================================
-// ✅ CREATE HERO VIDEO
+// ✅ CREATE HERO VIDEO - FIXED with Cloudinary
 // ============================================================
 export const createHeroVideo = async (req, res) => {
   try {
     const { title, description, listingId, priority = 0, isActive = true } = req.body;
-
-    // ✅ No required validation for title, description, or listingId
 
     // If listingId is provided, validate it exists
     if (listingId) {
@@ -140,41 +172,43 @@ export const createHeroVideo = async (req, res) => {
       });
     }
 
-    // Validate video duration
-    let duration = 0;
-    try {
-      duration = await validateVideoDuration(req.file.path);
-    } catch (error) {
-      // Clean up file if validation fails
-      if (fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-      return res.status(400).json({
+    // ✅ Upload video to Cloudinary using Media Service
+    const uploadResult = await uploadVideo(req.file, {
+      category: 'hero-videos',
+      transformation: [
+        { quality: 'auto' },
+        { format: 'mp4' },
+      ],
+    });
+
+    if (!uploadResult) {
+      return res.status(500).json({
         success: false,
-        message: error.message,
+        message: "Failed to upload video to Cloudinary",
       });
     }
 
-    // Generate thumbnail
-    const thumbnailPath = req.file.path.replace(/\.[^.]+$/, "-thumb.jpg");
+    // ✅ Generate thumbnail from Cloudinary URL
     let thumbnail = null;
-    try {
-      const generated = await generateVideoThumbnail(req.file.path, thumbnailPath);
-      if (generated) {
-        thumbnail = `/uploads/videos/${path.basename(thumbnailPath)}`;
+    if (uploadResult.cloudinary?.publicId) {
+      try {
+        const mediaService = getMediaService();
+        thumbnail = mediaService.getVideoThumbnail(uploadResult.cloudinary.publicId, {
+          time: 1,
+          width: 1280,
+          height: 720,
+        });
+      } catch (error) {
+        console.warn("⚠️ Thumbnail generation failed:", error.message);
       }
-    } catch (error) {
-      console.warn("⚠️ Thumbnail generation failed:", error.message);
     }
-
-    const videoUrl = `/uploads/videos/${path.basename(req.file.path)}`;
 
     const heroVideo = new HeroVideo({
       title: title || "",
       description: description || "",
-      videoUrl,
-      thumbnail,
-      duration: Math.round(duration),
+      videoUrl: uploadResult.url, // Cloudinary secure_url
+      thumbnail: thumbnail || null,
+      duration: Math.round(uploadResult.cloudinary?.duration || 0),
       mimeType: req.file.mimetype,
       fileSize: req.file.size,
       priority: parseInt(priority) || 0,
@@ -192,10 +226,6 @@ export const createHeroVideo = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Create hero video error:", error);
-    // Clean up uploaded file if exists
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
     res.status(500).json({
       success: false,
       message: error.message,
@@ -257,7 +287,7 @@ export const updateHeroVideo = async (req, res) => {
 };
 
 // ============================================================
-// ✅ UPLOAD/REPLACE HERO VIDEO
+// ✅ UPLOAD/REPLACE HERO VIDEO - FIXED with Cloudinary
 // ============================================================
 export const uploadHeroVideo = async (req, res) => {
   try {
@@ -273,8 +303,12 @@ export const uploadHeroVideo = async (req, res) => {
 
     const heroVideo = await HeroVideo.findById(id);
     if (!heroVideo) {
-      if (fs.existsSync(file.path)) {
-        fs.unlinkSync(file.path);
+      if (req.file && req.file.path) {
+        // Clean up local file if it was saved
+        const fs = await import('fs');
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
       }
       return res.status(404).json({
         success: false,
@@ -282,52 +316,49 @@ export const uploadHeroVideo = async (req, res) => {
       });
     }
 
-    // Validate video duration
-    let duration = 0;
-    try {
-      duration = await validateVideoDuration(file.path);
-    } catch (error) {
-      if (fs.existsSync(file.path)) {
-        fs.unlinkSync(file.path);
-      }
-      return res.status(400).json({
+    // ✅ Upload video to Cloudinary using Media Service
+    const uploadResult = await uploadVideo(file, {
+      category: 'hero-videos',
+      transformation: [
+        { quality: 'auto' },
+        { format: 'mp4' },
+      ],
+    });
+
+    if (!uploadResult) {
+      return res.status(500).json({
         success: false,
-        message: error.message,
+        message: "Failed to upload video to Cloudinary",
       });
     }
 
-    // Generate thumbnail
-    const thumbnailPath = file.path.replace(/\.[^.]+$/, "-thumb.jpg");
+    // ✅ Generate thumbnail from Cloudinary URL
     let thumbnail = null;
-    try {
-      const generated = await generateVideoThumbnail(file.path, thumbnailPath);
-      if (generated) {
-        thumbnail = `/uploads/videos/${path.basename(thumbnailPath)}`;
+    if (uploadResult.cloudinary?.publicId) {
+      try {
+        const mediaService = getMediaService();
+        thumbnail = mediaService.getVideoThumbnail(uploadResult.cloudinary.publicId, {
+          time: 1,
+          width: 1280,
+          height: 720,
+        });
+      } catch (error) {
+        console.warn("⚠️ Thumbnail generation failed:", error.message);
       }
-    } catch (error) {
-      console.warn("⚠️ Thumbnail generation failed:", error.message);
     }
 
-    // Delete old video file
+    // ✅ Delete old video from Cloudinary
     if (heroVideo.videoUrl) {
-      const oldPath = path.join(process.cwd(), heroVideo.videoUrl);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
+      await deleteFile(heroVideo.videoUrl);
+    }
+    if (heroVideo.thumbnail && heroVideo.thumbnail !== thumbnail) {
+      await deleteFile(heroVideo.thumbnail);
     }
 
-    // Delete old thumbnail
-    if (heroVideo.thumbnail) {
-      const oldThumbPath = path.join(process.cwd(), heroVideo.thumbnail);
-      if (fs.existsSync(oldThumbPath)) {
-        fs.unlinkSync(oldThumbPath);
-      }
-    }
-
-    // Update with new video
-    heroVideo.videoUrl = `/uploads/videos/${path.basename(file.path)}`;
-    heroVideo.thumbnail = thumbnail;
-    heroVideo.duration = Math.round(duration);
+    // ✅ Update with new video
+    heroVideo.videoUrl = uploadResult.url; // Cloudinary secure_url
+    heroVideo.thumbnail = thumbnail || null;
+    heroVideo.duration = Math.round(uploadResult.cloudinary?.duration || 0);
     heroVideo.mimeType = file.mimetype;
     heroVideo.fileSize = file.size;
     heroVideo.updatedBy = req.user._id;
@@ -341,9 +372,6 @@ export const uploadHeroVideo = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Upload hero video error:", error);
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
     res.status(500).json({
       success: false,
       message: error.message,
@@ -400,20 +428,14 @@ export const deleteHeroVideo = async (req, res) => {
       });
     }
 
-    // Delete video file
+    // ✅ Delete video from Cloudinary
     if (heroVideo.videoUrl) {
-      const videoPath = path.join(process.cwd(), heroVideo.videoUrl);
-      if (fs.existsSync(videoPath)) {
-        fs.unlinkSync(videoPath);
-      }
+      await deleteFile(heroVideo.videoUrl);
     }
 
-    // Delete thumbnail
+    // ✅ Delete thumbnail from Cloudinary
     if (heroVideo.thumbnail) {
-      const thumbPath = path.join(process.cwd(), heroVideo.thumbnail);
-      if (fs.existsSync(thumbPath)) {
-        fs.unlinkSync(thumbPath);
-      }
+      await deleteFile(heroVideo.thumbnail);
     }
 
     await heroVideo.deleteOne();

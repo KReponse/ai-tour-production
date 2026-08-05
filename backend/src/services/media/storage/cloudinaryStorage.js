@@ -1,5 +1,6 @@
 // backend/src/services/media/storage/cloudinaryStorage.js
 // ✅ Cloudinary Storage Provider - Production media storage
+// ✅ ADDED: timeout: 120000 to prevent timeouts
 
 import { v2 as cloudinary } from 'cloudinary';
 import streamifier from 'streamifier';
@@ -13,6 +14,7 @@ cloudinary.config({
   api_key: mediaConfig.cloudinary.apiKey,
   api_secret: mediaConfig.cloudinary.apiSecret,
   secure: true,
+  timeout: 120000, // ✅ 2 minutes
 });
 
 /**
@@ -30,6 +32,7 @@ const uploadToCloudinary = (fileData, options = {}) => {
       overwrite: options.overwrite !== false,
       invalidate: options.invalidate !== false,
       transformation: options.transformation || [],
+      timeout: 120000, // ✅ 2 minutes
       ...options.extraOptions,
     };
 
@@ -166,6 +169,7 @@ export const cloudinaryStorageProvider = {
       overwrite: true,
       invalidate: true,
       transformation,
+      timeout: 120000, // ✅ 2 minutes
     };
 
     // For images, add image transformations
@@ -278,6 +282,7 @@ export const cloudinaryStorageProvider = {
       const result = await cloudinary.uploader.destroy(id, {
         resource_type: resourceType,
         invalidate: true,
+        timeout: 60000, // ✅ 1 minute
       });
 
       if (result.result === 'ok') {
@@ -332,6 +337,7 @@ export const cloudinaryStorageProvider = {
     try {
       const result = await cloudinary.api.resource(publicId, {
         resource_type: resourceType,
+        timeout: 60000, // ✅ 1 minute
       });
       return !!result;
     } catch (error) {
@@ -358,6 +364,7 @@ export const cloudinaryStorageProvider = {
     try {
       const result = await cloudinary.api.resource(publicId, {
         resource_type: resourceType,
+        timeout: 60000, // ✅ 1 minute
       });
 
       return {

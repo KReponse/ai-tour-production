@@ -7,6 +7,7 @@
 // ✅ ADDED Rate Lock Routes
 // ✅ ADDED Webhook Routes
 // ✅ ADDED Hero Routes
+// ✅ ADDED Media Routes
 
 import "dotenv/config";
 
@@ -59,6 +60,9 @@ import webhookRoutes from "./routes/webhookRoutes.js";
 // ✅ NEW: Hero Routes
 import heroRoutes from "./routes/heroRoutes.js";
 
+// ✅ NEW: Media Routes (direct Cloudinary uploads)
+import mediaRoutes from "./routes/mediaRoutes.js";
+
 import errorHandler from "./middleware/errorMiddleware.js";
 import footerRoutes from "./routes/footerRoutes.js";
 import { setIo } from './utils/notificationService.js';
@@ -75,8 +79,6 @@ import termsRoutes from './routes/termsRoutes.js';
 import careersRoutes from './routes/careersRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
 import exchangeRateRoutes from "./routes/exchangeRateRoutes.js";
-
-
 
 /* ================= DATABASE ================= */
 
@@ -233,9 +235,11 @@ app.use("/api/reviews", reviewRoutes);
 // Video routes
 app.use("/api/videos", videoRoutes);
 
-
 // ✅ Hero Routes
 app.use("/api/hero", heroRoutes);
+
+// ✅ Media Routes (direct Cloudinary uploads)
+app.use("/api/media", mediaRoutes);
 
 // Provider routes
 app.use("/api/provider", providerRoutes);

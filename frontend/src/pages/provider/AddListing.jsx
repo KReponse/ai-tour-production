@@ -1,5 +1,9 @@
 // frontend/src/pages/provider/AddListing.jsx
-// ✅ COMPLETE FIXED - Added draft support with useDraftStorage
+// ✅ REFACTORED - Media uploads go directly to Cloudinary
+// ✅ Only URLs are sent to backend
+// ✅ Added progress tracking for uploads
+// ✅ Added retry logic
+// ✅ Added draft support with useDraftStorage
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -49,6 +53,9 @@ import {
 } from "../../constants/listingCategories";
 // ✅ NEW: Import draft hook
 import { useDraftStorage } from "../../hooks/useDraftStorage";
+// ✅ NEW: Import media upload service
+import { useMediaUpload } from "../../hooks/useMediaUpload";
+import UploadProgress from "../../components/ui/UploadProgress";
 
 // ── Brand tokens ─────────────────────────────────────────────────
 const TEAL = "#0D9488";
@@ -232,7 +239,8 @@ const AddListing = () => {
   const [providerProfile, setProviderProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [submitStatus, setSubmitStatus] = useState('');
+  const [submitError, setSubmitError] = useState(null);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
 
@@ -253,6 +261,22 @@ const AddListing = () => {
 
   // ✅ Draft Dialog state
   const [showDraftDialog, setShowDraftDialog] = useState(false);
+
+  // ================================================================
+  // ✅ MEDIA UPLOAD HOOK
+  // ================================================================
+  const {
+    uploading: mediaUploading,
+    progress: mediaProgress,
+    status: mediaStatus,
+    completedFiles,
+    totalFiles,
+    errors: mediaErrors,
+    reset: resetMediaUpload,
+    uploadCover,
+    uploadMultipleImages,
+    uploadMultipleVideos,
+  } = useMediaUpload();
 
   // ================================================================
   // ✅ DRAFT STORAGE
@@ -290,15 +314,12 @@ const AddListing = () => {
     const draft = restoreDraft();
     if (draft) {
       setForm(draft);
-      // ✅ Restore custom category
       if (draft.customCategory) {
         setCustomCategory(draft.customCategory);
       }
-      // ✅ Restore cover media type
       if (draft.coverMediaType) {
         setCoverMediaType(draft.coverMediaType);
       }
-      // ✅ Restore previews if they exist in draft
       if (draft.coverPreview) {
         setCoverPreview(draft.coverPreview);
       }
@@ -595,7 +616,9 @@ const AddListing = () => {
     }
   };
 
-  // ── Submit ────────────────────────────────────────────────────
+  // ============================================================
+  // ✅ REFACTORED: Submit Handler
+  // ============================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -631,100 +654,113 @@ const AddListing = () => {
 
     try {
       setLoading(true);
-      setUploadProgress(10);
+      setSubmitError(null);
+      setSubmitStatus('Starting upload...');
 
-      const data = new FormData();
-      
-      const fields = [
-        "title",
-        "location",
-        "price",
-        "duration",
-        "capacity",
-        "description",
-        "highlights",
-        "included",
-        "excluded",
-        "amenities",
-        "menu",
-        "meetingPoint",
-        "cancellationPolicy",
-        "requirements",
-        "refundPolicy",
-        "listingType",
-      ];
-      
-      fields.forEach((k) => {
-        const value = form[k];
-        if (Array.isArray(value)) {
-          data.append(k, value[0] || "");
+      let coverMediaUrl = '';
+      let finalCoverMediaType = 'image';
+      let galleryUrls = [];
+      let videoUrls = [];
+
+      // ✅ STEP 1: Upload Cover Media
+      if (form.coverMedia instanceof File) {
+        setSubmitStatus('Uploading cover media...');
+        const result = await uploadCover(form.coverMedia, 'listings');
+        if (result && result.success) {
+          coverMediaUrl = result.url;
+          finalCoverMediaType = result.mediaType || coverMediaType;
+          console.log('✅ Cover uploaded:', coverMediaUrl);
         } else {
-          data.append(k, value || "");
+          throw new Error('Failed to upload cover media');
         }
-      });
+      } else {
+        throw new Error('Cover media file is required');
+      }
+
+      // ✅ STEP 2: Upload Gallery Images
+      if (form.galleryImages && form.galleryImages.length > 0) {
+        const imageFiles = form.galleryImages.filter(f => f instanceof File);
+        if (imageFiles.length > 0) {
+          setSubmitStatus(`Uploading ${imageFiles.length} gallery images...`);
+          const results = await uploadMultipleImages(imageFiles, 'listings');
+          galleryUrls = results
+            .filter(r => r && r.success !== false && r.url)
+            .map(r => r.url || r.secure_url);
+          console.log(`✅ ${galleryUrls.length} gallery images uploaded`);
+        }
+      }
+
+      // ✅ STEP 3: Upload Videos
+      if (form.videos && form.videos.length > 0) {
+        const videoFiles = form.videos.filter(f => f instanceof File);
+        if (videoFiles.length > 0) {
+          setSubmitStatus(`Uploading ${videoFiles.length} videos...`);
+          const results = await uploadMultipleVideos(videoFiles, 'listings');
+          videoUrls = results
+            .filter(r => r && r.success !== false && r.url)
+            .map(r => r.url || r.secure_url);
+          console.log(`✅ ${videoUrls.length} videos uploaded`);
+        }
+      }
+
+      // ✅ STEP 4: Create Listing with URLs only
+      setSubmitStatus('Creating listing...');
 
       const finalCategory = form.category === "Other" 
         ? customCategory 
-        : (Array.isArray(form.category) ? form.category[0] || "" : form.category || "");
-      data.append("category", finalCategory);
+        : form.category || '';
 
-      const finalBusinessType = businessType || 'tour_operator';
-      data.append("businessType", finalBusinessType);
-      console.log("📌 businessType being sent:", finalBusinessType);
+      const listingData = {
+        title: form.title,
+        location: form.location,
+        price: form.price,
+        duration: form.duration,
+        capacity: form.capacity,
+        description: form.description,
+        businessType: businessType || 'tour_operator',
+        listingType: form.listingType || 'experience',
+        category: finalCategory,
+        highlights: form.highlights || '',
+        included: form.included || '',
+        excluded: form.excluded || '',
+        meetingPoint: form.meetingPoint || '',
+        cancellationPolicy: form.cancellationPolicy || '',
+        requirements: form.requirements || '',
+        amenities: form.amenities || '',
+        menu: form.menu || '',
+        cuisine: form.cuisine || '',
+        vehicleType: form.vehicleType || '',
+        seats: form.seats || 0,
+        dynamicFields: form.dynamicFields || {},
+        coverMedia: coverMediaUrl,
+        coverMediaType: finalCoverMediaType,
+        coverImage: coverMediaUrl,
+        galleryImages: galleryUrls,
+        videos: videoUrls,
+      };
 
-      if (form.coverMedia instanceof File) {
-        data.append("coverMedia", form.coverMedia);
-        data.append("coverMediaType", coverMediaType);
-        data.append("coverImage", form.coverMedia);
-        console.log("✅ Cover Media appended:", form.coverMedia.name, `(${coverMediaType})`);
-      } else {
-        console.warn("⚠️ No cover media file found:", form.coverMedia);
-        setErrors({ submit: "Cover media file is required" });
-        setLoading(false);
-        return;
-      }
-
-      if (form.galleryImages && form.galleryImages.length > 0) {
-        form.galleryImages.forEach((img) => {
-          if (img instanceof File) {
-            data.append("galleryImages", img);
-          }
-        });
-        console.log(`✅ ${form.galleryImages.length} gallery images appended`);
-      }
-
-      if (form.videos && form.videos.length > 0) {
-        form.videos.forEach((vid) => {
-          if (vid instanceof File) {
-            data.append("videos", vid);
-          }
-        });
-        console.log(`✅ ${form.videos.length} videos appended`);
-      }
-
-      console.log("📌 ===== FORMDATA ENTRIES =====");
-      for (let pair of data.entries()) {
-        if (pair[1] instanceof File) {
-          console.log(`📁 ${pair[0]}: ${pair[1].name} (${pair[1].size} bytes)`);
-        } else {
-          console.log(`📝 ${pair[0]}: ${pair[1]}`);
-        }
-      }
-      console.log("📌 ===== END FORMDATA =====");
-
-      await createListing(data, token, (p) => setUploadProgress(p));
-
-      // ✅ Clear draft on success
-      clearDraftOnSuccess();
-      
-      setUploadProgress(100);
-      setTimeout(() => navigate("/provider/listings"), 600);
-    } catch (err) {
-      console.error("❌ Submit error:", err);
-      console.error("❌ Error response:", err.response?.data);
-      setErrors({
-        submit: err.response?.data?.message || err.response?.data?.error || "Failed to create listing. Please try again.",
+      console.log('📌 Creating listing with URLs:', {
+        coverMedia: coverMediaUrl,
+        galleryImages: galleryUrls.length,
+        videos: videoUrls.length,
       });
+
+      const response = await createListing(listingData);
+
+      if (response && response.success) {
+        setSubmitStatus('Listing created successfully! 🎉');
+        clearDraftOnSuccess();
+        setUploadProgress(100);
+        setTimeout(() => navigate('/provider/listings'), 600);
+      } else {
+        throw new Error(response?.message || 'Failed to create listing');
+      }
+    } catch (err) {
+      console.error('❌ Submit error:', err);
+      console.error('❌ Error response:', err.response?.data);
+      setSubmitError(err.response?.data?.message || err.message || 'Failed to create listing. Please try again.');
+      setSubmitStatus('Upload failed');
+    } finally {
       setLoading(false);
     }
   };
@@ -841,6 +877,20 @@ const AddListing = () => {
           </div>
         )}
 
+        {/* ── UPLOAD PROGRESS ── */}
+        {(mediaUploading || loading || mediaErrors.length > 0) && (
+          <div className="mb-6">
+            <UploadProgress
+              isUploading={mediaUploading || loading}
+              progress={mediaProgress}
+              status={mediaStatus || submitStatus}
+              completed={completedFiles}
+              total={totalFiles}
+              errors={mediaErrors}
+            />
+          </div>
+        )}
+
         {/* ── TIP BANNER ── */}
         <div className="flex gap-2.5 items-start p-3 rounded-xl mb-6 bg-[#F59E0B]/10 dark:bg-[#F59E0B]/10 border border-[#F59E0B]/30 dark:border-[#F59E0B]/30">
           <Info size={16} color={GOLD} className="flex-shrink-0 mt-0.5" />
@@ -850,6 +900,13 @@ const AddListing = () => {
         </div>
 
         {/* ── SUBMIT ERROR ── */}
+        {submitError && (
+          <div className="flex items-center gap-2 p-3 rounded-xl mb-5 bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+            <AlertCircle size={16} /> {submitError}
+          </div>
+        )}
+
+        {/* ── FORM ERROR ── */}
         {errors.submit && (
           <div className="flex items-center gap-2 p-3 rounded-xl mb-5 bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
             <AlertCircle size={16} /> {errors.submit}
@@ -1406,24 +1463,25 @@ const AddListing = () => {
           <div className="sticky bottom-5 z-10">
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || mediaUploading}
               className={`w-full h-14 border-none rounded-xl font-extrabold text-base flex items-center justify-center gap-2.5 transition-all duration-200 font-sans ${
-                loading
+                (loading || mediaUploading)
                   ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                   : `text-white shadow-lg hover:scale-[1.015]`
               }`}
               style={{
-                background: loading 
+                background: (loading || mediaUploading) 
                   ? undefined 
                   : `linear-gradient(135deg, ${bizCfg.accent} 0%, ${GOLD} 100%)`,
-                boxShadow: loading 
+                boxShadow: (loading || mediaUploading) 
                   ? undefined 
                   : `0 6px 24px ${bizCfg.accent}45`,
               }}
             >
-              {loading ? (
+              {(loading || mediaUploading) ? (
                 <>
-                  <Loader2 size={20} className="animate-spin" /> Uploading {uploadProgress}%...
+                  <Loader2 size={20} className="animate-spin" /> 
+                  {submitStatus || 'Uploading...'} {mediaProgress > 0 ? `${mediaProgress}%` : ''}
                 </>
               ) : (
                 <>
