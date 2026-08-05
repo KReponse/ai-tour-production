@@ -30,13 +30,10 @@ const heroVideoSchema = new mongoose.Schema(
       default: null,
     },
 
-    duration: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 20,
-    },
-
+   duration: {
+  type: Number,
+  max: 120
+},
     mimeType: {
       type: String,
       enum: ["video/mp4", "video/webm", null],
