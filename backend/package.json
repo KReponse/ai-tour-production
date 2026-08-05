@@ -5,10 +5,10 @@
   "main": "src/server.js",
   "type": "module",
   
-  "scripts": {
-  "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 nodemon src/server.js",
-  "start": "cross-env NODE_OPTIONS=--max-old-space-size=4096 node src/server.js",
-  "prod": "cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=4096 node src/server.js",
+"scripts": {
+  "dev": "nodemon src/server.js",
+  "start": "node src/server.js",
+  "prod": "node src/server.js",
   "fix-videos": "node src/scripts/fixVideoPaths.js"
 },
   "keywords": [
