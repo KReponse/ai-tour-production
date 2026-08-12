@@ -1,4 +1,7 @@
 // src/components/provider/ProviderMobileNavbar.jsx
+// ✅ COMPLETE FIXED - Notification click navigates to notifications page
+// ✅ Added proper navigation for notifications
+// ✅ ADDED: Messages icon with unread badge for provider chat
 
 import React, {
   useState,
@@ -11,10 +14,12 @@ import {
   Bell,
   BellDot,
   UserCircle,
+  MessageCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import notificationService from "../../services/notification.service";
+import { getTotalUnreadCount } from "../../services/chatService";
 import logo from "../../assets/images/logo.png";
 
 // ===============================
@@ -43,6 +48,7 @@ const ProviderMobileNavbar = ({
   const { user, refreshUser } = useAuth();
 
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [profileImageError, setProfileImageError] = useState(false);
   
   // ✅ Use ref to track if initial fetch is done
@@ -72,15 +78,30 @@ const ProviderMobileNavbar = ({
     } catch (error) {
       console.error('Error fetching unread count:', error);
     }
-  }, [user?._id]); // ✅ Only depends on user ID, not the whole user object
+  }, [user?._id]);
 
-  // ✅ Fetch unread count only once on mount and when user changes
+  /* ================= FETCH CHAT UNREAD COUNT ================= */
+  const fetchChatUnreadCount = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const response = await getTotalUnreadCount();
+      if (response.success) {
+        setChatUnreadCount(response.data?.count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching chat unread count:', error);
+    }
+  }, [user?._id]);
+
+  // ✅ Fetch unread counts only once on mount and when user changes
   useEffect(() => {
     if (user && !hasFetchedRef.current) {
       fetchUnreadCount();
+      fetchChatUnreadCount();
       hasFetchedRef.current = true;
     }
-  }, [user?._id, fetchUnreadCount]); // ✅ Depends on user ID only
+  }, [user?._id, fetchUnreadCount, fetchChatUnreadCount]);
 
   // ✅ Refresh user data only once on mount
   useEffect(() => {
@@ -88,7 +109,7 @@ const ProviderMobileNavbar = ({
       refreshUser();
       hasRefreshedRef.current = true;
     }
-  }, [user?._id, refreshUser]); // ✅ Depends on user ID only
+  }, [user?._id, refreshUser]);
 
   /* ================= GET USER DISPLAY NAME ================= */
   const getDisplayName = useCallback(() => {
@@ -103,6 +124,23 @@ const ProviderMobileNavbar = ({
     return name.charAt(0).toUpperCase();
   }, [getDisplayName]);
 
+  // =========================
+  // ✅ HANDLE NOTIFICATION CLICK
+  // =========================
+  const handleNotificationClick = useCallback(() => {
+    if (onNotificationClick) {
+      onNotificationClick();
+    }
+    navigate('/provider/notifications');
+  }, [navigate, onNotificationClick]);
+
+  // =========================
+  // ✅ HANDLE MESSAGES CLICK
+  // =========================
+  const handleMessagesClick = useCallback(() => {
+    navigate('/provider/chat');
+  }, [navigate]);
+
   return (
     <header className="lg:hidden fixed top-0 left-0 right-0 h-16 z-50 bg-white/90 dark:bg-gray-950/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 shadow-sm">
       <div className="h-full px-4 flex items-center justify-between">
@@ -112,6 +150,7 @@ const ProviderMobileNavbar = ({
           <button
             onClick={onMenuClick}
             className="w-11 h-11 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:scale-105 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-300"
+            aria-label="Open menu"
           >
             <Menu className="w-5 h-5 text-gray-700 dark:text-white" />
           </button>
@@ -137,11 +176,26 @@ const ProviderMobileNavbar = ({
         </div>
 
         {/* RIGHT */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
+          {/* ✅ MESSAGES - Provider Chat */}
+          <button
+            onClick={handleMessagesClick}
+            className="relative w-11 h-11 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:scale-105 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-300"
+            aria-label="Messages"
+          >
+            <MessageCircle className="w-5 h-5 text-gray-700 dark:text-white" />
+            {chatUnreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-5 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center border-2 border-white dark:border-gray-950 px-1 animate-pulse">
+                {chatUnreadCount > 9 ? '9+' : chatUnreadCount}
+              </span>
+            )}
+          </button>
+
           {/* NOTIFICATION */}
           <button
-            onClick={onNotificationClick}
+            onClick={handleNotificationClick}
             className="relative w-11 h-11 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:scale-105 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-300"
+            aria-label="Notifications"
           >
             {unreadCount > 0 ? (
               <BellDot className="w-5 h-5 text-[#0D9488] dark:text-[#0D9488]" />
@@ -156,11 +210,12 @@ const ProviderMobileNavbar = ({
             )}
           </button>
 
-          {/* PROFILE - ✅ Updated with profileImage support */}
+          {/* PROFILE */}
           {user ? (
             <button
               onClick={() => navigate("/provider/profile")}
               className="relative group"
+              aria-label="Profile"
             >
               {avatarUrl && !profileImageError ? (
                 <img
@@ -182,6 +237,7 @@ const ProviderMobileNavbar = ({
             <button
               onClick={() => navigate("/login")}
               className="w-11 h-11 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white shadow-lg shadow-[#0D9488]/30 hover:scale-105 transition-all duration-300"
+              aria-label="Login"
             >
               <UserCircle size={25} />
             </button>

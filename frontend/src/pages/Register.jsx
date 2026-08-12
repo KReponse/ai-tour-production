@@ -1,5 +1,5 @@
 // frontend/src/pages/Register.jsx
-// ✅ OPTIMIZED - Added debouncing and prevent duplicate submissions
+// ✅ COMPLETE FIXED - Same response handling as login
 
 import React, { useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -80,42 +80,149 @@ const Register = () => {
 
       const response = await registerUser(formData);
       
-      console.log("📝 Registration response:", response);
+      console.log("📝 Full registration response:", JSON.stringify(response, null, 2));
 
-      if (response.accessToken) {
-        localStorage.setItem("token", response.accessToken);
-        if (response.refreshToken) {
-          localStorage.setItem("refreshToken", response.refreshToken);
+      // ✅ Handle multiple response structures (same as login)
+      let accessToken = null;
+      let refreshToken = null;
+      let user = null;
+      let requiresVerification = false;
+
+      // Case 1: Flat structure { accessToken, refreshToken, user }
+      if (response.accessToken && response.user) {
+        accessToken = response.accessToken;
+        refreshToken = response.refreshToken;
+        user = response.user;
+        requiresVerification = response.requiresVerification || false;
+        console.log("📦 Case 1: Flat structure");
+      }
+      // Case 2: Nested in data { data: { accessToken, refreshToken, user } }
+      else if (response.data?.accessToken && response.data?.user) {
+        accessToken = response.data.accessToken;
+        refreshToken = response.data.refreshToken;
+        user = response.data.user;
+        requiresVerification = response.data.requiresVerification || false;
+        console.log("📦 Case 2: Nested in data");
+      }
+      // Case 3: Nested in userData
+      else if (response.userData?.accessToken && response.userData?.user) {
+        accessToken = response.userData.accessToken;
+        refreshToken = response.userData.refreshToken;
+        user = response.userData.user;
+        requiresVerification = response.userData.requiresVerification || false;
+        console.log("📦 Case 3: Nested in userData");
+      }
+      // Case 4: Token in token field
+      else if (response.token && response.user) {
+        accessToken = response.token;
+        refreshToken = response.refreshToken;
+        user = response.user;
+        requiresVerification = response.requiresVerification || false;
+        console.log("📦 Case 4: token field");
+      }
+      // Case 5: Response from ResponseUtils.created
+      else if (response.data?.data?.accessToken) {
+        accessToken = response.data.data.accessToken;
+        refreshToken = response.data.data.refreshToken;
+        user = response.data.data.user;
+        requiresVerification = response.data.data.requiresVerification || false;
+        console.log("📦 Case 5: Deep nested in data.data");
+      }
+      // Case 6: Success wrapper
+      else if (response.success && response.data?.accessToken) {
+        accessToken = response.data.accessToken;
+        refreshToken = response.data.refreshToken;
+        user = response.data.user;
+        requiresVerification = response.data.requiresVerification || false;
+        console.log("📦 Case 6: success wrapper");
+      }
+
+      console.log("📦 Extracted - Token:", !!accessToken, "User:", !!user);
+
+      if (accessToken && user) {
+        // ✅ Store tokens
+        localStorage.setItem("token", accessToken);
+        if (refreshToken) {
+          localStorage.setItem("refreshToken", refreshToken);
         }
         
-        login(response.user, response.accessToken);
+        // ✅ Login user
+        const loggedIn = login(user, accessToken, refreshToken);
+        
+        if (loggedIn) {
+          // ✅ Show appropriate message
+          if (requiresVerification) {
+            toast.success("Account created! Please verify your email. 📧");
+          } else {
+            toast.success(`Welcome, ${user.name || 'Traveler'}! 🎉`);
+          }
 
-        toast.success("Account created successfully 🎉");
-
-        if (response.user?.role === "admin") {
-          navigate("/admin");
-        } else if (response.user?.role === "provider") {
-          toast("Provider account waiting for admin approval", {
-            icon: "⏳",
-          });
-          navigate("/provider/dashboard");
-        } else {
-          navigate("/");
-        }
-      } else {
-        if (response.token) {
-          login(response.user, response.token);
-          toast.success("Account created successfully 🎉");
-          navigate("/");
-        } else {
-          toast.error("Registration successful but no token received");
+          // ✅ Navigate based on role
+          if (user?.role === "admin") {
+            navigate("/admin");
+          } else if (user?.role === "provider") {
+            toast("Provider account waiting for admin approval", {
+              icon: "⏳",
+            });
+            navigate("/provider/dashboard");
+          } else {
+            navigate("/");
+          }
+          return;
         }
       }
+
+      // ✅ If we have token but no user, try to get user
+      if (accessToken && !user) {
+        try {
+          console.log("🔄 Token exists, fetching user from /auth/me...");
+          const { getCurrentUser } = await import('../services/authService');
+          const fetchedUser = await getCurrentUser();
+          
+          if (fetchedUser) {
+            login(fetchedUser, accessToken, refreshToken);
+            toast.success(`Welcome, ${fetchedUser.name || 'Traveler'}! 🎉`);
+            
+            if (fetchedUser?.role === "admin") {
+              navigate("/admin");
+            } else if (fetchedUser?.role === "provider") {
+              navigate("/provider/dashboard");
+            } else {
+              navigate("/");
+            }
+            return;
+          }
+        } catch (userError) {
+          console.error("❌ Failed to fetch user:", userError);
+        }
+      }
+
+      // ✅ If registration succeeded but no token/user, show success message
+      if (response.success || response.message) {
+        toast.success(response.message || "Registration successful! Please login.");
+        navigate("/login");
+        return;
+      }
+
+      // ✅ If we reached here, something went wrong
+      console.error("❌ Could not extract user data from response:", response);
+      toast.error("Registration successful but could not retrieve user data. Please login.");
+
     } catch (error) {
       console.error("❌ Registration error:", error);
-      toast.error(
-        error.response?.data?.message || error.message || "Registration failed"
-      );
+      
+      const errorData = error?.response?.data || error?.data || error;
+      
+      // ✅ Handle specific error responses
+      if (errorData?.message?.includes("already registered") || 
+          errorData?.message?.includes("already exists") ||
+          errorData?.message?.includes("duplicate")) {
+        toast.error("This email is already registered. Please login instead.");
+        setTimeout(() => navigate("/login"), 2000);
+        return;
+      }
+      
+      toast.error(errorData?.message || error?.message || "Registration failed");
     } finally {
       setLoading(false);
       isSubmitting.current = false;

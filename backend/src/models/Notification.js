@@ -1,6 +1,7 @@
 // backend/src/models/Notification.js
 // ✅ PRODUCTION READY - Notification Model
-// ✅ FIXED: Added provider_reply to type enum
+// ✅ COMPLETE FIXED - Removed all index: true from field definitions
+// ✅ All indexes defined ONLY in schema.index() section
 
 import mongoose from 'mongoose';
 
@@ -9,7 +10,7 @@ const notificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-    index: true,
+    // ✅ REMOVED: index: true
   },
   sender: {
     type: mongoose.Schema.Types.ObjectId,
@@ -35,7 +36,7 @@ const notificationSchema = new mongoose.Schema({
       
       // Review related
       'new_review',
-      'provider_reply',        // ✅ ADDED - Provider reply to review
+      'provider_reply',
       'review_hidden',
       'review_restored',
       'review_report_threshold',
@@ -71,7 +72,7 @@ const notificationSchema = new mongoose.Schema({
       'provider_rejected',
     ],
     required: true,
-    index: true,
+    // ✅ REMOVED: index: true
   },
   title: {
     type: String,
@@ -92,7 +93,7 @@ const notificationSchema = new mongoose.Schema({
   read: {
     type: Boolean,
     default: false,
-    index: true,
+    // ✅ REMOVED: index: true
   },
   readAt: {
     type: Date,
@@ -123,25 +124,42 @@ const notificationSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    index: true,
+    // ✅ REMOVED: index: true
   },
+}, {
+  timestamps: true,
 });
 
 // =========================
-// ✅ INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
+// NO index:true in field definitions above
+// All indexes defined ONLY here
+
+// Single field indexes
+notificationSchema.index({ recipient: 1 });
+notificationSchema.index({ type: 1 });
+notificationSchema.index({ read: 1 });
+notificationSchema.index({ createdAt: -1 });
+
+// Compound indexes
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 notificationSchema.index({ recipient: 1, read: 1 });
 notificationSchema.index({ type: 1, createdAt: -1 });
 notificationSchema.index({ read: 1, createdAt: -1 });
 
 // =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. No field has both index:true AND a schema.index() call
+// 2. All indexes are defined ONLY in this section
+// 3. All single field indexes are listed above
+// 4. All compound indexes are listed above
+
+// =========================
 // ✅ STATIC METHODS
 // =========================
 
-/**
- * Mark all notifications as read for a user
- */
 notificationSchema.statics.markAllAsRead = async function(recipientId) {
   const result = await this.updateMany(
     { recipient: recipientId, read: false },
@@ -150,16 +168,10 @@ notificationSchema.statics.markAllAsRead = async function(recipientId) {
   return result;
 };
 
-/**
- * Get unread count for a user
- */
 notificationSchema.statics.getUnreadCount = async function(recipientId) {
   return this.countDocuments({ recipient: recipientId, read: false });
 };
 
-/**
- * Get notifications for a user with pagination
- */
 notificationSchema.statics.getForUser = async function(recipientId, options = {}) {
   const { page = 1, limit = 20, unreadOnly = false } = options;
   
@@ -193,9 +205,6 @@ notificationSchema.statics.getForUser = async function(recipientId, options = {}
 // ✅ INSTANCE METHODS
 // =========================
 
-/**
- * Mark a single notification as read
- */
 notificationSchema.methods.markAsRead = async function() {
   this.read = true;
   this.readAt = new Date();
@@ -203,9 +212,6 @@ notificationSchema.methods.markAsRead = async function() {
   return this;
 };
 
-/**
- * Mark a single notification as unread
- */
 notificationSchema.methods.markAsUnread = async function() {
   this.read = false;
   this.readAt = null;

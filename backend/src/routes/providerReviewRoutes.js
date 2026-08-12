@@ -1,12 +1,17 @@
 // backend/src/routes/providerReviewRoutes.js
-// ✅ FIXED - Using Authentication v2 middleware
+// ✅ COMPLETE FIXED - All routes properly configured
 
 import express from 'express';
 import {
   getProviderReviews,
+  getProviderReviewStats,
+  addReview,           // ✅ POST handler
+  updateReview,        // ✅ PUT handler
+  deleteReview,        // ✅ DELETE handler
   respondToReview,
   editResponse,
-  getProviderReviewStats
+  deleteResponse,
+  getReviewById
 } from '../controllers/providerReviewController.js';
 // ✅ Updated to v2
 import { AuthMiddleware } from '../middleware/auth.middleware.js';
@@ -14,19 +19,49 @@ import { canRespondToReview } from '../middleware/reviewPermission.js';
 
 const router = express.Router();
 
-// ✅ Updated to v2
+// ✅ All routes require authentication and provider role
 router.use(AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'));
 
-// ✅ GET provider reviews
+// =========================
+// ✅ GET ROUTES
+// =========================
+// Get all provider reviews
 router.get('/', getProviderReviews);
 
-// ✅ GET provider review stats
+// Get review statistics
 router.get('/stats', getProviderReviewStats);
 
-// ✅ Respond to review
-router.post('/:id/respond', canRespondToReview, respondToReview);
+// Get single review by ID
+router.get('/:id', getReviewById);
 
-// ✅ Edit response
+// =========================
+// ✅ POST ROUTES - THIS FIXES YOUR 404 ERROR!
+// =========================
+// Create a new review
+router.post('/', addReview);  // ✅ THIS WAS MISSING!
+
+// =========================
+// ✅ PUT ROUTES
+// =========================
+// Update a review
+router.put('/:id', updateReview);
+
+// Edit response to a review
 router.put('/:id/respond', canRespondToReview, editResponse);
+
+// =========================
+// ✅ DELETE ROUTES
+// =========================
+// Delete a review
+router.delete('/:id', deleteReview);
+
+// Delete response from a review
+router.delete('/:id/respond', deleteResponse);
+
+// =========================
+// ✅ RESPONSE ROUTES
+// =========================
+// Add response to a review
+router.post('/:id/respond', canRespondToReview, respondToReview);
 
 export default router;

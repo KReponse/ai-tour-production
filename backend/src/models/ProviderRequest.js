@@ -1,6 +1,7 @@
 // backend/src/models/ProviderRequest.js
 // ✅ COMPLETE FIXED - Removed duplicate index on user field
-// ✅ Fixed duplicate index warning
+// ✅ COMPLETE FIXED - Removed index: true from status field
+// ✅ All indexes defined ONLY in schema.index() section
 
 import mongoose from "mongoose";
 
@@ -425,7 +426,7 @@ const providerRequestSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "approved", "rejected", "needs_information"],
       default: "pending",
-      index: true
+      // ✅ REMOVED: index: true - defined in schema.index() below
     },
 
     adminNotes: {
@@ -449,29 +450,38 @@ const providerRequestSchema = new mongoose.Schema(
 );
 
 // =========================
-// INDEXES FOR PERFORMANCE
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
-// ✅ All indexes defined here to avoid duplicates
-providerRequestSchema.index({ user: 1 }); // ✅ Single definition
-providerRequestSchema.index({ status: 1, createdAt: -1 });
-providerRequestSchema.index({ businessName: 'text', fullName: 'text', email: 'text' });
+// NO index:true in field definitions above
+// All indexes defined ONLY here
+
+providerRequestSchema.index({ user: 1 });
+providerRequestSchema.index({ status: 1 });
 providerRequestSchema.index({ createdAt: -1 });
 providerRequestSchema.index({ updatedAt: -1 });
 providerRequestSchema.index({ user: 1, status: 1 });
+providerRequestSchema.index({ status: 1, createdAt: -1 });
+providerRequestSchema.index({ businessName: 'text', fullName: 'text', email: 'text' });
 providerRequestSchema.index({ businessName: 1, status: 1 });
+
+// =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. No field has both index:true AND a schema.index() call
+// 2. All indexes are defined ONLY in this section
+// 3. All single field indexes are listed above
+// 4. All compound indexes are listed above
 
 // =========================
 // PRE-SAVE MIDDLEWARE
 // =========================
 providerRequestSchema.pre('save', function(next) {
-  // ✅ Ensure user is set and is a valid ObjectId
   if (!this.user) {
     const error = new Error('User is required');
     error.status = 400;
     return next(error);
   }
 
-  // ✅ Trim string fields
   const stringFields = ['fullName', 'email', 'phone', 'whatsapp', 'nationality', 
     'businessEmail', 'alternatePhone', 'businessName', 'description', 'country',
     'province', 'district', 'city', 'street', 'googleMaps', 'businessAddress',
@@ -485,16 +495,13 @@ providerRequestSchema.pre('save', function(next) {
     }
   });
 
-  // ✅ Ensure email is lowercase
   if (this.email) this.email = this.email.toLowerCase();
   if (this.businessEmail) this.businessEmail = this.businessEmail.toLowerCase();
 
-  // ✅ Ensure price is a number
   if (this.price !== undefined && this.price !== null) {
     this.price = Number(this.price);
   }
 
-  // ✅ Ensure employees is a number
   if (this.employees !== undefined && this.employees !== null) {
     this.employees = Number(this.employees);
   }
@@ -503,43 +510,28 @@ providerRequestSchema.pre('save', function(next) {
 });
 
 // =========================
-// VIRTUAL: Is pending
+// VIRTUALS
 // =========================
 providerRequestSchema.virtual('isPending').get(function() {
   return this.status === 'pending';
 });
 
-// =========================
-// VIRTUAL: Is approved
-// =========================
 providerRequestSchema.virtual('isApproved').get(function() {
   return this.status === 'approved';
 });
 
-// =========================
-// VIRTUAL: Is rejected
-// =========================
 providerRequestSchema.virtual('isRejected').get(function() {
   return this.status === 'rejected';
 });
 
-// =========================
-// VIRTUAL: Needs information
-// =========================
 providerRequestSchema.virtual('needsInformation').get(function() {
   return this.status === 'needs_information';
 });
 
-// =========================
-// VIRTUAL: Has been reviewed
-// =========================
 providerRequestSchema.virtual('hasBeenReviewed').get(function() {
   return this.status !== 'pending' && !!this.reviewedAt;
 });
 
-// =========================
-// VIRTUAL: Review status display
-// =========================
 providerRequestSchema.virtual('reviewStatus').get(function() {
   const statusMap = {
     'pending': '⏳ Pending Review',
@@ -551,7 +543,7 @@ providerRequestSchema.virtual('reviewStatus').get(function() {
 });
 
 // =========================
-// METHOD: Update status
+// METHODS
 // =========================
 providerRequestSchema.methods.updateStatus = async function(status, adminNotes, adminId) {
   const validStatuses = ['pending', 'approved', 'rejected', 'needs_information'];
@@ -568,29 +560,20 @@ providerRequestSchema.methods.updateStatus = async function(status, adminNotes, 
   return this;
 };
 
-// =========================
-// METHOD: Approve
-// =========================
 providerRequestSchema.methods.approve = async function(adminId, notes = '') {
   return this.updateStatus('approved', notes, adminId);
 };
 
-// =========================
-// METHOD: Reject
-// =========================
 providerRequestSchema.methods.reject = async function(adminId, notes = '') {
   return this.updateStatus('rejected', notes, adminId);
 };
 
-// =========================
-// METHOD: Request more information
-// =========================
 providerRequestSchema.methods.requestInformation = async function(adminId, notes = '') {
   return this.updateStatus('needs_information', notes, adminId);
 };
 
 // =========================
-// STATIC: Get pending requests
+// STATICS
 // =========================
 providerRequestSchema.statics.getPending = function() {
   return this.find({ status: 'pending' })
@@ -598,26 +581,17 @@ providerRequestSchema.statics.getPending = function() {
     .sort({ createdAt: 1 });
 };
 
-// =========================
-// STATIC: Get by status
-// =========================
 providerRequestSchema.statics.getByStatus = function(status) {
   return this.find({ status })
     .populate('user', 'name email profileImage phone')
     .sort({ createdAt: -1 });
 };
 
-// =========================
-// STATIC: Get by user
-// =========================
 providerRequestSchema.statics.getByUser = function(userId) {
   return this.findOne({ user: userId })
     .sort({ createdAt: -1 });
 };
 
-// =========================
-// STATIC: Check if user has pending request
-// =========================
 providerRequestSchema.statics.hasPendingRequest = async function(userId) {
   const request = await this.findOne({ 
     user: userId, 
@@ -626,9 +600,6 @@ providerRequestSchema.statics.hasPendingRequest = async function(userId) {
   return !!request;
 };
 
-// =========================
-// STATIC: Get all with populated user
-// =========================
 providerRequestSchema.statics.getAllWithUser = function(filter = {}) {
   return this.find(filter)
     .populate('user', 'name email profileImage phone role isEmailVerified')
@@ -636,9 +607,6 @@ providerRequestSchema.statics.getAllWithUser = function(filter = {}) {
     .sort({ createdAt: -1 });
 };
 
-// =========================
-// STATIC: Get paginated
-// =========================
 providerRequestSchema.statics.getPaginated = async function({
   page = 1,
   limit = 20,
@@ -688,9 +656,6 @@ providerRequestSchema.statics.getPaginated = async function({
   };
 };
 
-// =========================
-// STATIC: Get statistics
-// =========================
 providerRequestSchema.statics.getStats = async function() {
   const stats = await this.aggregate([
     {
@@ -717,7 +682,6 @@ providerRequestSchema.statics.getStats = async function() {
     else if (stat._id === 'needs_information') result.needsInformation = stat.count;
   });
 
-  // ✅ Today's submissions
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
@@ -727,7 +691,6 @@ providerRequestSchema.statics.getStats = async function() {
     createdAt: { $gte: today, $lt: tomorrow }
   });
 
-  // ✅ This week
   const weekStart = new Date(today);
   weekStart.setDate(weekStart.getDate() - weekStart.getDay());
   result.thisWeek = await this.countDocuments({
@@ -737,9 +700,6 @@ providerRequestSchema.statics.getStats = async function() {
   return result;
 };
 
-// =========================
-// STATIC: Search provider requests
-// =========================
 providerRequestSchema.statics.search = async function(query, options = {}) {
   const { limit = 20, page = 1, status = null } = options;
   
@@ -778,7 +738,7 @@ providerRequestSchema.statics.search = async function(query, options = {}) {
 };
 
 // =========================
-// TO JSON
+// TO JSON / TO OBJECT
 // =========================
 providerRequestSchema.set('toJSON', {
   virtuals: true,
@@ -788,9 +748,6 @@ providerRequestSchema.set('toJSON', {
   }
 });
 
-// =========================
-// TO OBJECT
-// =========================
 providerRequestSchema.set('toObject', {
   virtuals: true
 });

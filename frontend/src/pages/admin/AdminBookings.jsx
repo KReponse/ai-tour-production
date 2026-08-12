@@ -1,7 +1,10 @@
 // frontend/src/pages/admin/AdminBookings.jsx
-// ✅ FIXED - Correct admin bookings endpoint: /bookings/admin/all
+// ✅ COMPLETE FIXED - Added booking management actions
+// ✅ Added approve, cancel, reject, complete actions
+// ✅ Added optimistic updates
+// ✅ Added loading states for individual actions
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   CalendarDays, 
@@ -15,6 +18,13 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertCircle,
+  User,
+  Calendar,
+  DollarSign,
+  MoreVertical,
+  Check,
+  X,
+  RefreshCw,
 } from 'lucide-react';
 import API from '../../services/api';
 import toast from 'react-hot-toast';
@@ -36,6 +46,10 @@ const AdminBookings = () => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   
+  // ✅ Track action loading states per booking
+  const [actionLoading, setActionLoading] = useState({});
+  const submittingRef = useRef(new Set());
+  
   // ✅ Pagination state
   const [pagination, setPagination] = useState({
     page: 1,
@@ -50,7 +64,6 @@ const AdminBookings = () => {
       setLoading(true);
       setError(null);
       
-      // ✅ FIXED: Correct endpoint - matches backend route
       const response = await API.get('/bookings/admin/all', {
         params: {
           page,
@@ -60,11 +73,9 @@ const AdminBookings = () => {
         }
       });
       
-      // ✅ Handle different response formats
       const bookingsData = response.data.bookings || response.data.data || [];
       setBookings(bookingsData);
       
-      // ✅ Update pagination from response
       if (response.data.pagination) {
         setPagination({
           page: response.data.pagination.page || page,
@@ -141,6 +152,12 @@ const AdminBookings = () => {
         icon: CheckCircle,
         label: 'Confirmed'
       },
+      in_progress: {
+        bg: 'bg-blue-100',
+        text: 'text-blue-600',
+        icon: RefreshCw,
+        label: 'In Progress'
+      },
       completed: {
         bg: 'bg-green-100',
         text: 'text-green-600',
@@ -160,7 +177,109 @@ const AdminBookings = () => {
         label: 'Rejected'
       }
     };
-    return styles[status] || styles.pending_payment;
+    return styles[status] || styles.pending;
+  };
+
+  // ============================================================
+  // ✅ BOOKING ACTIONS - FIXED
+  // ============================================================
+
+  const handleAction = useCallback(async (bookingId, action, actionLabel) => {
+    // ✅ Prevent duplicate submissions
+    const key = `${bookingId}-${action}`;
+    if (submittingRef.current.has(key)) {
+      console.log(`⏳ ${action} already in progress for ${bookingId}`);
+      return;
+    }
+
+    // ✅ Confirm before action
+    if (!window.confirm(`Are you sure you want to ${actionLabel} this booking?`)) {
+      return;
+    }
+
+    try {
+      submittingRef.current.add(key);
+      setActionLoading(prev => ({ ...prev, [bookingId]: action }));
+
+      // ✅ Make API call
+      const response = await API.put(`/bookings/${bookingId}/${action}`);
+
+      if (response.data.success) {
+        // ✅ Update local state immediately (optimistic update)
+        setBookings(prev => 
+          prev.map(b => 
+            b._id === bookingId 
+              ? { 
+                  ...b, 
+                  status: action === 'confirm' ? 'confirmed' 
+                        : action === 'cancel' ? 'cancelled' 
+                        : action === 'reject' ? 'rejected' 
+                        : action === 'complete' ? 'completed' 
+                        : b.status,
+                  updatedAt: new Date().toISOString()
+                } 
+              : b
+          )
+        );
+
+        toast.success(`Booking ${actionLabel}ed successfully! 🎉`);
+
+        // ✅ Refresh to get updated data
+        setTimeout(() => {
+          fetchBookings(pagination.page, pagination.limit);
+        }, 1000);
+      } else {
+        toast.error(response.data.message || `Failed to ${actionLabel} booking`);
+      }
+    } catch (error) {
+      console.error(`❌ Error ${action} booking:`, error);
+      toast.error(error.response?.data?.message || `Failed to ${actionLabel} booking`);
+    } finally {
+      submittingRef.current.delete(key);
+      setActionLoading(prev => ({ ...prev, [bookingId]: null }));
+    }
+  }, [fetchBookings, pagination.page, pagination.limit]);
+
+  // ✅ Get available actions based on booking status
+  const getAvailableActions = (status) => {
+    const actions = [];
+    
+    switch(status) {
+      case 'pending':
+      case 'pending_payment':
+        actions.push(
+          { action: 'confirm', label: 'Confirm', icon: Check, color: 'text-[#0D9488] hover:bg-[#0D9488]/10' }
+        );
+        actions.push(
+          { action: 'reject', label: 'Reject', icon: X, color: 'text-red-500 hover:bg-red-500/10' }
+        );
+        break;
+      case 'paid':
+        actions.push(
+          { action: 'confirm', label: 'Confirm', icon: Check, color: 'text-[#0D9488] hover:bg-[#0D9488]/10' }
+        );
+        actions.push(
+          { action: 'cancel', label: 'Cancel', icon: X, color: 'text-red-500 hover:bg-red-500/10' }
+        );
+        break;
+      case 'confirmed':
+        actions.push(
+          { action: 'complete', label: 'Complete', icon: Check, color: 'text-green-500 hover:bg-green-500/10' }
+        );
+        actions.push(
+          { action: 'cancel', label: 'Cancel', icon: X, color: 'text-red-500 hover:bg-red-500/10' }
+        );
+        break;
+      case 'in_progress':
+        actions.push(
+          { action: 'complete', label: 'Complete', icon: Check, color: 'text-green-500 hover:bg-green-500/10' }
+        );
+        break;
+      default:
+        break;
+    }
+    
+    return actions;
   };
 
   // ✅ Loading state
@@ -226,17 +345,18 @@ const AdminBookings = () => {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <select
             className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           >
             <option value="all">All Status</option>
-            <option value="pending_payment">Pending Payment</option>
             <option value="pending">Pending</option>
+            <option value="pending_payment">Pending Payment</option>
             <option value="paid">Paid</option>
             <option value="confirmed">Confirmed</option>
+            <option value="in_progress">In Progress</option>
             <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
             <option value="rejected">Rejected</option>
@@ -265,7 +385,7 @@ const AdminBookings = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px]">
+            <table className="w-full min-w-[800px]">
               <thead className="bg-gray-50 dark:bg-gray-800">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Booking</th>
@@ -281,6 +401,8 @@ const AdminBookings = () => {
                 {bookings.map((booking) => {
                   const statusStyle = getStatusBadge(booking.status);
                   const StatusIcon = statusStyle.icon;
+                  const availableActions = getAvailableActions(booking.status);
+                  const isLoading = actionLoading[booking._id];
                   
                   return (
                     <tr key={booking._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition">
@@ -319,13 +441,33 @@ const AdminBookings = () => {
                         {booking.createdAt ? new Date(booking.createdAt).toLocaleDateString() : 'N/A'}
                       </td>
                       <td className="px-6 py-4">
-                        <button
-                          onClick={() => navigate(`/booking-details/${booking._id}`)}
-                          className="p-2 hover:bg-[#0D9488]/10 rounded-lg transition group"
-                          title="View Booking Details"
-                        >
-                          <Eye className="w-4 h-4 text-[#0D9488] group-hover:scale-110 transition-transform" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          {/* ✅ Action Buttons */}
+                          {availableActions.map((action) => (
+                            <button
+                              key={action.action}
+                              onClick={() => handleAction(booking._id, action.action, action.label)}
+                              disabled={!!isLoading}
+                              className={`p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition ${action.color} disabled:opacity-50 disabled:cursor-not-allowed`}
+                              title={`${action.label} booking`}
+                            >
+                              {isLoading === action.action ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <action.icon className="w-4 h-4" />
+                              )}
+                            </button>
+                          ))}
+                          
+                          {/* View Details */}
+                          <button
+                            onClick={() => navigate(`/booking-details/${booking._id}`)}
+                            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition group"
+                            title="View Booking Details"
+                          >
+                            <Eye className="w-4 h-4 text-[#0D9488] group-hover:scale-110 transition-transform" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -366,8 +508,8 @@ const AdminBookings = () => {
         </div>
       )}
 
-      {/* Footer with clear filter */}
-      <div className="flex justify-between items-center text-sm text-gray-500">
+      {/* Footer */}
+      <div className="flex justify-between items-center text-sm text-gray-500 flex-wrap gap-2">
         <span>Showing {bookings.length} of {pagination.total} bookings</span>
         {filter !== 'all' && (
           <button

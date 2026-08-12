@@ -1,5 +1,5 @@
 // frontend/src/services/authService.js
-// ✅ PRODUCTION-READY - Fixed baseURL, added verifyEmail and resendVerification functions
+// ✅ PRODUCTION-READY - Fixed login response handling
 
 import axios from "axios";
 
@@ -35,11 +35,15 @@ ERROR HANDLER
 ========================= */
 
 const handleError = (error) => {
-  throw {
+  // ✅ Improved error handling with more details
+  const errorResponse = {
     message: error.response?.data?.message || "Something went wrong",
     status: error.response?.status,
     data: error.response?.data,
   };
+  
+  console.error("❌ API Error:", errorResponse);
+  throw errorResponse;
 };
 
 /* =========================
@@ -57,38 +61,63 @@ export const registerUser = async (userData) => {
     
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
 /* =========================
-LOGIN
+LOGIN - FIXED
 ========================= */
 
 export const loginUser = async (userData) => {
   try {
-    const { data } = await API.post("/auth/login", userData);
-
+    const response = await API.post("/auth/login", userData);
+    
+    // ✅ Extract data from response
+    const data = response.data;
+    
+    console.log("🔐 Login response data:", data);
+    
+    // ✅ Store tokens if present
     if (data.accessToken) {
       localStorage.setItem("token", data.accessToken);
+      console.log("✅ Token stored in localStorage");
+    }
+    
+    if (data.refreshToken) {
+      localStorage.setItem("refreshToken", data.refreshToken);
+      console.log("✅ Refresh token stored in localStorage");
+    }
+    
+    if (data.user) {
       localStorage.setItem("user", JSON.stringify(data.user));
-
-      if (data.refreshToken) {
-        localStorage.setItem("refreshToken", data.refreshToken);
-      }
+      console.log("✅ User stored in localStorage");
     }
 
     if (data.email) {
       localStorage.setItem("pendingVerificationEmail", data.email);
     }
 
-    return data;
+    // ✅ Return the data directly (not wrapped)
+    return {
+      success: true,
+      ...data
+    };
   } catch (error) {
+    console.error("❌ Login error:", error);
+    
     // ✅ Handle 403 - Unverified email
-    if (error.status === 403 && error.data?.email) {
-      localStorage.setItem("pendingVerificationEmail", error.data.email);
+    if (error.response?.status === 403 && error.response?.data?.email) {
+      localStorage.setItem("pendingVerificationEmail", error.response.data.email);
     }
-    throw error;
+    
+    // ✅ Re-throw the error with better structure
+    throw {
+      message: error.response?.data?.message || "Login failed",
+      status: error.response?.status,
+      data: error.response?.data,
+      response: error.response
+    };
   }
 };
 
@@ -106,7 +135,7 @@ export const verifyEmail = async (token) => {
     
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -119,7 +148,7 @@ export const resendVerificationEmail = async (emailData) => {
     const { data } = await API.post("/auth/resend-verification", emailData);
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -132,7 +161,7 @@ export const forgotPassword = async (email) => {
     const { data } = await API.post("/auth/forgot-password", { email });
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -145,7 +174,7 @@ export const resetPassword = async (token, password) => {
     const { data } = await API.post(`/auth/reset-password/${token}`, { password });
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -203,7 +232,7 @@ export const logoutUser = () => {
 };
 
 /* =========================
-REFRESH TOKEN
+REFRESH TOKEN - FIXED ENDPOINT
 ========================= */
 
 export const refreshAccessToken = async () => {
@@ -213,21 +242,25 @@ export const refreshAccessToken = async () => {
       throw new Error("No refresh token available");
     }
 
-    const { data } = await API.post("/auth/refresh-token", { 
+    // ✅ FIXED: Use /auth/refresh (not /auth/refresh-token)
+    const { data } = await API.post("/auth/refresh", { 
       refreshToken: storedRefreshToken 
     });
     
     if (data.accessToken) {
       localStorage.setItem("token", data.accessToken);
-      if (data.refreshToken) {
-        localStorage.setItem("refreshToken", data.refreshToken);
-      }
+      console.log("✅ Access token refreshed");
+    }
+    
+    if (data.refreshToken) {
+      localStorage.setItem("refreshToken", data.refreshToken);
     }
     
     return data;
   } catch (error) {
+    console.error("❌ Refresh token failed:", error);
     logoutUser();
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -240,7 +273,7 @@ export const changePassword = async (passwordData) => {
     const { data } = await API.put("/auth/change-password", passwordData);
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 
@@ -253,7 +286,7 @@ export const updateProfile = async (profileData) => {
     const { data } = await API.put("/auth/profile", profileData);
     return data;
   } catch (error) {
-    handleError(error);
+    throw handleError(error);
   }
 };
 

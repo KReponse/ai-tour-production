@@ -1,7 +1,7 @@
 // frontend/src/pages/provider/BookingDetails.jsx
-// ✅ Provider Booking Details - Reuses the existing booking details component with provider context
+// ✅ COMPLETE FIXED - Single "Chat with Traveler" button with avatar/logo support
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Calendar,
@@ -30,11 +30,15 @@ import {
   Play,
   Video,
   Eye,
+  Copy,
+  Check,
+  Send,
 } from 'lucide-react';
 import Card, { CardContent } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { getBookingById } from '../../services/bookingService';
 import { useAuth } from '../../contexts/AuthContext';
+import { getOrCreateRoom } from '../../services/chatService';
 import toast from 'react-hot-toast';
 
 // ✅ FIXED: Import mediaHelpers for consistent image and video handling
@@ -49,6 +53,13 @@ import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo 
 // White : #FFFFFF
 // ===============================
 
+// ✅ Helper to get traveler avatar
+const getTravelerAvatar = (traveler) => {
+  if (!traveler) return null;
+  // Priority: logo > profileImage > avatar
+  return traveler.logo || traveler.profileImage || traveler.avatar || null;
+};
+
 const ProviderBookingDetails = () => {
   const { bookingId } = useParams();
   const navigate = useNavigate();
@@ -56,6 +67,8 @@ const ProviderBookingDetails = () => {
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
+  const [avatarError, setAvatarError] = useState(false);
 
   useEffect(() => {
     if (bookingId) {
@@ -137,6 +150,76 @@ const ProviderBookingDetails = () => {
   const getBookingCode = () => {
     return booking?.bookingCode || booking?._id?.slice(-8)?.toUpperCase() || 'N/A';
   };
+
+  // ✅ Get traveler info
+  const getTraveler = () => {
+    return booking?.user || null;
+  };
+
+  const getTravelerName = () => {
+    const traveler = getTraveler();
+    return traveler?.name || booking?.fullName || 'Traveler';
+  };
+
+  const getTravelerEmail = () => {
+    const traveler = getTraveler();
+    return traveler?.email || booking?.email || null;
+  };
+
+  const getTravelerPhone = () => {
+    const traveler = getTraveler();
+    return traveler?.phone || booking?.phone || null;
+  };
+
+  // ✅ Get traveler avatar
+  const getTravelerAvatarUrl = () => {
+    const traveler = getTraveler();
+    const avatarPath = getTravelerAvatar(traveler);
+    if (avatarPath) {
+      return getImageUrl(avatarPath);
+    }
+    return null;
+  };
+
+  // ✅ Copy to clipboard
+  const copyToClipboard = useCallback((text, field) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      toast.success(`${field} copied to clipboard!`);
+      setTimeout(() => setCopiedField(null), 2000);
+    }).catch(() => {
+      toast.error('Failed to copy');
+    });
+  }, []);
+
+  // ✅ Handle Chat with Traveler
+  const handleChatWithTraveler = useCallback(async () => {
+    const travelerId = booking?.user?._id || booking?.userId;
+    
+    if (!travelerId) {
+      toast.error('Traveler information not available');
+      return;
+    }
+
+    if (!user) {
+      toast.error('Please login to chat');
+      navigate('/login');
+      return;
+    }
+
+    try {
+      const response = await getOrCreateRoom(travelerId);
+      if (response.success) {
+        navigate(`/chat/${response.room._id}`);
+      } else {
+        toast.error(response.message || 'Failed to start chat');
+      }
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      toast.error('Failed to start chat. Please try again.');
+    }
+  }, [booking, user, navigate]);
 
   // ✅ Get status config
   const getStatusConfig = (status) => {
@@ -360,6 +443,13 @@ const ProviderBookingDetails = () => {
   const entityTitle = getEntityTitle();
   const entityLocation = getEntityLocation();
   const media = getEntityMedia(entity);
+  
+  // ✅ Traveler info
+  const traveler = getTraveler();
+  const travelerName = getTravelerName();
+  const travelerEmail = getTravelerEmail();
+  const travelerPhone = getTravelerPhone();
+  const travelerAvatarUrl = getTravelerAvatarUrl();
 
   // ✅ Helper to check if JWT
   const isJWT = (str) => {
@@ -455,31 +545,125 @@ const ProviderBookingDetails = () => {
             )}
           </div>
 
-          {/* Contact Information */}
-          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
+          {/* ✅ CONTACT TRAVELER - With Avatar */}
+          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border-2 border-[#0D9488]/20 dark:border-[#0D9488]/30 p-6">
             <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
               <User className="w-5 h-5 text-[#0D9488]" />
-              Contact Information
+              Contact Traveler
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Full Name</label>
-                <p className="text-[#374151] dark:text-white font-medium">
-                  {booking.user?.name || booking.fullName || 'N/A'}
-                </p>
+            
+            <div className="space-y-4">
+              {/* Traveler Name with Avatar */}
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                <div className="flex items-center gap-3">
+                  {/* ✅ Traveler Avatar with logo support */}
+                  <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex-shrink-0 flex items-center justify-center text-white font-bold">
+                    {travelerAvatarUrl && !avatarError ? (
+                      <img
+                        src={travelerAvatarUrl}
+                        alt={travelerName}
+                        className="w-full h-full object-cover"
+                        onError={() => setAvatarError(true)}
+                      />
+                    ) : (
+                      travelerName.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Traveler</p>
+                    <p className="font-semibold text-[#374151] dark:text-white">{travelerName}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => copyToClipboard(travelerName, 'Name')}
+                  className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition"
+                >
+                  {copiedField === 'Name' ? (
+                    <Check className="w-4 h-4 text-[#0D9488]" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-gray-400 hover:text-[#0D9488]" />
+                  )}
+                </button>
               </div>
-              <div>
-                <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Email</label>
-                <p className="text-[#374151] dark:text-white font-medium">
-                  {booking.user?.email || booking.email || 'N/A'}
-                </p>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Phone</label>
-                <p className="text-[#374151] dark:text-white font-medium">
-                  {booking.user?.phone || booking.phone || 'N/A'}
-                </p>
-              </div>
+
+              {/* Email */}
+              {travelerEmail && (
+                <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#F59E0B]/10 flex items-center justify-center">
+                      <Mail className="w-5 h-5 text-[#F59E0B]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Email</p>
+                      <p className="font-medium text-[#374151] dark:text-white truncate max-w-[180px] sm:max-w-[250px]">
+                        {travelerEmail}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => copyToClipboard(travelerEmail, 'Email')}
+                      className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition"
+                    >
+                      {copiedField === 'Email' ? (
+                        <Check className="w-4 h-4 text-[#0D9488]" />
+                      ) : (
+                        <Copy className="w-4 h-4 text-gray-400 hover:text-[#0D9488]" />
+                      )}
+                    </button>
+                    <a
+                      href={`mailto:${travelerEmail}`}
+                      className="p-2 hover:bg-[#0D9488]/10 rounded-lg transition text-gray-400 hover:text-[#0D9488]"
+                      title="Send Email"
+                    >
+                      <Send className="w-4 h-4" />
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Phone */}
+              {travelerPhone && (
+                <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#0D9488]/10 flex items-center justify-center">
+                      <Phone className="w-5 h-5 text-[#0D9488]" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Phone</p>
+                      <p className="font-medium text-[#374151] dark:text-white">{travelerPhone}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => copyToClipboard(travelerPhone, 'Phone')}
+                      className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition"
+                    >
+                      {copiedField === 'Phone' ? (
+                        <Check className="w-4 h-4 text-[#0D9488]" />
+                      ) : (
+                        <Copy className="w-4 h-4 text-gray-400 hover:text-[#0D9488]" />
+                      )}
+                    </button>
+                    <a
+                      href={`tel:${travelerPhone}`}
+                      className="p-2 hover:bg-[#0D9488]/10 rounded-lg transition text-gray-400 hover:text-[#0D9488]"
+                      title="Call"
+                    >
+                      <Phone className="w-4 h-4" />
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ SINGLE CHAT BUTTON */}
+              <button
+                onClick={handleChatWithTraveler}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-semibold hover:scale-[1.02] transition flex items-center justify-center gap-2 shadow-lg shadow-[#0D9488]/30"
+              >
+                <MessageCircle className="w-5 h-5" />
+                Chat with Traveler
+              </button>
             </div>
           </div>
         </div>
@@ -530,7 +714,7 @@ const ProviderBookingDetails = () => {
             </div>
           </div>
 
-          {/* ✅ Cancellation Reason - Only show if cancelled */}
+          {/* Cancellation Reason */}
           {booking.status === 'cancelled' && (
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
               <h2 className="text-lg font-bold text-red-600 dark:text-red-400 mb-4 flex items-center gap-2">
@@ -568,15 +752,6 @@ const ProviderBookingDetails = () => {
         >
           Back to Bookings
         </button>
-        {booking.user && (
-          <button
-            onClick={() => navigate(`/messages?userId=${booking.user._id}`)}
-            className="px-6 py-3 rounded-xl bg-[#0D9488] text-white font-semibold hover:bg-[#0D9488]/90 transition flex items-center gap-2"
-          >
-            <MessageCircle className="w-4 h-4" />
-            Contact Traveler
-          </button>
-        )}
         {entity && (
           <Link
             to={`/listing/${entity._id}`}

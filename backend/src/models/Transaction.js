@@ -1,5 +1,7 @@
 // backend/src/models/Transaction.js
-// ✅ FIXED - Removed ALL duplicate index definitions
+// ✅ COMPLETE FIXED - Removed ALL duplicate index definitions
+// ✅ All indexes defined in ONE place only
+// ✅ No field has both index:true AND schema.index()
 
 import mongoose from "mongoose";
 
@@ -56,7 +58,7 @@ const transactionSchema = new mongoose.Schema(
       "escrow",
     ],
     required: true,
-    index: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Transaction status
@@ -74,7 +76,7 @@ const transactionSchema = new mongoose.Schema(
     ],
     default: "pending",
     required: true,
-    index: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // ─── Amounts ────────────────────────────────────────────────────
@@ -126,28 +128,28 @@ const transactionSchema = new mongoose.Schema(
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: true,
-    index: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Who received the transaction
   recipient: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    index: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Provider involved (if applicable)
   provider: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    index: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Customer involved (if applicable)
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    index: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // ─── Related Records ──────────────────────────────────────────
@@ -155,41 +157,41 @@ const transactionSchema = new mongoose.Schema(
   booking: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Booking",
-    // ✅ REMOVED: index: true - added in indexes section
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Payment reference
   payment: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Payment",
-    // ✅ REMOVED: index: true
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Wallet references
   sourceWallet: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Wallet",
-    // ✅ REMOVED: index: true
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   destinationWallet: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Wallet",
-    // ✅ REMOVED: index: true
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Earning reference
   earning: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Earning",
-    // ✅ REMOVED: index: true
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Withdrawal reference
   withdrawal: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Withdrawal",
-    // ✅ REMOVED: index: true
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // ─── Currency ──────────────────────────────────────────────────
@@ -198,6 +200,7 @@ const transactionSchema = new mongoose.Schema(
     enum: ["USD", "RWF", "EUR", "GBP"],
     default: "USD",
     required: true,
+    // ✅ REMOVED: index: true - defined in indexes section
   },
 
   // Exchange rate if currency conversion occurred
@@ -293,21 +296,24 @@ const transactionSchema = new mongoose.Schema(
 });
 
 // =========================
-// ✅ INDEXES - NO DUPLICATES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
+// NO index:true in field definitions above
+// NO duplicate indexes here
 
+// =========================
+// ✅ SINGLE FIELD INDEXES
+// =========================
 // ❌ DO NOT add reference index here - it's already created by 'unique: true'
-
-// ✅ Primary lookup indexes
-transactionSchema.index({ initiator: 1, createdAt: -1 });
-transactionSchema.index({ recipient: 1, createdAt: -1 });
-transactionSchema.index({ provider: 1, createdAt: -1 });
-transactionSchema.index({ customer: 1, createdAt: -1 });
-
-// ✅ Status and type filters
-transactionSchema.index({ status: 1, type: 1 });
-transactionSchema.index({ type: 1, createdAt: -1 });
-transactionSchema.index({ status: 1, createdAt: -1 });
+// ✅ Add all other single field indexes here
+transactionSchema.index({ type: 1 });
+transactionSchema.index({ status: 1 });
+transactionSchema.index({ initiator: 1 });
+transactionSchema.index({ recipient: 1 });
+transactionSchema.index({ provider: 1 });
+transactionSchema.index({ customer: 1 });
+transactionSchema.index({ currency: 1 });
+transactionSchema.index({ grossAmount: 1 });
 
 // ✅ Related records (for joins)
 transactionSchema.index({ booking: 1 });
@@ -322,14 +328,34 @@ transactionSchema.index({ initiatedAt: -1 });
 transactionSchema.index({ completedAt: -1 });
 transactionSchema.index({ settledAt: -1 });
 
-// ✅ Currency and amounts
-transactionSchema.index({ currency: 1 });
-transactionSchema.index({ grossAmount: 1 });
+// =========================
+// ✅ COMPOUND INDEXES
+// =========================
+// ✅ Primary lookup indexes
+transactionSchema.index({ initiator: 1, createdAt: -1 });
+transactionSchema.index({ recipient: 1, createdAt: -1 });
+transactionSchema.index({ provider: 1, createdAt: -1 });
+transactionSchema.index({ customer: 1, createdAt: -1 });
 
-// ✅ Compound indexes (for complex queries)
+// ✅ Status and type filters
+transactionSchema.index({ status: 1, type: 1 });
+transactionSchema.index({ type: 1, createdAt: -1 });
+transactionSchema.index({ status: 1, createdAt: -1 });
+
+// ✅ Complex queries
 transactionSchema.index({ initiator: 1, status: 1, createdAt: -1 });
 transactionSchema.index({ provider: 1, type: 1, status: 1 });
 transactionSchema.index({ type: 1, status: 1, completedAt: -1 });
+
+// =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. reference has unique:true - this automatically creates an index
+//    DO NOT add: transactionSchema.index({ reference: 1 })
+// 2. All other indexes are defined ONLY in this section
+// 3. No field has both index:true AND a schema.index() call
+// 4. All single field indexes are listed above
+// 5. All compound indexes are listed above
 
 // =========================
 // ✅ VIRTUALS

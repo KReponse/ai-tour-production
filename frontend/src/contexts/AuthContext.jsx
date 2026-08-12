@@ -1,5 +1,6 @@
 // frontend/src/contexts/AuthContext.jsx
 // ✅ COMPLETE FIXED - Added axios interceptor and fixed refresh endpoint
+// ✅ ADDED: userId to localStorage for socket reconnection
 
 import {
   createContext,
@@ -59,6 +60,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("user");
     localStorage.removeItem("token");
     localStorage.removeItem("refreshToken");
+    localStorage.removeItem("userId"); // ✅ Also remove userId
     setUser(null);
     setToken(null);
     setRefreshToken(null);
@@ -87,6 +89,7 @@ export const AuthProvider = ({ children }) => {
         const userData = response.data.user;
         setUser(userData);
         localStorage.setItem("user", JSON.stringify(userData));
+        localStorage.setItem("userId", userData._id); // ✅ Store userId for socket
         console.log("✅ User refreshed:", userData.email);
         return true;
       }
@@ -116,10 +119,15 @@ export const AuthProvider = ({ children }) => {
         const savedRefreshToken = localStorage.getItem("refreshToken");
 
         if (savedUser && savedToken) {
-          setUser(JSON.parse(savedUser));
+          const userData = JSON.parse(savedUser);
+          setUser(userData);
           setToken(savedToken);
           if (savedRefreshToken) {
             setRefreshToken(savedRefreshToken);
+          }
+          // ✅ Restore userId
+          if (userData._id) {
+            localStorage.setItem("userId", userData._id);
           }
           await refreshUser();
         }
@@ -155,8 +163,10 @@ export const AuthProvider = ({ children }) => {
     if (refreshTokenData) {
       localStorage.setItem("refreshToken", refreshTokenData);
     }
+    localStorage.setItem("userId", userData._id); // ✅ Store userId for socket
 
     console.log("✅ User logged in:", userData.email);
+    console.log("✅ User ID stored for socket:", userData._id);
     return true;
   }, []);
 
@@ -180,6 +190,9 @@ export const AuthProvider = ({ children }) => {
     
     setUser(userData);
     localStorage.setItem("user", JSON.stringify(userData));
+    if (userData._id) {
+      localStorage.setItem("userId", userData._id);
+    }
     console.log("✅ User updated:", userData.email);
   }, []);
 
@@ -225,6 +238,9 @@ export const AuthProvider = ({ children }) => {
           localStorage.setItem("refreshToken", response.data.refreshToken);
         }
         
+        // ✅ Refresh user to get updated userId
+        await refreshUser();
+        
         console.log("✅ Token refreshed successfully");
         
         // ✅ Resolve all queued requests with the new token
@@ -248,7 +264,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       isRefreshing.current = false;
     }
-  }, [clearSession]);
+  }, [clearSession, refreshUser]);
 
   /*
   =========================

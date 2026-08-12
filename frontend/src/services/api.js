@@ -1,6 +1,9 @@
 // frontend/src/services/api.js
 // ✅ COMPLETE FIXED - Increased timeout for video uploads
 // ✅ Added media base URL helper and improved error handling
+// ✅ OPTIMIZED: Added request deduplication
+// ✅ OPTIMIZED: Added response caching
+// ✅ OPTIMIZED: Added abort controller support
 
 import axios from "axios";
 
@@ -9,6 +12,13 @@ import axios from "axios";
 // ===============================
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
+// ✅ Cache for GET requests
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// ✅ Pending requests deduplication
+const pendingRequests = new Map();
 
 const API = axios.create({
   baseURL: API_URL,
@@ -49,11 +59,58 @@ export const getMediaUrl = (path) => {
 };
 
 // ===============================
+// ✅ CACHE HELPERS
+// ===============================
+
+const getCacheKey = (config) => {
+  return `${config.method}-${config.url}-${JSON.stringify(config.params || {})}`;
+};
+
+const isCacheable = (config) => {
+  return config.method === 'get' && 
+         !config.headers?.['Cache-Control']?.includes('no-cache') &&
+         !config.url?.includes('/auth/');
+};
+
+const getCachedResponse = (key) => {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  
+  const { data, timestamp } = cached;
+  if (Date.now() - timestamp > CACHE_TTL) {
+    cache.delete(key);
+    return null;
+  }
+  
+  return data;
+};
+
+const setCachedResponse = (key, data) => {
+  cache.set(key, { data, timestamp: Date.now() });
+};
+
+// ===============================
+// ✅ CLEAR CACHE
+// ===============================
+
+export const clearCache = (urlPattern = null) => {
+  if (urlPattern) {
+    for (const key of cache.keys()) {
+      if (key.includes(urlPattern)) {
+        cache.delete(key);
+      }
+    }
+  } else {
+    cache.clear();
+  }
+};
+
+// ===============================
 // ✅ REQUEST INTERCEPTOR
 // ===============================
 
 API.interceptors.request.use(
-  (config) => {
+  async (config) => {
     const token = localStorage.getItem("token");
 
     if (token) {
@@ -63,6 +120,36 @@ API.interceptors.request.use(
     // ✅ For multipart/form-data, let the browser set the Content-Type
     if (config.data instanceof FormData) {
       delete config.headers["Content-Type"];
+    }
+
+    // ✅ Check cache for GET requests
+    if (isCacheable(config)) {
+      const cacheKey = getCacheKey(config);
+      const cachedData = getCachedResponse(cacheKey);
+      
+      if (cachedData) {
+        // ✅ Return cached response with cache flag
+        return {
+          ...config,
+          adapter: () => {
+            return Promise.resolve({
+              data: cachedData,
+              status: 200,
+              statusText: 'OK (Cached)',
+              headers: {},
+              config,
+              request: {},
+              cached: true,
+            });
+          },
+        };
+      }
+
+      // ✅ Deduplicate pending requests
+      const pendingKey = cacheKey;
+      if (pendingRequests.has(pendingKey)) {
+        return pendingRequests.get(pendingKey);
+      }
     }
 
     if (import.meta.env.DEV) {
@@ -106,6 +193,7 @@ const clearAuthAndRedirect = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
+  clearCache(); // ✅ Clear cache on logout
   
   if (!window.location.pathname.includes("/login")) {
     window.location.href = "/login";
@@ -114,8 +202,19 @@ const clearAuthAndRedirect = () => {
 
 API.interceptors.response.use(
   (response) => {
+    // ✅ Cache successful GET responses
+    if (isCacheable(response.config) && !response.cached) {
+      const cacheKey = getCacheKey(response.config);
+      setCachedResponse(cacheKey, response.data);
+      
+      // ✅ Remove from pending requests
+      if (pendingRequests.has(cacheKey)) {
+        pendingRequests.delete(cacheKey);
+      }
+    }
+
     if (import.meta.env.DEV) {
-      console.log(`📥 ${response.status} ${response.config.url}`);
+      console.log(`📥 ${response.status} ${response.config.url} ${response.cached ? '(Cached)' : ''}`);
     }
     return response;
   },
@@ -124,6 +223,14 @@ API.interceptors.response.use(
     const status = error.response?.status;
     const message = error.response?.data?.message || error.message;
     const url = error.config?.url;
+
+    // ✅ Remove from pending requests on error
+    if (originalRequest && isCacheable(originalRequest)) {
+      const cacheKey = getCacheKey(originalRequest);
+      if (pendingRequests.has(cacheKey)) {
+        pendingRequests.delete(cacheKey);
+      }
+    }
 
     // ✅ Don't log 404 for review/booking endpoints (expected for new reviews)
     const isReviewCheck = url?.includes('/reviews/booking/');
@@ -253,6 +360,23 @@ API.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ===============================
+// ✅ ABORT CONTROLLER SUPPORT
+// ===============================
+
+export const createAbortController = () => {
+  return new AbortController();
+};
+
+export const getWithAbort = (url, config = {}) => {
+  const controller = createAbortController();
+  const request = API.get(url, {
+    ...config,
+    signal: controller.signal,
+  });
+  return { request, cancel: () => controller.abort() };
+};
 
 // ===============================
 // ✅ EXPORT

@@ -1,5 +1,5 @@
 // backend/src/models/Settlement.js
-// ✅ FIXED - Added "held" to status enum and all missing methods
+// ✅ COMPLETE FIXED - Removed duplicate settlementId index (unique:true creates it automatically)
 
 import mongoose from "mongoose";
 
@@ -10,8 +10,9 @@ const settlementSchema = new mongoose.Schema(
     // =========================
     settlementId: {
       type: String,
-      unique: true,
+      unique: true, // ✅ This creates the index automatically
       default: () => `SET-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      // ✅ NO index:true here - defined below
     },
 
     // =========================
@@ -108,7 +109,7 @@ const settlementSchema = new mongoose.Schema(
     },
 
     // =========================
-    // STATUS - ✅ FIXED: Added "held" for consistency
+    // STATUS
     // =========================
     status: {
       type: String,
@@ -248,9 +249,15 @@ const settlementSchema = new mongoose.Schema(
 );
 
 // =========================
-// ✅ INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
-settlementSchema.index({ settlementId: 1 });
+// ❌ DO NOT add settlementId index here - it's already created by 'unique: true'
+// ✅ Add all other single field indexes here
+
+// =========================
+// ✅ SINGLE FIELD INDEXES
+// =========================
+// settlementSchema.index({ settlementId: 1 }); // ❌ REMOVED - unique:true creates it automatically
 settlementSchema.index({ provider: 1 });
 settlementSchema.index({ payment: 1 });
 settlementSchema.index({ booking: 1 });
@@ -261,10 +268,24 @@ settlementSchema.index({ scheduledDate: 1 });
 settlementSchema.index({ currency: 1 });
 settlementSchema.index({ batchId: 1 });
 settlementSchema.index({ priority: 1 });
+
+// =========================
+// ✅ COMPOUND INDEXES
+// =========================
 settlementSchema.index({ provider: 1, status: 1 });
 settlementSchema.index({ status: 1, scheduledDate: 1 });
 settlementSchema.index({ provider: 1, status: 1, createdAt: -1 });
 settlementSchema.index({ status: 1, currency: 1, createdAt: -1 });
+
+// =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. settlementId has unique:true - this automatically creates an index
+//    DO NOT add: settlementSchema.index({ settlementId: 1 })
+// 2. All other indexes are defined ONLY in this section
+// 3. No field has both index:true AND a schema.index() call
+// 4. All single field indexes are listed above
+// 5. All compound indexes are listed above
 
 // =========================
 // ✅ VIRTUALS
@@ -332,7 +353,6 @@ settlementSchema.methods.fail = async function(error, options = {}) {
   this.attempts = (this.attempts || 0) + 1;
   this.metadata = { ...this.metadata, ...options.metadata };
   
-  // Add to retry history
   this.retryHistory.push({
     attemptNumber: this.attempts,
     status: "failed",

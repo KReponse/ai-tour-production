@@ -1,5 +1,5 @@
 // backend/src/models/ChatRoom.js
-// ✅ UPDATED - Uses "listing" instead of "tour"
+// ✅ COMPLETE FIXED - Removed problematic unique index
 
 import mongoose from 'mongoose';
 
@@ -11,11 +11,14 @@ const chatRoomSchema = new mongoose.Schema({
   }],
   booking: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Booking'
+    ref: 'Booking',
+    default: null,
+    index: false, // No unique index
   },
-  listing: {  // Changed from 'tour' to 'listing'
+  listing: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Listing'
+    ref: 'Listing',
+    default: null,
   },
   lastMessage: {
     type: mongoose.Schema.Types.ObjectId,
@@ -28,20 +31,27 @@ const chatRoomSchema = new mongoose.Schema({
   unreadCount: {
     type: Map,
     of: Number,
-    default: {}
+    default: () => new Map(),
   },
   isActive: {
     type: Boolean,
     default: true
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+}, {
+  timestamps: true, // ✅ Use timestamps instead of custom createdAt
 });
 
-// Ensure unique chat room between two users for same booking/listing
-chatRoomSchema.index({ participants: 1, booking: 1 }, { unique: true });
+// ✅ Index for finding rooms by participants (non-unique)
+chatRoomSchema.index({ participants: 1 });
+
+// ✅ Compound index for querying (non-unique)
+chatRoomSchema.index({ participants: 1, lastMessageAt: -1 });
+
+// ✅ Index for active rooms
+chatRoomSchema.index({ participants: 1, isActive: 1 });
+
+// ❌ REMOVED: Unique index causing duplicate key errors
+// chatRoomSchema.index({ participants: 1, booking: 1 }, { unique: true });
 
 const ChatRoom = mongoose.model('ChatRoom', chatRoomSchema);
 export default ChatRoom;

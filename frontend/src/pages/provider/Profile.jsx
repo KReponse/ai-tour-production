@@ -1,9 +1,7 @@
 // src/pages/provider/Profile.jsx
-// ✅ FIXED - Private provider dashboard with correct API URL
-// ✅ ADDED: WhatsApp support
-// ✅ FIXED: Better stats handling with fallbacks
+// ✅ COMPLETE FIXED - Using correct endpoint /listings/my
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   MapPin,
@@ -32,11 +30,11 @@ import {
   Twitter,
   Linkedin,
   Youtube,
+  Camera,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-
-// ✅ FIXED: Use API client for consistent base URL
 import API from '../../services/api';
+import toast from 'react-hot-toast';
 
 // ===============================
 // AI TOUR COLORS
@@ -51,7 +49,22 @@ const getBaseUrl = () => {
   return url.replace(/\/api$/, '');
 };
 
-// ✅ Format business hours for display
+// ✅ Helper for image URLs
+const getImageUrl = (path) => {
+  if (!path) return null;
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('data:image')) return path;
+  
+  const baseUrl = getBaseUrl();
+  
+  if (path.startsWith('/uploads/')) {
+    return `${baseUrl}${path}`;
+  }
+  
+  return `${baseUrl}/uploads/${path}`;
+};
+
+// ✅ Format business hours
 const formatBusinessHours = (businessHours) => {
   if (!businessHours) return null;
   
@@ -71,21 +84,6 @@ const formatBusinessHours = (businessHours) => {
   }).filter(Boolean);
 };
 
-// ✅ Helper for image URLs
-const getImageUrl = (path) => {
-  if (!path) return null;
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  if (path.startsWith('data:image')) return path;
-  
-  const baseUrl = getBaseUrl();
-  
-  if (path.startsWith('/uploads/')) {
-    return `${baseUrl}${path}`;
-  }
-  
-  return `${baseUrl}/uploads/${path}`;
-};
-
 // ✅ Helper to get WhatsApp number
 const getWhatsAppNumber = (profile) => {
   if (profile?.whatsapp) return profile.whatsapp;
@@ -97,19 +95,21 @@ const getWhatsAppNumber = (profile) => {
 const Profile = () => {
   const { user: authUser } = useAuth();
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
+  
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [profile, setProfile] = useState(null);
   const [stats, setStats] = useState({
-    totalTours: 0,
     totalListings: 0,
     totalBookings: 0,
-    pendingBookings: 0,
-    completedBookings: 0,
-    totalTravelers: 0,
     totalRevenue: 0,
     averageRating: 0,
     totalReviews: 0,
+    memberSince: null,
+    pendingBookings: 0,
+    completedBookings: 0,
   });
 
   useEffect(() => {
@@ -122,27 +122,31 @@ const Profile = () => {
       setError(null);
 
       const token = localStorage.getItem('token');
-      
       if (!token) {
-        console.warn('⚠️ No token found, redirecting to login...');
         setError('Please login to view your profile');
         setTimeout(() => navigate('/login'), 2000);
         setLoading(false);
         return;
       }
 
-      console.log('📌 Fetching provider profile from: /provider-profiles/me');
+      console.log('📌 Fetching provider profile...');
 
-      // ✅ FIXED: Use API client - NO duplicate /api
-      const response = await API.get('/provider-profiles/me');
-
-      if (response.data.success) {
-        setProfile(response.data.profile);
-      } else {
-        setError(response.data.message || 'Failed to load profile');
+      // ✅ Fetch provider profile
+      const profileResponse = await API.get('/provider-profiles/me');
+      
+      if (profileResponse.data.success) {
+        setProfile(profileResponse.data.profile);
+        
+        // Set member since from profile
+        if (profileResponse.data.profile?.createdAt) {
+          setStats(prev => ({
+            ...prev,
+            memberSince: profileResponse.data.profile.createdAt,
+          }));
+        }
       }
 
-      // ✅ Fetch provider stats - FIXED with multiple endpoints
+      // ✅ Fetch provider stats from correct endpoints
       await fetchProviderStats();
 
     } catch (err) {
@@ -150,7 +154,6 @@ const Profile = () => {
       
       if (err.response?.status === 401) {
         localStorage.removeItem('token');
-        localStorage.removeItem('refreshToken');
         setError('Session expired. Please login again.');
         setTimeout(() => navigate('/login'), 2000);
       } else if (err.response?.status === 403) {
@@ -165,66 +168,147 @@ const Profile = () => {
     }
   };
 
-  // ✅ Separate function for fetching stats
+  // ✅ Fetch real stats from backend using correct endpoints
   const fetchProviderStats = async () => {
     try {
-      // Try analytics endpoint
+      // 1. Get listing count - ✅ USE /listings/my (correct endpoint from listingRoutes.js)
       try {
-        const statsResponse = await API.get('/analytics/provider');
-        if (statsResponse.data.success) {
-          const analytics = statsResponse.data.analytics || statsResponse.data.data || {};
+        console.log('📌 Fetching listings from /listings/my...');
+        const listingsResponse = await API.get('/listings/my');
+        console.log('📌 Listings response:', listingsResponse.data);
+        
+        if (listingsResponse.data.success) {
+          const listings = listingsResponse.data.listings || listingsResponse.data.data || [];
+          const listingsCount = listings.length || 0;
+          
           setStats(prev => ({
             ...prev,
-            totalTours: analytics.totalTours || analytics.totalListings || 0,
-            totalListings: analytics.totalListings || analytics.totalTours || 0,
-            totalBookings: analytics.totalBookings || 0,
-            pendingBookings: analytics.pendingBookings || 0,
-            completedBookings: analytics.completedBookings || 0,
-            totalTravelers: analytics.totalTravelers || 0,
-            totalRevenue: analytics.totalRevenue || 0,
-            averageRating: analytics.averageRating || 0,
-            totalReviews: analytics.totalReviews || 0,
+            totalListings: listingsCount,
           }));
-          return;
+          console.log('✅ Total listings:', listingsCount);
         }
-      } catch (analyticsError) {
-        console.warn('⚠️ Analytics endpoint failed, trying earnings:', analyticsError.message);
+      } catch (e) {
+        console.warn('⚠️ Could not fetch from /listings/my:', e.message);
+        // Set to 0 as fallback
+        setStats(prev => ({
+          ...prev,
+          totalListings: 0,
+        }));
       }
 
-      // Try earnings endpoint as fallback
+      // 2. Get booking stats - ✅ Use /bookings/provider
       try {
-        const earningsResponse = await API.get('/earnings/provider');
-        if (earningsResponse.data.success) {
-          const earnings = earningsResponse.data.earnings || earningsResponse.data.data || {};
-          setStats(prev => ({
-            ...prev,
-            totalRevenue: earnings.totalEarnings || earnings.totalRevenue || 0,
-          }));
-        }
-      } catch (earningsError) {
-        console.warn('⚠️ Earnings endpoint failed:', earningsError.message);
-      }
-
-      // Try bookings endpoint for booking counts
-      try {
+        console.log('📌 Fetching bookings from /bookings/provider...');
         const bookingsResponse = await API.get('/bookings/provider');
         if (bookingsResponse.data.success) {
-          const bookings = bookingsResponse.data.bookings || [];
-          const pending = bookings.filter(b => b.status === 'pending' || b.status === 'pending_payment').length;
-          const completed = bookings.filter(b => b.status === 'completed' || b.status === 'confirmed').length;
+          const bookings = bookingsResponse.data.bookings || bookingsResponse.data.data || [];
+          const pending = bookings.filter(b => 
+            b.status === 'pending' || b.status === 'pending_payment'
+          ).length;
+          const completed = bookings.filter(b => 
+            b.status === 'completed' || b.status === 'confirmed'
+          ).length;
+          
           setStats(prev => ({
             ...prev,
-            totalBookings: bookings.length,
+            totalBookings: bookings.length || 0,
             pendingBookings: pending,
             completedBookings: completed,
           }));
+          console.log('✅ Total bookings:', bookings.length);
         }
-      } catch (bookingsError) {
-        console.warn('⚠️ Bookings endpoint failed:', bookingsError.message);
+      } catch (e) {
+        console.warn('⚠️ Could not fetch bookings:', e.message);
+      }
+
+      // 3. Get earnings/revenue - ✅ Use /earnings/provider
+      try {
+        console.log('📌 Fetching earnings from /earnings/provider...');
+        const earningsResponse = await API.get('/earnings/provider');
+        if (earningsResponse.data.success) {
+          const earnings = earningsResponse.data.totalEarnings || 
+                          earningsResponse.data.totalRevenue || 
+                          earningsResponse.data.earnings?.totalEarnings || 0;
+          setStats(prev => ({
+            ...prev,
+            totalRevenue: earnings || 0,
+          }));
+          console.log('✅ Total revenue:', earnings);
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not fetch earnings:', e.message);
+      }
+
+      // 4. Get review stats - ✅ Use /provider/reviews/stats
+      try {
+        console.log('📌 Fetching review stats from /provider/reviews/stats...');
+        const reviewResponse = await API.get('/provider/reviews/stats');
+        if (reviewResponse.data.success) {
+          const reviewStats = reviewResponse.data.stats || reviewResponse.data;
+          setStats(prev => ({
+            ...prev,
+            averageRating: reviewStats.averageRating || 0,
+            totalReviews: reviewStats.totalReviews || 0,
+          }));
+          console.log('✅ Average rating:', reviewStats.averageRating);
+          console.log('✅ Total reviews:', reviewStats.totalReviews);
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not fetch review stats:', e.message);
       }
 
     } catch (error) {
       console.error('❌ Error fetching provider stats:', error);
+    }
+  };
+
+  // ✅ Handle profile photo upload
+  const handleProfilePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('logo', file);
+
+    try {
+      setUploading(true);
+      
+      const response = await API.put('/provider-profiles/me/logo', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (response.data.success) {
+        // Update profile with new logo
+        setProfile(prev => ({
+          ...prev,
+          logo: response.data.logo || response.data.profile?.logo,
+        }));
+        toast.success('Profile photo updated successfully!');
+      } else {
+        toast.error(response.data.message || 'Failed to update photo');
+      }
+    } catch (error) {
+      console.error('❌ Upload error:', error);
+      toast.error(error.response?.data?.message || 'Failed to upload photo');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -329,6 +413,8 @@ const Profile = () => {
     { key: 'youtube', icon: Youtube, label: 'YouTube' },
   ].filter(s => profile.socialLinks?.[s.key]);
 
+  const profilePhoto = profile.logo || profile.avatar || profile.profileImage;
+
   return (
     <div className="space-y-8 animate-fade-in">
 
@@ -363,12 +449,12 @@ const Profile = () => {
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 md:p-8 shadow-sm hover:shadow-xl transition-all duration-300">
         <div className="flex flex-col xl:flex-row gap-8">
 
-          {/* LEFT - Logo/Avatar */}
+          {/* LEFT - Profile Photo with Upload */}
           <div className="flex flex-col items-center xl:items-start">
-            <div className="relative">
-              {profile.logo ? (
+            <div className="relative group">
+              {profilePhoto ? (
                 <img
-                  src={getImageUrl(profile.logo)}
+                  src={getImageUrl(profilePhoto)}
                   alt={profile.businessName}
                   className="w-32 h-32 rounded-3xl object-cover shadow-xl border-4 border-white dark:border-gray-900"
                   onError={(e) => {
@@ -383,13 +469,38 @@ const Profile = () => {
                   {profile.businessName?.charAt(0) || 'P'}
                 </div>
               )}
+              
+              {/* Upload overlay */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="absolute inset-0 bg-black/50 rounded-3xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer"
+              >
+                {uploading ? (
+                  <Loader2 className="w-8 h-8 text-white animate-spin" />
+                ) : (
+                  <Camera className="w-8 h-8 text-white" />
+                )}
+              </button>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleProfilePhotoUpload}
+                className="hidden"
+              />
+              
               {isVerified && (
                 <div className="absolute -bottom-1 -right-1 bg-[#0D9488] rounded-full p-1.5 border-4 border-white dark:border-gray-900">
                   <BadgeCheck className="w-5 h-5 text-white" />
                 </div>
               )}
             </div>
-            <span className="mt-3 text-sm font-semibold text-[#374151] dark:text-white text-center">
+            <p className="mt-2 text-xs text-gray-400 text-center">
+              Click photo to upload
+            </p>
+            <span className="mt-1 text-sm font-semibold text-[#374151] dark:text-white text-center">
               {profile.businessName}
             </span>
           </div>
@@ -419,14 +530,6 @@ const Profile = () => {
                   Tour Provider • {profile.city}, {profile.country}
                 </p>
               </div>
-
-              <button
-                onClick={() => navigate('/provider/profile/edit')}
-                className="h-12 px-6 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-semibold shadow-lg shadow-[#0D9488]/30 hover:scale-105 transition-all duration-300 flex items-center gap-2"
-              >
-                <Edit2 className="w-5 h-5" />
-                Edit Profile
-              </button>
             </div>
 
             {/* INFO GRID */}
@@ -481,7 +584,7 @@ const Profile = () => {
                   <div>
                     <p className="text-sm text-gray-500">Status</p>
                     <h3 className={`font-semibold ${isVerified ? 'text-[#0D9488]' : 'text-[#F59E0B]'}`}>
-                      {isVerified ? 'Verified Provider' : 'Pending Verification'}
+                      {isVerified ? '✅ Verified Provider' : '⏳ Pending Verification'}
                     </h3>
                   </div>
                 </div>
@@ -515,6 +618,58 @@ const Profile = () => {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* ✅ STATS CARDS - REAL DATA */}
+            <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+              {/* Total Listings */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#0f766e] text-white shadow-lg shadow-[#0D9488]/30">
+                <div>
+                  <p className="text-xs opacity-80">Total Listings</p>
+                  <h2 className="text-2xl font-black mt-1">{stats.totalListings}</h2>
+                </div>
+              </div>
+
+              {/* Total Bookings */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-[#F59E0B] to-[#d97706] text-white shadow-lg shadow-[#F59E0B]/30">
+                <div>
+                  <p className="text-xs opacity-80">Total Bookings</p>
+                  <h2 className="text-2xl font-black mt-1">{stats.totalBookings}</h2>
+                  {stats.pendingBookings > 0 && (
+                    <p className="text-[10px] opacity-80 mt-0.5">Pending: {stats.pendingBookings}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Total Revenue */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-[#374151] to-[#1f2937] text-white shadow-lg shadow-[#374151]/30">
+                <div>
+                  <p className="text-xs opacity-80">Total Revenue</p>
+                  <h2 className="text-xl font-black mt-1">{formatCurrency(stats.totalRevenue)}</h2>
+                </div>
+              </div>
+
+              {/* Average Rating */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-[#F59E0B] to-[#d97706] text-white shadow-lg shadow-[#F59E0B]/30">
+                <div>
+                  <p className="text-xs opacity-80">Average Rating</p>
+                  <h2 className="text-2xl font-black mt-1 flex items-center gap-1">
+                    {ratingDisplay}
+                    <Star className="w-4 h-4 fill-white text-white" />
+                  </h2>
+                </div>
+              </div>
+
+              {/* Total Reviews & Member Since */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#0f766e] text-white shadow-lg shadow-[#0D9488]/30">
+                <div>
+                  <p className="text-xs opacity-80">Total Reviews</p>
+                  <h2 className="text-2xl font-black mt-1">{stats.totalReviews}</h2>
+                  <p className="text-[10px] opacity-80 mt-0.5">
+                    Since {stats.memberSince ? new Date(stats.memberSince).getFullYear() : 'N/A'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Description */}
@@ -603,81 +758,6 @@ const Profile = () => {
                 </div>
               </div>
             )}
-
-            {/* STATS */}
-            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#0f766e] text-white shadow-lg shadow-[#0D9488]/30">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm opacity-80">Total Listings</p>
-                    <h2 className="text-3xl font-black mt-2">{stats.totalListings || stats.totalTours || 0}</h2>
-                  </div>
-                  <Briefcase className="w-7 h-7 opacity-80" />
-                </div>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-[#F59E0B] to-[#d97706] text-white shadow-lg shadow-[#F59E0B]/30">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm opacity-80">Total Bookings</p>
-                    <h2 className="text-3xl font-black mt-2">{stats.totalBookings}</h2>
-                    {stats.pendingBookings > 0 && (
-                      <p className="text-xs opacity-80 mt-1">Pending: {stats.pendingBookings}</p>
-                    )}
-                  </div>
-                  <Users className="w-7 h-7 opacity-80" />
-                </div>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-[#374151] to-[#1f2937] text-white shadow-lg shadow-[#374151]/30">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm opacity-80">Total Revenue</p>
-                    <h2 className="text-2xl font-black mt-2">{formatCurrency(stats.totalRevenue)}</h2>
-                  </div>
-                  <TrendingUp className="w-7 h-7 opacity-80" />
-                </div>
-              </div>
-            </div>
-
-            {/* Review Stats */}
-            <div className="grid sm:grid-cols-3 gap-4">
-              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center gap-3">
-                  <Star className="w-5 h-5 text-[#F59E0B] fill-[#F59E0B]" />
-                  <div>
-                    <p className="text-sm text-gray-500">Average Rating</p>
-                    <h3 className="font-bold text-[#374151] dark:text-white">
-                      {ratingDisplay}
-                    </h3>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center gap-3">
-                  <MessageCircle className="w-5 h-5 text-[#0D9488]" />
-                  <div>
-                    <p className="text-sm text-gray-500">Total Reviews</p>
-                    <h3 className="font-bold text-[#374151] dark:text-white">
-                      {stats.totalReviews}
-                    </h3>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center gap-3">
-                  <Calendar className="w-5 h-5 text-[#0D9488]" />
-                  <div>
-                    <p className="text-sm text-gray-500">Member Since</p>
-                    <h3 className="font-bold text-[#374151] dark:text-white">
-                      {profile.createdAt ? new Date(profile.createdAt).getFullYear() : 'N/A'}
-                    </h3>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>

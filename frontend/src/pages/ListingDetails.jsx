@@ -1,7 +1,8 @@
 // src/pages/ListingDetails.jsx
-// ✅ COMPLETE FIXED - Use mediaHelpers for consistent image URLs
+// ✅ COMPLETE FIXED - Use ProviderCard component with WhatsApp
 // ✅ FIXED: Better 409 conflict handling with redirect to existing booking
 // ✅ FIXED: Replaced deprecated getTourReviews with getListingReviews
+// ✅ FIXED: mailto: links work with user gesture
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
@@ -56,21 +57,15 @@ import {
 import { getListingById, toggleLike } from '../services/listingService';
 import { getPublicProviderProfile } from '../services/providerService';
 import { useAuth } from '../contexts/AuthContext';
-// ✅ FIXED: Use getListingReviews instead of getTourReviews
 import { getListingReviews, createReview, toggleHelpful } from '../services/reviewService';
 import { createBooking, getMyBookings } from '../services/bookingService';
 import { BIZ_CONFIG, getBusinessConfig } from '../config/listingConfigs';
 import ReviewCard from '../components/ReviewCard';
 import ProviderCard from '../components/provider/ProviderCard';
 
-// ✅ FIXED: Import mediaHelpers for consistent image URLs
 import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo } from '../utils/mediaHelpers';
 
-// ─── Brand tokens ───────────────────────────────────────────────
-// ❌ REMOVED: const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
 // ─── Helpers ────────────────────────────────────────────────────
-// ✅ FIXED: Use getImageUrl from mediaHelpers
 const toUrl = (img) => {
   if (!img) return '/placeholder-tour.jpg';
   if (img.startsWith('http://') || img.startsWith('https://')) return img;
@@ -79,14 +74,12 @@ const toUrl = (img) => {
   return getImageUrl(img);
 };
 
-// ✅ FIXED: Use getImageUrl for videos too
 const toVideoUrl = (v) => {
   if (!v) return '';
   if (v.startsWith('http://') || v.startsWith('https://')) return v;
   return getImageUrl(v);
 };
 
-// ✅ UPDATED: Build gallery with coverMediaType support
 const buildGallery = (listing) => {
   const seen = new Set();
   const push = (src) => {
@@ -95,28 +88,23 @@ const buildGallery = (listing) => {
   };
   const out = [];
   
-  // ✅ If coverMediaType is 'image', show cover media first
   if (listing.coverMediaType === 'image' && listing.coverMedia) {
     if (push(listing.coverMedia)) out.push(listing.coverMedia);
   } else if (listing.coverMediaType !== 'video' && listing.coverImage) {
     if (push(listing.coverImage)) out.push(listing.coverImage);
   }
   
-  // ✅ Add gallery images
   (listing.galleryImages || []).forEach(i => push(i) && out.push(i));
   return out;
 };
 
-// ✅ UPDATED: Build videos with cover video support
 const buildVideos = (listing) => {
   const videos = [];
   
-  // ✅ If coverMediaType is 'video', add cover video first
   if (listing.coverMediaType === 'video' && listing.coverMedia) {
     videos.push(listing.coverMedia);
   }
   
-  // ✅ Add gallery videos
   if (Array.isArray(listing.videos) && listing.videos.length) {
     listing.videos.forEach(v => {
       if (v !== listing.coverMedia) {
@@ -125,7 +113,6 @@ const buildVideos = (listing) => {
     });
   }
   
-  // Fallback: if no cover video but video exists
   if (videos.length === 0 && listing.video) {
     videos.push(listing.video);
   }
@@ -133,7 +120,6 @@ const buildVideos = (listing) => {
   return videos;
 };
 
-// ✅ NEW: Get cover media info
 const getCoverMediaInfo = (listing) => {
   if (!listing) return null;
   return {
@@ -144,7 +130,6 @@ const getCoverMediaInfo = (listing) => {
   };
 };
 
-// ─── Get Business Config ────────────────────────────────────────
 const getBusinessIcon = (businessType) => {
   const config = getBusinessConfig(businessType);
   return config?.icon || Building2;
@@ -174,7 +159,6 @@ const HeroMediaArea = ({
   const [videoError, setVideoError] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
 
-  // ✅ Build image list (cover image + gallery images)
   const imageList = [];
   if (coverMedia && coverMediaType === 'image') {
     imageList.push({ url: coverMedia, isCover: true, isVideo: false });
@@ -185,7 +169,6 @@ const HeroMediaArea = ({
     }
   });
 
-  // ✅ Build video list (cover video + gallery videos)
   const videoList = [];
   if (coverMedia && coverMediaType === 'video') {
     videoList.push({ url: coverMedia, isCover: true, isVideo: true });
@@ -196,7 +179,6 @@ const HeroMediaArea = ({
     }
   });
 
-  // ✅ Determine which item to show based on activeMediaType
   const getCurrentItem = () => {
     if (activeMediaType === 'video' && videoList.length > 0) {
       const idx = Math.min(videoIndex, videoList.length - 1);
@@ -206,7 +188,6 @@ const HeroMediaArea = ({
       const idx = Math.min(imageIndex, imageList.length - 1);
       return imageList[idx] || null;
     }
-    // Fallback: show first available
     if (imageList.length > 0) return imageList[0];
     if (videoList.length > 0) return videoList[0];
     return null;
@@ -214,13 +195,11 @@ const HeroMediaArea = ({
 
   const currentItem = getCurrentItem();
 
-  // ✅ Reset video states when item changes
   useEffect(() => {
     setVideoError(false);
     setVideoLoading(true);
   }, [currentItem?.url]);
 
-  // ✅ Navigation for images
   const handleImagePrev = () => {
     if (imageList.length <= 1) return;
     const newIndex = (imageIndex - 1 + imageList.length) % imageList.length;
@@ -233,7 +212,6 @@ const HeroMediaArea = ({
     if (onImageIndexChange) onImageIndexChange(newIndex);
   };
 
-  // ✅ Navigation for videos
   const handleVideoPrev = () => {
     if (videoList.length <= 1) return;
     const newIndex = (videoIndex - 1 + videoList.length) % videoList.length;
@@ -256,7 +234,6 @@ const HeroMediaArea = ({
       );
     }
 
-    // ✅ VIDEO RENDERING
     if (currentItem.isVideo) {
       const videoSrc = toVideoUrl(currentItem.url);
       const totalVideos = videoList.length;
@@ -323,7 +300,6 @@ const HeroMediaArea = ({
               Video {currentVideoIndex + 1}/{totalVideos}
             </div>
           )}
-          {/* Video Navigation Arrows */}
           {totalVideos > 1 && (
             <>
               <button
@@ -346,7 +322,6 @@ const HeroMediaArea = ({
       );
     }
 
-    // ✅ IMAGE RENDERING
     const totalImages = imageList.length;
     const currentImageIndex = imageList.findIndex(v => v.url === currentItem.url);
     
@@ -372,7 +347,6 @@ const HeroMediaArea = ({
             Cover Image
           </div>
         )}
-        {/* Image Navigation Arrows */}
         {totalImages > 1 && (
           <>
             <button
@@ -391,7 +365,6 @@ const HeroMediaArea = ({
             </button>
           </>
         )}
-        {/* Image counter */}
         {totalImages > 1 && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
             {imageList.map((item, index) => (
@@ -459,11 +432,9 @@ const GalleryThumbnails = ({
   coverMediaType = 'image',
   selectedIndex = 0,
 }) => {
-  // ✅ Build thumbnail items including cover media
   const buildThumbnails = () => {
     const items = [];
     
-    // ✅ Add cover media first if it's an image
     if (coverMedia && coverMediaType === 'image') {
       items.push({
         url: coverMedia,
@@ -472,7 +443,6 @@ const GalleryThumbnails = ({
       });
     }
     
-    // ✅ Add gallery images
     images.forEach(img => {
       if (img) {
         items.push({
@@ -541,15 +511,12 @@ const GalleryThumbnails = ({
 // VIDEO GALLERY
 // ================================================================
 const VideoGallery = ({ videos = [], onSelect, coverVideo = null, selectedIndex = 0 }) => {
-  // ✅ Build video list with cover video first if exists
   const videoList = [];
   
-  // Add cover video first
   if (coverVideo) {
     videoList.push({ url: coverVideo, isCover: true });
   }
   
-  // Add gallery videos (avoid duplicates)
   videos.forEach(v => {
     if (v !== coverVideo) {
       videoList.push({ url: v, isCover: false });
@@ -634,7 +601,6 @@ const ReviewsSection = ({ listingId, onReviewAdded }) => {
   const fetchReviews = useCallback(async () => {
     try {
       setLoading(true);
-      // ✅ FIXED: Use getListingReviews instead of deprecated getTourReviews
       const data = await getListingReviews(listingId);
       const approvedReviews = (data.reviews || []).filter(r => r.status === 'approved' || !r.status);
       const limitedReviews = approvedReviews.slice(0, 3);
@@ -776,22 +742,18 @@ const ListingDetails = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('about');
   
-  // ✅ Read coverMediaType from navigation state
   const initialMediaType = location.state?.coverMediaType || 'image';
   
-  // ✅ Initialize state based on navigation
   const [imageIndex, setImageIndex] = useState(0);
   const [videoIndex, setVideoIndex] = useState(0);
   const [activeMediaType, setActiveMediaType] = useState(initialMediaType);
 
-  // ✅ Booking Modal State
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [bookingDate, setBookingDate] = useState('');
   const [numberOfPeople, setNumberOfPeople] = useState(1);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState('');
 
-  // ✅ TABS DEFINITION
   const TABS = [
     { id: 'about', label: 'About', Icon: Info },
     { id: 'highlights', label: 'Highlights', Icon: Sparkles },
@@ -816,7 +778,6 @@ const ListingDetails = () => {
     }
   };
 
-  // ✅ Separate handlers for image and video gallery
   const handleImageSelect = (index) => {
     setImageIndex(index);
     setActiveMediaType('image');
@@ -845,7 +806,6 @@ const ListingDetails = () => {
     setActiveMediaType('video');
   };
 
-  // ✅ Handle Booking Submission - FIXED with better 409 handling
   const handleBookingSubmit = async () => {
     if (!user) {
       navigate('/login');
@@ -879,28 +839,22 @@ const ListingDetails = () => {
     } catch (error) {
       console.error('❌ Booking error:', error);
       
-      // ✅ Handle 409 Conflict - Active booking exists with redirect
       if (error.response?.status === 409) {
         const activeBooking = error.response?.data?.activeBooking;
         
-        // ✅ If we have the active booking ID, redirect to payment
         if (activeBooking?._id) {
           setBookingError(
             `You already have an active booking for this experience. Redirecting to payment...`
           );
-          // Redirect after short delay
           setTimeout(() => {
             navigate(`/payment/${activeBooking._id}`);
           }, 1500);
           return;
         }
         
-        // ✅ If no booking ID but we know there's a conflict
         if (error.response?.data?.message) {
           setBookingError(error.response.data.message);
-          // Try to find the booking via API
           try {
-            // Check if user has an active booking for this listing
             const myBookings = await getMyBookings();
             const existingBookings = myBookings?.bookings || [];
             const pendingBooking = existingBookings.find(b => 
@@ -917,7 +871,6 @@ const ListingDetails = () => {
             }
           } catch (e) {
             console.error('Error fetching existing bookings:', e);
-            // Show a helpful message with a button
             setBookingError(
               `You already have an active booking for this experience. Please check your bookings page.`
             );
@@ -954,15 +907,11 @@ const ListingDetails = () => {
     </div>
   );
 
-  // ✅ Get cover media info
   const coverInfo = getCoverMediaInfo(listing);
-  
-  // ✅ Build gallery and videos with coverMediaType support
   const gallery = buildGallery(listing);
   const videos = buildVideos(listing);
   const coverVideo = coverInfo?.isVideo ? coverInfo.url : null;
   
-  // ✅ Ensure indices are within bounds
   const safeImageIndex = Math.min(imageIndex, gallery.length - 1);
   const safeVideoIndex = Math.min(videoIndex, videos.length - 1);
   
@@ -1035,7 +984,7 @@ const ListingDetails = () => {
                 )}
               </div>
 
-              {/* Gallery Thumbnails with selected index */}
+              {/* Gallery Thumbnails */}
               <GalleryThumbnails
                 images={gallery}
                 title={listing.title}
@@ -1045,7 +994,7 @@ const ListingDetails = () => {
                 selectedIndex={safeImageIndex}
               />
 
-              {/* Video Gallery with selected index */}
+              {/* Video Gallery */}
               <VideoGallery
                 videos={videos}
                 onSelect={handleVideoSelect}
@@ -1053,7 +1002,7 @@ const ListingDetails = () => {
                 selectedIndex={safeVideoIndex}
               />
 
-              {/* ✅ Provider Profile - Using new ProviderCard with WhatsApp */}
+              {/* ✅ Provider Profile - Using ProviderCard with WhatsApp */}
               {listing.provider && (
                 <ProviderCard 
                   provider={listing.provider} 
@@ -1252,11 +1201,9 @@ const ListingDetails = () => {
                 {bookingError && (
                   <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30">
                     <p className="text-sm text-red-600 dark:text-red-400">{bookingError}</p>
-                    {/* ✅ Show manual redirect button if auto-redirect didn't happen */}
                     {bookingError.includes('already have an active booking') && (
                       <button
                         onClick={() => {
-                          // Try to find and redirect to the existing booking
                           const getExistingBooking = async () => {
                             try {
                               const myBookings = await getMyBookings();

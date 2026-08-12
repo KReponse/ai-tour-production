@@ -2,6 +2,7 @@
 // ✅ UPDATED - Uses ProviderCard component with WhatsApp contact
 // ✅ FIXED: Uses getPublicProviderListings instead of deprecated getPublicProviderTours
 // ✅ FIXED: Uses getProviderPublicReviews for provider reviews
+// ✅ ADDED: Chat with Provider button
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -48,6 +49,8 @@ import ReviewCard from '../components/ReviewCard';
 import MediaCard from '../components/ui/MediaCard';
 import Button from '../components/ui/Button';
 import ProviderCard from '../components/provider/ProviderCard';
+import { getOrCreateRoom } from '../services/chatService';
+import toast from 'react-hot-toast';
 
 // ✅ Use centralized API client helpers
 import { getImageUrl } from '../utils/mediaHelpers';
@@ -190,6 +193,27 @@ const PublicProfile = () => {
     }
   };
 
+  // ✅ Handle Chat with Provider
+  const handleStartChat = async () => {
+    if (!user) {
+      toast.error('Please login to chat with this provider');
+      navigate('/login');
+      return;
+    }
+
+    try {
+      const response = await getOrCreateRoom(providerId);
+      if (response.success) {
+        navigate(`/chat/${response.room._id}`);
+      } else {
+        toast.error(response.message || 'Failed to start chat');
+      }
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      toast.error('Failed to start chat. Please try again.');
+    }
+  };
+
   const isVerified = profile?.verified || profile?.verificationStatus === 'approved';
   const ratingDisplay = profile?.averageRating > 0 ? profile.averageRating.toFixed(1) : 'New';
 
@@ -308,6 +332,17 @@ const PublicProfile = () => {
 
       {/* ─── PROFILE INFO ─── */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-16 relative z-10">
+        {/* ✅ ADDED: Chat Button in Profile Header */}
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={handleStartChat}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition flex items-center gap-2"
+          >
+            <MessageCircle className="w-5 h-5" />
+            Chat with Provider
+          </button>
+        </div>
+        
         <ProviderCard 
           provider={providerForCard}
           variant="detailed"

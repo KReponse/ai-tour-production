@@ -1,5 +1,5 @@
 // backend/src/models/Currency.js
-// ✅ COMPLETE FIXED - Removed duplicate code and isBaseCurrency indexes
+// ✅ COMPLETE FIXED - Removed duplicate code index (unique:true creates it automatically)
 
 import mongoose from "mongoose";
 
@@ -11,7 +11,7 @@ const currencySchema = new mongoose.Schema(
     code: {
       type: String,
       required: [true, "Currency code is required"],
-      unique: true,
+      unique: true, // ✅ This creates the index automatically
       uppercase: true,
       trim: true,
       enum: ["RWF", "USD", "EUR", "GBP", "KES", "UGX", "TZS"],
@@ -242,18 +242,18 @@ const currencySchema = new mongoose.Schema(
 );
 
 // =========================
-// ✅ SINGLE SOURCE OF TRUTH FOR INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
-// All indexes defined here - NO index:true in field definitions
-// Fields with unique: true already create indexes automatically
+// ❌ DO NOT add code index here - it's already created by 'unique: true'
+// ✅ Add all other single field indexes here
 
 // =========================
 // ✅ SINGLE FIELD INDEXES
 // =========================
-currencySchema.index({ code: 1 }); // ✅ Only defined here
+// currencySchema.index({ code: 1 }); // ❌ REMOVED - unique:true creates it automatically
 currencySchema.index({ isActive: 1 });
 currencySchema.index({ isDefault: 1 });
-currencySchema.index({ isBaseCurrency: 1 }); // ✅ Only defined here
+currencySchema.index({ isBaseCurrency: 1 });
 currencySchema.index({ exchangeRate: 1 });
 
 // =========================
@@ -263,10 +263,14 @@ currencySchema.index({ isActive: 1, isDefault: 1, code: 1 });
 currencySchema.index({ isActive: 1, settlementAllowed: 1 });
 
 // =========================
-// ✅ NOTE: code index is NOT created by unique: true alone
-// We need the schema.index({ code: 1 }) for queries
-// But NOT duplicate index:true in field
+// ✅ IMPORTANT NOTES ON INDEXES:
 // =========================
+// 1. code has unique:true - this automatically creates an index
+//    DO NOT add: currencySchema.index({ code: 1 })
+// 2. All other indexes are defined ONLY in this section
+// 3. No field has both index:true AND a schema.index() call
+// 4. All single field indexes are listed above
+// 5. All compound indexes are listed above
 
 // =========================
 // ✅ VIRTUALS

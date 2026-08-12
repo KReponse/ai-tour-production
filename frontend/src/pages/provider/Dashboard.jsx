@@ -1,9 +1,10 @@
 // src/pages/provider/Dashboard.jsx
-// ✅ COMPLETE FIXED - Multi-Currency Support with Settlement Currency
-// ✅ Added Payments quick action button
-// ✅ Added currency conversion and formatting
-// ✅ Added settlement currency display
-// ✅ FIXED: Data structure handling for listings, bookings, reviews
+// ✅ COMPLETE FIXED - Mobile Responsive Optimizations
+// ✅ Fixed: Stats cards on mobile (1 column, then 2, then 4)
+// ✅ Fixed: Quick actions grid on mobile
+// ✅ Fixed: Review cards responsive
+// ✅ Fixed: Spacing for mobile
+// ✅ Fixed: Touch targets for mobile
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -325,19 +326,19 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[70vh]">
+      <div className="flex flex-col items-center justify-center h-[70vh] px-4">
         <div className="relative w-16 h-16">
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">Loading dashboard...</p>
+        <p className="mt-4 text-gray-500 dark:text-gray-400 text-sm sm:text-base">Loading dashboard...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-[70vh]">
+      <div className="flex flex-col items-center justify-center h-[70vh] px-4">
         <div className="text-center max-w-md">
           <div className="w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center mx-auto mb-4">
             <XCircle className="w-10 h-10 text-red-600" />
@@ -345,17 +346,17 @@ const Dashboard = () => {
           <h2 className="text-2xl font-bold text-[#374151] dark:text-white mb-2">
             Access Restricted
           </h2>
-          <p className="text-gray-500 dark:text-gray-400 mb-6">{error}</p>
-          <div className="flex gap-3 justify-center">
+          <p className="text-gray-500 dark:text-gray-400 mb-6 text-sm sm:text-base">{error}</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <button
               onClick={() => navigate('/provider/request')}
-              className="px-6 py-3 rounded-2xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/80 transition"
+              className="px-6 py-3 rounded-2xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/80 transition text-sm sm:text-base"
             >
               Apply for Provider
             </button>
             <button
               onClick={() => navigate('/')}
-              className="px-6 py-3 rounded-2xl border-2 border-gray-200 dark:border-gray-700 text-[#374151] dark:text-white font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              className="px-6 py-3 rounded-2xl border-2 border-gray-200 dark:border-gray-700 text-[#374151] dark:text-white font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition text-sm sm:text-base"
             >
               Go Home
             </button>
@@ -368,60 +369,61 @@ const Dashboard = () => {
   const displayCurrency = settlementCurrency || selectedCurrency || 'RWF';
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-6 sm:space-y-8 animate-fade-in px-4 sm:px-0">
 
-      {/* HEADER */}
+      {/* HEADER - Mobile Responsive */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-lg">
-              <Sparkles className="w-6 h-6 text-white" />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-lg flex-shrink-0">
+              <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-black text-[#374151] dark:text-white">
+              <h1 className="text-2xl sm:text-3xl font-black text-[#374151] dark:text-white">
                 Provider Dashboard
               </h1>
-              <p className="text-gray-500 dark:text-gray-400 mt-1">
+              <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1">
                 Welcome back, {displayName}!
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Settlement Currency Display */}
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800">
-            <Globe className="w-4 h-4 text-gray-500" />
-            <span className="text-sm text-gray-600 dark:text-gray-300">
+          <div className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800">
+            <Globe className="w-4 h-4 text-gray-500 flex-shrink-0" />
+            <span className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
               Settlement: <CurrencyBadge currency={displayCurrency} size="xs" />
             </span>
           </div>
 
           <button
             onClick={() => navigate('/provider/add-listing')}
-            className="h-12 px-6 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-semibold shadow-lg shadow-[#0D9488]/30 hover:scale-105 transition-all duration-300 flex items-center gap-2"
+            className="h-11 sm:h-12 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-semibold shadow-lg shadow-[#0D9488]/30 hover:scale-105 transition-all duration-300 flex items-center gap-2 text-sm sm:text-base"
           >
-            <Plus className="w-5 h-5" />
-            Create New Listing
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="hidden xs:inline">Create New</span>
+            <span className="inline xs:hidden">New</span>
           </button>
         </div>
       </div>
 
-      {/* STATS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+      {/* STATS - Responsive Grid: 1 col on mobile, 2 on tablet, 4 on desktop */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
         {Array.isArray(providerStats) && providerStats.map((item, index) => {
           const Icon = iconMap[item.title];
           return (
             <div
               key={index}
-              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
+              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 font-medium">
                     {item.title}
                   </p>
-                  <h2 className="text-3xl font-black text-[#374151] dark:text-white mt-2">
+                  <h2 className="text-2xl sm:text-3xl font-black text-[#374151] dark:text-white mt-1 sm:mt-2">
                     {item.value}
                   </h2>
                   {item.isCurrency && (
@@ -430,38 +432,38 @@ const Dashboard = () => {
                     </p>
                   )}
                 </div>
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white bg-gradient-to-r ${colors[index]} shadow-lg`}>
-                  {Icon && <Icon className="w-7 h-7" />}
+                <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white bg-gradient-to-r ${colors[index]} shadow-lg flex-shrink-0`}>
+                  {Icon && <Icon className="w-5 h-5 sm:w-7 sm:h-7" />}
                 </div>
               </div>
-              <div className="mt-6 flex items-center gap-2 text-[#0D9488] text-sm font-medium bg-[#0D9488]/5 px-3 py-1.5 rounded-full w-fit">
-                <ArrowUpRight className="w-4 h-4" />
+              <div className="mt-4 sm:mt-6 flex items-center gap-2 text-[#0D9488] text-xs sm:text-sm font-medium bg-[#0D9488]/5 px-2.5 sm:px-3 py-1.5 rounded-full w-fit">
+                <ArrowUpRight className="w-3 h-3 sm:w-4 sm:h-4" />
                 <span>{item.growth}</span>
-                <span className="text-gray-400 text-xs">vs last month</span>
+                <span className="text-gray-400 text-[10px] sm:text-xs hidden xs:inline">vs last month</span>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* RECENT LISTINGS */}
+      {/* RECENT LISTINGS - Mobile Responsive */}
       {recentListings.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
-          <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm hover:shadow-md transition-all duration-300">
+          <div className="flex items-center justify-between mb-4 sm:mb-6 flex-wrap gap-3">
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-[#0D9488]/10 flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-[#0D9488]" />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#0D9488]/10 flex items-center justify-center flex-shrink-0">
+                <ClipboardList className="w-4 h-4 sm:w-5 sm:h-5 text-[#0D9488]" />
               </div>
-              <h2 className="text-2xl font-black text-[#374151] dark:text-white">
+              <h2 className="text-xl sm:text-2xl font-black text-[#374151] dark:text-white">
                 Recent Listings
               </h2>
             </div>
             <button
               onClick={() => navigate('/provider/listings')}
-              className="text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium flex items-center gap-1 transition"
+              className="text-xs sm:text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium flex items-center gap-1 transition"
             >
               View All
-              <ArrowUpRight className="w-4 h-4" />
+              <ArrowUpRight className="w-3 h-3 sm:w-4 sm:h-4" />
             </button>
           </div>
 
@@ -469,14 +471,14 @@ const Dashboard = () => {
             {recentListings.map((listing) => (
               <div
                 key={listing._id}
-                className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300"
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300"
               >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-bold text-[#374151] dark:text-white">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold text-[#374151] dark:text-white text-sm sm:text-base truncate">
                       {listing.title}
                     </h3>
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold whitespace-nowrap ${
                       listing.status === 'approved' ? 'bg-[#0D9488]/10 text-[#0D9488]' :
                       listing.status === 'pending' ? 'bg-[#F59E0B]/10 text-[#F59E0B]' :
                       'bg-red-100 text-red-600'
@@ -484,23 +486,24 @@ const Dashboard = () => {
                       {listing.status || 'pending'}
                     </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-4 mt-1">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1">
+                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                       {listing.location || 'No location'}
                     </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                       {listing.businessType?.replace('_', ' ') || 'Service'}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="px-4 py-1.5 rounded-full bg-[#0D9488]/10 text-[#0D9488] text-sm font-bold">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <span className="px-3 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#0D9488]/10 text-[#0D9488] text-xs sm:text-sm font-bold">
                     {formatCurrency(listing.price || 0)}
                   </span>
                   <button
                     onClick={() => navigate(`/listing/${listing._id}`)}
-                    className="p-2 rounded-xl hover:bg-[#0D9488]/10 transition"
+                    className="p-1.5 sm:p-2 rounded-xl hover:bg-[#0D9488]/10 transition"
+                    aria-label="View listing"
                   >
                     <Eye className="w-4 h-4 text-gray-400 hover:text-[#0D9488]" />
                   </button>
@@ -511,39 +514,39 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* REVIEW STATS */}
+      {/* REVIEW STATS - Mobile Responsive */}
       {reviewStats && (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center">
-              <Star className="w-5 h-5 text-[#F59E0B]" />
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm">
+          <div className="flex items-center gap-2 sm:gap-3 mb-4">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center flex-shrink-0">
+              <Star className="w-4 h-4 sm:w-5 sm:h-5 text-[#F59E0B]" />
             </div>
-            <h2 className="text-2xl font-black text-[#374151] dark:text-white">
+            <h2 className="text-xl sm:text-2xl font-black text-[#374151] dark:text-white">
               Review Analytics
             </h2>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Total Reviews</p>
-              <p className="text-2xl font-bold text-[#374151] dark:text-white">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div className="p-3 sm:p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
+              <p className="text-[10px] sm:text-sm text-gray-500 dark:text-gray-400">Total Reviews</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#374151] dark:text-white">
                 {reviewStats.totalReviews || 0}
               </p>
             </div>
-            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Average Rating</p>
-              <p className="text-2xl font-bold text-[#F59E0B]">
+            <div className="p-3 sm:p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
+              <p className="text-[10px] sm:text-sm text-gray-500 dark:text-gray-400">Average Rating</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#F59E0B]">
                 {reviewStats.averageRating ? reviewStats.averageRating.toFixed(1) : '0.0'} ★
               </p>
             </div>
-            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Replied</p>
-              <p className="text-2xl font-bold text-[#0D9488]">
+            <div className="p-3 sm:p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
+              <p className="text-[10px] sm:text-sm text-gray-500 dark:text-gray-400">Replied</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#0D9488]">
                 {reviewStats.replied || 0}
               </p>
             </div>
-            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
-              <p className="text-sm text-gray-500 dark:text-gray-400">Reply Rate</p>
-              <p className="text-2xl font-bold text-[#374151] dark:text-white">
+            <div className="p-3 sm:p-4 rounded-2xl bg-gray-50 dark:bg-gray-800">
+              <p className="text-[10px] sm:text-sm text-gray-500 dark:text-gray-400">Reply Rate</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#374151] dark:text-white">
                 {reviewStats.replyRate || '0%'}
               </p>
             </div>
@@ -551,33 +554,33 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* RECENT BOOKINGS */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+      {/* RECENT BOOKINGS - Mobile Responsive */}
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="flex items-center justify-between mb-4 sm:mb-6 flex-wrap gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-[#0D9488]/10 flex items-center justify-center">
-              <CalendarCheck className="w-5 h-5 text-[#0D9488]" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#0D9488]/10 flex items-center justify-center flex-shrink-0">
+              <CalendarCheck className="w-4 h-4 sm:w-5 sm:h-5 text-[#0D9488]" />
             </div>
-            <h2 className="text-2xl font-black text-[#374151] dark:text-white">
+            <h2 className="text-xl sm:text-2xl font-black text-[#374151] dark:text-white">
               Recent Bookings
             </h2>
           </div>
           <button
             onClick={() => navigate('/provider/bookings')}
-            className="text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium flex items-center gap-1 transition"
+            className="text-xs sm:text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium flex items-center gap-1 transition"
           >
             View All
-            <ArrowUpRight className="w-4 h-4" />
+            <ArrowUpRight className="w-3 h-3 sm:w-4 sm:h-4" />
           </button>
         </div>
 
         {recentRequests.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
-              <CalendarCheck className="w-8 h-8 text-gray-400" />
+          <div className="text-center py-8 sm:py-12 text-gray-500 dark:text-gray-400">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-3 sm:mb-4">
+              <CalendarCheck className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400" />
             </div>
-            <p className="font-medium">No bookings yet</p>
-            <p className="text-sm">Bookings will appear here once travelers make reservations</p>
+            <p className="font-medium text-sm sm:text-base">No bookings yet</p>
+            <p className="text-xs sm:text-sm">Bookings will appear here once travelers make reservations</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -589,37 +592,38 @@ const Dashboard = () => {
               return (
                 <div
                   key={item._id}
-                  className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-300"
                 >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <h3 className="font-bold text-[#374151] dark:text-white">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-[#374151] dark:text-white text-sm sm:text-base truncate">
                         {item.tour?.title || item.listing?.title || item.tourTitle || "Service"}
                       </h3>
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusStyle.bg} ${statusStyle.text}`}>
-                        <StatusIcon className="w-3 h-3" />
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}>
+                        <StatusIcon className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                         {item.status || 'pending'}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-4 mt-1">
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1">
+                      <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                         Traveler: {item.user?.name || item.fullName || item.travelerName || "Unknown"}
                       </p>
                       {travelDate && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                        <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
                           {new Date(travelDate).toLocaleDateString()}
                         </p>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="px-4 py-1.5 rounded-full bg-[#0D9488]/10 text-[#0D9488] text-sm font-bold">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <span className="px-3 sm:px-4 py-1 sm:py-1.5 rounded-full bg-[#0D9488]/10 text-[#0D9488] text-xs sm:text-sm font-bold">
                       {formatCurrency(item.totalPrice || item.price || 0)}
                     </span>
                     <button
                       onClick={() => navigate(`/provider/bookings/${item._id}`)}
-                      className="p-2 rounded-xl hover:bg-[#0D9488]/10 transition"
+                      className="p-1.5 sm:p-2 rounded-xl hover:bg-[#0D9488]/10 transition"
+                      aria-label="View booking"
                     >
                       <Eye className="w-4 h-4 text-gray-400 hover:text-[#0D9488]" />
                     </button>
@@ -631,33 +635,33 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* RECENT REVIEWS */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+      {/* RECENT REVIEWS - Mobile Responsive */}
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="flex items-center justify-between mb-4 sm:mb-6 flex-wrap gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center">
-              <MessageCircle className="w-5 h-5 text-[#F59E0B]" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center flex-shrink-0">
+              <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-[#F59E0B]" />
             </div>
-            <h2 className="text-2xl font-black text-[#374151] dark:text-white">
+            <h2 className="text-xl sm:text-2xl font-black text-[#374151] dark:text-white">
               Recent Reviews
             </h2>
           </div>
           <button
             onClick={() => navigate('/provider/reviews')}
-            className="text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium flex items-center gap-1 transition"
+            className="text-xs sm:text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium flex items-center gap-1 transition"
           >
             View All
-            <ArrowUpRight className="w-4 h-4" />
+            <ArrowUpRight className="w-3 h-3 sm:w-4 sm:h-4" />
           </button>
         </div>
 
         {recentReviews.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-            <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
-              <Star className="w-8 h-8 text-gray-400" />
+          <div className="text-center py-8 sm:py-12 text-gray-500 dark:text-gray-400">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-3 sm:mb-4">
+              <Star className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400" />
             </div>
-            <p className="font-medium">No reviews yet</p>
-            <p className="text-sm">Reviews will appear here once travelers leave feedback</p>
+            <p className="font-medium text-sm sm:text-base">No reviews yet</p>
+            <p className="text-xs sm:text-sm">Reviews will appear here once travelers leave feedback</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -673,7 +677,7 @@ const Dashboard = () => {
               <div className="text-center pt-2">
                 <button
                   onClick={() => navigate('/provider/reviews')}
-                  className="text-sm text-[#0D9488] hover:underline font-medium"
+                  className="text-xs sm:text-sm text-[#0D9488] hover:underline font-medium"
                 >
                   View all {recentReviews.length} reviews →
                 </button>
@@ -683,50 +687,49 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* ✅ Quick Actions - Added Payments */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      {/* ✅ Quick Actions - Mobile Responsive Grid */}
+      <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">
         <button
           onClick={() => navigate('/provider/listings')}
-          className="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#0D9488] transition-all duration-300 hover:shadow-lg group"
+          className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#0D9488] transition-all duration-300 hover:shadow-lg group"
         >
-          <ClipboardList className="w-6 h-6 text-[#0D9488] mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm font-semibold text-[#374151] dark:text-white">My Listings</p>
+          <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-[#0D9488] mx-auto mb-1 sm:mb-2 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] sm:text-sm font-semibold text-[#374151] dark:text-white truncate">Listings</p>
         </button>
         <button
           onClick={() => navigate('/provider/add-listing')}
-          className="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#F59E0B] transition-all duration-300 hover:shadow-lg group"
+          className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#F59E0B] transition-all duration-300 hover:shadow-lg group"
         >
-          <Plus className="w-6 h-6 text-[#F59E0B] mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm font-semibold text-[#374151] dark:text-white">Add Listing</p>
+          <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-[#F59E0B] mx-auto mb-1 sm:mb-2 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] sm:text-sm font-semibold text-[#374151] dark:text-white truncate">Add</p>
         </button>
         <button
           onClick={() => navigate('/provider/analytics')}
-          className="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#0D9488] transition-all duration-300 hover:shadow-lg group"
+          className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#0D9488] transition-all duration-300 hover:shadow-lg group"
         >
-          <TrendingUp className="w-6 h-6 text-[#0D9488] mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm font-semibold text-[#374151] dark:text-white">Analytics</p>
+          <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-[#0D9488] mx-auto mb-1 sm:mb-2 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] sm:text-sm font-semibold text-[#374151] dark:text-white truncate">Analytics</p>
         </button>
         <button
           onClick={() => navigate('/provider/profile')}
-          className="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#F59E0B] transition-all duration-300 hover:shadow-lg group"
+          className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#F59E0B] transition-all duration-300 hover:shadow-lg group"
         >
-          <Users className="w-6 h-6 text-[#F59E0B] mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm font-semibold text-[#374151] dark:text-white">Profile</p>
+          <Users className="w-5 h-5 sm:w-6 sm:h-6 text-[#F59E0B] mx-auto mb-1 sm:mb-2 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] sm:text-sm font-semibold text-[#374151] dark:text-white truncate">Profile</p>
         </button>
         <button
           onClick={() => navigate('/provider/reviews')}
-          className="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#F59E0B] transition-all duration-300 hover:shadow-lg group"
+          className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#F59E0B] transition-all duration-300 hover:shadow-lg group"
         >
-          <MessageCircle className="w-6 h-6 text-[#F59E0B] mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm font-semibold text-[#374151] dark:text-white">Reviews</p>
+          <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 text-[#F59E0B] mx-auto mb-1 sm:mb-2 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] sm:text-sm font-semibold text-[#374151] dark:text-white truncate">Reviews</p>
         </button>
-        {/* ✅ NEW: Payments Quick Action */}
         <button
           onClick={() => navigate('/provider/payments')}
-          className="p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#0D9488] transition-all duration-300 hover:shadow-lg group"
+          className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-[#0D9488] transition-all duration-300 hover:shadow-lg group"
         >
-          <CreditCard className="w-6 h-6 text-[#0D9488] mx-auto mb-2 group-hover:scale-110 transition-transform" />
-          <p className="text-sm font-semibold text-[#374151] dark:text-white">Payments</p>
+          <CreditCard className="w-5 h-5 sm:w-6 sm:h-6 text-[#0D9488] mx-auto mb-1 sm:mb-2 group-hover:scale-110 transition-transform" />
+          <p className="text-[10px] sm:text-sm font-semibold text-[#374151] dark:text-white truncate">Payments</p>
         </button>
       </div>
     </div>

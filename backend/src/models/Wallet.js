@@ -1,5 +1,7 @@
 // backend/src/models/Wallet.js
 // ✅ COMPLETE FIXED - Professional Wallet Model with all required features
+// ✅ Removed all index: true from field definitions
+// ✅ All indexes defined ONLY in schema.index() section
 // ✅ Renamed conflicting method to isWithdrawable
 // ✅ Added all necessary fields for production
 
@@ -29,7 +31,7 @@ const walletSchema = new mongoose.Schema(
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: true,
-    index: true,
+    // ✅ REMOVED: index: true
   },
 
   // ─── Wallet Type ──────────────────────────────────────────────
@@ -38,7 +40,7 @@ const walletSchema = new mongoose.Schema(
     enum: ["provider", "platform", "commission"],
     required: true,
     default: "provider",
-    index: true,
+    // ✅ REMOVED: index: true
   },
 
   // ─── Currency ──────────────────────────────────────────────────
@@ -207,7 +209,7 @@ const walletSchema = new mongoose.Schema(
     type: String,
     enum: ["active", "suspended", "closed"],
     default: "active",
-    index: true,
+    // ✅ REMOVED: index: true
   },
 
   // ─── Freeze Reason ─────────────────────────────────────────────
@@ -257,8 +259,10 @@ const walletSchema = new mongoose.Schema(
 });
 
 // =========================
-// ✅ INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
+// NO index:true in field definitions above
+// All indexes defined ONLY here
 
 // Primary lookups
 walletSchema.index({ ownerId: 1, currency: 1, type: 1 }, { unique: true });
@@ -272,6 +276,13 @@ walletSchema.index({ createdAt: -1 });
 // For reporting
 walletSchema.index({ "balances.available": 1 });
 walletSchema.index({ type: 1, status: 1, "balances.available": 1 });
+
+// =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. Compound index { ownerId: 1, currency: 1, type: 1 } is unique
+// 2. No field has both index:true AND a schema.index() call
+// 3. All indexes are defined ONLY in this section
 
 // =========================
 // ✅ VIRTUALS

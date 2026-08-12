@@ -1,5 +1,5 @@
 // backend/src/controllers/chatController.js
-// ✅ UPDATED - Uses "listing" instead of "tour"
+// ✅ COMPLETE FIXED - Accepts both participantId and userId
 
 import ChatRoom from '../models/ChatRoom.js';
 import Message from '../models/Message.js';
@@ -17,7 +17,7 @@ export const getRooms = async (req, res) => {
       path: 'lastMessage',
       select: 'message sender createdAt'
     })
-    .populate('listing', 'title coverImage location') // Changed from 'tour' to 'listing'
+    .populate('listing', 'title coverImage location')
     .sort({ lastMessageAt: -1 });
 
     res.json({
@@ -25,6 +25,7 @@ export const getRooms = async (req, res) => {
       rooms
     });
   } catch (error) {
+    console.error('❌ Error getting rooms:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -94,6 +95,7 @@ export const getMessages = async (req, res) => {
       limit: parseInt(limit)
     });
   } catch (error) {
+    console.error('❌ Error getting messages:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -104,7 +106,7 @@ export const getMessages = async (req, res) => {
 // Send message
 export const sendMessage = async (req, res) => {
   try {
-    const { roomId, message, receiverId, bookingId, listingId } = req.body; // Changed from tourId to listingId
+    const { roomId, message, receiverId, bookingId, listingId } = req.body;
 
     let room = await ChatRoom.findById(roomId);
 
@@ -112,7 +114,7 @@ export const sendMessage = async (req, res) => {
       room = new ChatRoom({
         participants: [req.user.id, receiverId],
         booking: bookingId || null,
-        listing: listingId || null, // Changed from 'tour' to 'listing'
+        listing: listingId || null,
         unreadCount: new Map([
           [req.user.id.toString(), 0],
           [receiverId.toString(), 0]
@@ -178,6 +180,7 @@ export const sendMessage = async (req, res) => {
       roomId: room._id
     });
   } catch (error) {
+    console.error('❌ Error sending message:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -185,37 +188,79 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// Create or get chat room
+// ✅ FIXED: Create or get chat room - Accepts both participantId and userId
 export const getOrCreateRoom = async (req, res) => {
   try {
-    const { userId, bookingId, listingId } = req.body; // Changed from tourId to listingId
+    // ✅ Accept both participantId and userId for flexibility
+    const { userId, participantId, bookingId, listingId } = req.body;
+    
+    // Use participantId if userId is not provided
+    const targetUserId = userId || participantId;
+    
+    console.log('📤 Creating room with:', { 
+      userId, 
+      participantId, 
+      targetUserId,
+      currentUser: req.user.id 
+    });
 
+    if (!targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    // ✅ Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // ✅ Don't allow creating room with self
+    if (targetUserId.toString() === req.user.id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot create chat room with yourself'
+      });
+    }
+
+    // ✅ Find existing room or create new one
     let room = await ChatRoom.findOne({
-      participants: { $all: [req.user.id, userId] },
-      $or: [
-        { booking: bookingId || null },
-        { listing: listingId || null } // Changed from 'tour' to 'listing'
-      ]
+      participants: { $all: [req.user.id, targetUserId] },
+      isActive: true
     });
 
     if (!room) {
       room = new ChatRoom({
-        participants: [req.user.id, userId],
+        participants: [req.user.id, targetUserId],
         booking: bookingId || null,
-        listing: listingId || null, // Changed from 'tour' to 'listing'
+        listing: listingId || null,
         unreadCount: new Map([
           [req.user.id.toString(), 0],
-          [userId.toString(), 0]
+          [targetUserId.toString(), 0]
         ])
       });
       await room.save();
+      
+      console.log('✅ New chat room created:', room._id);
+    } else {
+      console.log('✅ Existing chat room found:', room._id);
     }
+
+    // ✅ Populate participants for response
+    await room.populate('participants', 'name email profileImage role');
 
     res.json({
       success: true,
-      room
+      room,
+      isNew: room.createdAt === room.updatedAt
     });
   } catch (error) {
+    console.error('❌ Error creating/getting room:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -268,6 +313,7 @@ export const markAsRead = async (req, res) => {
       message: 'Messages marked as read'
     });
   } catch (error) {
+    console.error('❌ Error marking as read:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -288,6 +334,7 @@ export const getUnreadCount = async (req, res) => {
       unreadCount: count
     });
   } catch (error) {
+    console.error('❌ Error getting unread count:', error);
     res.status(500).json({
       success: false,
       message: error.message

@@ -1,7 +1,8 @@
 // src/components/admin/AdminNavbar.jsx
-// ✅ FIXED - Added notification fetching with token check
+// ✅ COMPLETE FIXED - Added notification fetching with token check
 // ✅ Added dynamic role display
 // ✅ Added 401 error handling
+// ✅ ADDED: Messages icon with unread badge for admin support chat
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -17,11 +18,14 @@ import {
   Sparkles,
   Shield,
   Loader2,
+  MessageCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logo from "../../assets/images/logo.png";
 import { useAuth } from "../../contexts/AuthContext";
 import notificationService from "../../services/notification.service";
+import { getTotalUnreadCount } from "../../services/chatService";
+import toast from "react-hot-toast";
 
 // ===============================
 // AI TOUR COLORS
@@ -46,6 +50,7 @@ export default function AdminNavbar({
     localStorage.getItem("adminTheme") === "dark"
   );
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
@@ -54,7 +59,6 @@ export default function AdminNavbar({
 
   // ✅ Fetch unread count on mount
   const fetchUnreadCount = useCallback(async () => {
-    // ✅ Check for token before fetching
     const token = localStorage.getItem('token');
     if (!token) {
       console.log('ℹ️ No token found, skipping unread count');
@@ -70,6 +74,28 @@ export default function AdminNavbar({
         return;
       }
       console.error('Error fetching unread count:', error);
+    }
+  }, []);
+
+  // ✅ Fetch chat unread count
+  const fetchChatUnreadCount = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.log('ℹ️ No token found, skipping chat unread count');
+      return;
+    }
+
+    try {
+      const response = await getTotalUnreadCount();
+      if (response.success) {
+        setChatUnreadCount(response.data?.count || 0);
+      }
+    } catch (error) {
+      if (error.response?.status === 401) {
+        console.log('ℹ️ User not authenticated, skipping chat unread count');
+        return;
+      }
+      console.error('Error fetching chat unread count:', error);
     }
   }, []);
 
@@ -102,7 +128,8 @@ export default function AdminNavbar({
   // ✅ Initial fetch
   useEffect(() => {
     fetchUnreadCount();
-  }, [fetchUnreadCount]);
+    fetchChatUnreadCount();
+  }, [fetchUnreadCount, fetchChatUnreadCount]);
 
   // ✅ Fetch notifications when dropdown opens
   useEffect(() => {
@@ -190,7 +217,7 @@ export default function AdminNavbar({
             <PanelLeft size={20} className="text-gray-700 dark:text-gray-300" />
           </button>
 
-          {/* LOGO - Updated with AI Tour colors */}
+          {/* LOGO */}
           <div className="flex items-center gap-3">
             <img
               src={logo}
@@ -231,6 +258,20 @@ export default function AdminNavbar({
               <Sun size={19} className="text-[#F59E0B]" />
             ) : (
               <Moon size={19} className="text-gray-700 dark:text-gray-300" />
+            )}
+          </button>
+
+          {/* ✅ MESSAGES - Admin Support Chat */}
+          <button
+            onClick={() => navigate('/admin/chat')}
+            className="relative w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105"
+            aria-label="Support Messages"
+          >
+            <MessageCircle size={20} className="text-gray-700 dark:text-gray-300" />
+            {chatUnreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white dark:border-gray-900 animate-pulse">
+                {chatUnreadCount > 9 ? '9+' : chatUnreadCount}
+              </span>
             )}
           </button>
 
@@ -354,7 +395,7 @@ export default function AdminNavbar({
             )}
           </div>
 
-          {/* PROFILE - Updated with AI Tour colors */}
+          {/* PROFILE */}
           <div className="relative" ref={profileRef}>
             <button
               onClick={() => setProfileOpen(!profileOpen)}

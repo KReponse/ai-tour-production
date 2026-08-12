@@ -1,51 +1,59 @@
-// src/services/contactService.js
-// ✅ NEW - Contact Service
+// frontend/src/services/contactService.js
+// ✅ COMPLETE FIXED - Added submitContactForm
 
-import axios from 'axios';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import API from './api';
 
 /**
- * Get contact content (public)
+ * Get contact page content from CMS
  */
 export const getContactContent = async () => {
   try {
-    const response = await axios.get(`${API_URL}/contact`);
+    const response = await API.get('/contact');
     return response.data;
   } catch (error) {
-    console.error('❌ Get contact content error:', error);
-    return null;
+    console.error('❌ Error fetching contact content:', error);
+    return {
+      success: false,
+      error: error.message,
+    };
   }
 };
 
 /**
- * Update contact content (admin only)
+ * Submit contact form
  */
-export const updateContactContent = async (data, token) => {
+export const submitContactForm = async (formData) => {
   try {
-    const response = await axios.put(`${API_URL}/contact`, data, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await API.post('/contact/submit', formData);
     return response.data;
   } catch (error) {
-    console.error('❌ Update contact content error:', error);
+    console.error('❌ Error submitting contact form:', error);
     throw error;
   }
 };
 
 /**
- * Reset contact content (admin only)
+ * Get all contact messages (admin only)
  */
-export const resetContactContent = async (token) => {
+export const getContactMessages = async () => {
   try {
-    const response = await axios.post(
-      `${API_URL}/contact/reset`,
-      {},
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    const response = await API.get('/contact/messages');
     return response.data;
   } catch (error) {
-    console.error('❌ Reset contact content error:', error);
+    console.error('❌ Error fetching contact messages:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get single contact message (admin only)
+ */
+export const getContactMessage = async (id) => {
+  try {
+    const response = await API.get(`/contact/messages/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Error fetching contact message:', error);
     throw error;
   }
 };

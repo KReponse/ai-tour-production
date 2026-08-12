@@ -1,5 +1,5 @@
-// src/pages/provider/Travelers.jsx
-// ✅ UPDATED - Removed Actions column
+// frontend/src/pages/provider/Travelers.jsx
+// ✅ COMPLETE FIXED - Properly handle provider-specific travelers data
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -20,9 +20,12 @@ import {
   Clock,
   CheckCircle,
   XCircle,
+  MessageCircle,
 } from 'lucide-react';
 import { getProviderTravelers } from '../../services/bookingService';
 import { useAuth } from '../../contexts/AuthContext';
+import { getOrCreateRoom } from '../../services/chatService';
+import toast from 'react-hot-toast';
 
 // ===============================
 // AI TOUR COLORS
@@ -40,6 +43,7 @@ const Travelers = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all');
+  const [chatLoading, setChatLoading] = useState({});
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -54,23 +58,69 @@ const Travelers = () => {
   const fetchTravelers = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const data = await getProviderTravelers(token);
       
-      const travelersList = data.travelers || [];
+      // ✅ This now only returns travelers for the authenticated provider
+      const data = await getProviderTravelers();
+      
+      console.log('📊 Provider travelers response:', data);
+      
+      // ✅ Handle different response formats
+      let travelersList = [];
+      if (data.success && data.travelers) {
+        travelersList = data.travelers;
+      } else if (Array.isArray(data)) {
+        travelersList = data;
+      } else if (data.data && Array.isArray(data.data)) {
+        travelersList = data.data;
+      }
+      
       setTravelers(travelersList);
 
       // Calculate stats
       const total = travelersList.length;
-      const active = travelersList.filter(t => t.status === 'confirmed' || t.status === 'in_progress').length;
-      const completed = travelersList.filter(t => t.status === 'completed').length;
-      const pending = travelersList.filter(t => t.status === 'pending_payment' || t.status === 'pending').length;
+      const active = travelersList.filter(t => 
+        t.status === 'confirmed' || t.status === 'in_progress'
+      ).length;
+      const completed = travelersList.filter(t => 
+        t.status === 'completed'
+      ).length;
+      const pending = travelersList.filter(t => 
+        t.status === 'pending_payment' || t.status === 'pending'
+      ).length;
 
       setStats({ total, active, completed, pending });
     } catch (error) {
       console.error('Error fetching travelers:', error);
+      setTravelers([]);
+      setStats({ total: 0, active: 0, completed: 0, pending: 0 });
+      toast.error('Failed to load travelers');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ✅ Handle Chat with Traveler
+  const handleChatWithTraveler = async (travelerId, travelerName) => {
+    if (!travelerId) {
+      toast.error('Traveler information not available');
+      return;
+    }
+
+    // Set loading state for this specific traveler
+    setChatLoading(prev => ({ ...prev, [travelerId]: true }));
+
+    try {
+      const response = await getOrCreateRoom(travelerId);
+      if (response.success) {
+        navigate(`/chat/${response.room._id}`);
+      } else {
+        toast.error(response.message || 'Failed to start chat');
+      }
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      toast.error('Failed to start chat. Please try again.');
+    } finally {
+      setChatLoading(prev => ({ ...prev, [travelerId]: false }));
     }
   };
 
@@ -217,6 +267,9 @@ const Travelers = () => {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Status
                   </th>
+                  <th className="px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Chat
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
@@ -228,10 +281,11 @@ const Travelers = () => {
                   const phone = traveler.phone || traveler.user?.phone || 'N/A';
                   const travelDate = traveler.travelDate || traveler.tripDate;
                   const travelersCount = traveler.travelers || 1;
-                  const bookingId = traveler.bookingId || traveler._id;
+                  const travelerId = traveler.user?._id || traveler.userId || traveler._id;
+                  const isChatLoading = chatLoading[travelerId];
 
                   return (
-                    <tr key={bookingId || traveler._id || Math.random().toString()} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition">
+                    <tr key={traveler._id || Math.random().toString()} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white font-bold">
@@ -271,6 +325,24 @@ const Travelers = () => {
                           <StatusIcon className="w-3 h-3" />
                           {statusStyle.label}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {travelerId ? (
+                          <button
+                            onClick={() => handleChatWithTraveler(travelerId, name)}
+                            disabled={isChatLoading}
+                            className="p-2 rounded-xl hover:bg-[#0D9488]/10 transition text-gray-400 hover:text-[#0D9488] disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={`Chat with ${name}`}
+                          >
+                            {isChatLoading ? (
+                              <Loader2 className="w-5 h-5 animate-spin text-[#0D9488]" />
+                            ) : (
+                              <MessageCircle className="w-5 h-5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">N/A</span>
+                        )}
                       </td>
                     </tr>
                   );

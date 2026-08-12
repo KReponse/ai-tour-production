@@ -2,6 +2,7 @@
 // ✅ COMPLETE FIXED - Full session management with conversation memory
 // ✅ Updated "Tours" → "Experiences" for user-facing text
 // ✅ Added sessionId persistence for conversation continuity
+// ✅ FIXED: Mobile positioning with bottom navbar awareness
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
@@ -36,6 +37,9 @@ import { useAuth } from '../../contexts/AuthContext';
 // White : #FFFFFF
 // ===============================
 
+// ✅ Bottom navbar height constant
+const BOTTOM_NAV_HEIGHT = 72; // pixels
+
 const AIWidget = ({ isOpen, onClose }) => {
   const { user } = useAuth();
   const [isMinimized, setIsMinimized] = useState(false);
@@ -45,11 +49,22 @@ const AIWidget = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('chat');
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState(null);
-  const [sessionId, setSessionId] = useState(null); // ✅ Track session for conversation memory
+  const [sessionId, setSessionId] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Quick actions - Updated: "Find Tours" → "Find Experiences"
+  // ✅ Check if mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Quick actions
   const quickActions = [
     { label: 'Plan a Trip', icon: Calendar, action: 'plan', color: 'bg-[#0D9488]/10 text-[#0D9488]' },
     { label: 'Find Experiences', icon: MapPin, action: 'experiences', color: 'bg-[#0D9488]/10 text-[#0D9488]' },
@@ -57,7 +72,7 @@ const AIWidget = ({ isOpen, onClose }) => {
     { label: 'Recommendations', icon: Sparkles, action: 'recommend', color: 'bg-[#F59E0B]/10 text-[#F59E0B]' },
   ];
 
-  // Welcome message - Updated: "find tours" → "find experiences"
+  // Welcome message
   useEffect(() => {
     if (isOpen && messages.length === 0) {
       setMessages([
@@ -68,7 +83,6 @@ const AIWidget = ({ isOpen, onClose }) => {
           timestamp: new Date().toISOString(),
         },
       ]);
-      // ✅ Reset sessionId when widget is reopened
       setSessionId(null);
     }
   }, [isOpen, user]);
@@ -85,7 +99,7 @@ const AIWidget = ({ isOpen, onClose }) => {
     }
   }, [isOpen, loading]);
 
-  // Handle quick action - Updated: "tours" → "experiences"
+  // Handle quick action
   const handleQuickAction = (action) => {
     const prompts = {
       plan: 'I want to plan a trip to Rwanda. Can you help me?',
@@ -119,17 +133,15 @@ const AIWidget = ({ isOpen, onClose }) => {
     setTyping(true);
 
     try {
-      // ✅ Send sessionId to maintain conversation context
       const response = await getAIChat({
         message: messageToSend.trim(),
-        sessionId: sessionId, // ✅ Pass sessionId for conversation continuity
+        sessionId: sessionId,
         history: messages.map(m => ({
           role: m.role,
           content: m.content,
         })),
       });
 
-      // ✅ Store sessionId for future messages
       if (response.sessionId) {
         setSessionId(response.sessionId);
       }
@@ -151,9 +163,7 @@ const AIWidget = ({ isOpen, onClose }) => {
 
       setMessages(prev => [...prev, aiMessage]);
 
-      // ✅ Show quick replies if available
       if (response.quickReplies && response.quickReplies.length > 0) {
-        // Add quick replies as suggestions
         const suggestionMessage = {
           id: Date.now() + 2,
           role: 'suggestion',
@@ -204,7 +214,7 @@ const AIWidget = ({ isOpen, onClose }) => {
             timestamp: new Date().toISOString(),
           },
         ]);
-        setSessionId(null); // ✅ Reset session when chat is cleared
+        setSessionId(null);
       }
     }
   };
@@ -226,6 +236,23 @@ const AIWidget = ({ isOpen, onClose }) => {
     });
   };
 
+  // ✅ Get bottom offset for mobile
+  const getBottomOffset = () => {
+    if (isMobile) {
+      // ✅ 16px gap + bottom nav height + safe area
+      return `calc(${BOTTOM_NAV_HEIGHT + 16}px + env(safe-area-inset-bottom))`;
+    }
+    return '6rem'; // default bottom-24
+  };
+
+  // ✅ Get width for mobile
+  const getWidgetWidth = () => {
+    if (isMobile) {
+      return 'calc(100vw - 32px)';
+    }
+    return '420px';
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -235,17 +262,24 @@ const AIWidget = ({ isOpen, onClose }) => {
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.8, opacity: 0, y: 20 }}
         transition={{ type: 'spring', damping: 20 }}
-        className="fixed bottom-24 right-6 z-50 w-[380px] md:w-[420px] bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
+        className="fixed z-50 bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
+        style={{
+          right: isMobile ? '16px' : '24px',
+          bottom: getBottomOffset(),
+          width: getWidgetWidth(),
+          maxWidth: '420px',
+          maxHeight: isMobile ? 'calc(100vh - 120px)' : 'auto',
+        }}
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B] p-4 text-white">
+        <div className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B] p-4 text-white flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
                 <Bot className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold">AI Tour Assistant</h3>
+                <h3 className="font-bold text-sm md:text-base">AI Tour Assistant</h3>
                 <div className="flex items-center gap-2 text-xs text-white/70">
                   <span className="inline-flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -298,7 +332,7 @@ const AIWidget = ({ isOpen, onClose }) => {
         {!isMinimized && (
           <>
             {/* Tabs */}
-            <div className="flex border-b border-gray-200 dark:border-gray-800">
+            <div className="flex border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
               <button
                 onClick={() => setActiveTab('chat')}
                 className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
@@ -324,13 +358,12 @@ const AIWidget = ({ isOpen, onClose }) => {
             </div>
 
             {/* Content */}
-            <div className="h-[400px] flex flex-col">
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ height: isMobile ? 'calc(100vh - 280px)' : '400px' }}>
               {activeTab === 'chat' ? (
                 <>
                   {/* Messages */}
                   <div className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth">
                     {messages.map((msg) => {
-                      // ✅ Handle suggestion messages
                       if (msg.role === 'suggestion') {
                         return (
                           <div key={msg.id} className="flex flex-wrap gap-2 justify-center p-2">
@@ -391,7 +424,7 @@ const AIWidget = ({ isOpen, onClose }) => {
 
                   {/* Error Message */}
                   {error && (
-                    <div className="px-4 pb-2">
+                    <div className="px-4 pb-2 flex-shrink-0">
                       <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
                         <AlertCircle className="w-4 h-4" />
                         {error}
@@ -399,9 +432,9 @@ const AIWidget = ({ isOpen, onClose }) => {
                     </div>
                   )}
 
-                  {/* Quick Actions - Only show on first message */}
+                  {/* Quick Actions */}
                   {messages.length <= 2 && (
-                    <div className="px-4 pb-2">
+                    <div className="px-4 pb-2 flex-shrink-0">
                       <p className="text-[10px] text-gray-400 mb-2 flex items-center gap-1">
                         <HelpCircle className="w-3 h-3" />
                         Try asking:
@@ -425,7 +458,7 @@ const AIWidget = ({ isOpen, onClose }) => {
                   )}
 
                   {/* Input */}
-                  <div className="p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+                  <div className="p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
                     <div className="flex items-center gap-2">
                       <input
                         ref={inputRef}
@@ -434,13 +467,13 @@ const AIWidget = ({ isOpen, onClose }) => {
                         onChange={(e) => setInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
                         placeholder="Ask AI Tour..."
-                        className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none dark:text-white"
+                        className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none dark:text-white min-h-[44px]"
                         disabled={loading}
                       />
                       <button
                         onClick={() => handleSend()}
                         disabled={!input.trim() || loading}
-                        className="w-10 h-10 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white flex items-center justify-center disabled:opacity-50 hover:scale-105 transition shadow-lg shadow-[#0D9488]/30"
+                        className="w-10 h-10 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white flex items-center justify-center disabled:opacity-50 hover:scale-105 transition shadow-lg shadow-[#0D9488]/30 min-w-[44px] min-h-[44px]"
                       >
                         {loading ? (
                           <Loader2 className="w-4 h-4 animate-spin" />

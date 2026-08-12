@@ -1,7 +1,7 @@
 // src/components/layout/Navbar.jsx
-// ✅ COMPLETE FIXED - Removed Search and Language dropdown
-// ✅ FIXED: Added token check before fetching notifications
-// ✅ FIXED: Graceful 401 error handling
+// ✅ COMPLETE FIXED - Fixed framer-motion ref warning
+// ✅ Fixed: AnimatePresence ref forwarding with mode="wait"
+// ✅ ADDED: Messages icon with unread badge
 
 import {
   useState,
@@ -17,11 +17,9 @@ import {
   Bell,
   Sun,
   Moon,
-  Search,
   User,
   LogOut,
   Settings,
-  Globe,
   Bot,
   ChevronDown,
   CalendarDays,
@@ -54,6 +52,7 @@ import {
 } from '../../contexts/AuthContext';
 
 import notificationService from '../../services/notification.service';
+import { getTotalUnreadCount } from '../../services/chatService';
 import logo from '../../assets/images/logo.png';
 
 // ===============================
@@ -118,49 +117,58 @@ const Navbar = () => {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [profileImageError, setProfileImageError] = useState(false);
 
   const notificationRef = useRef();
   const userMenuRef = useRef();
+  const mobileMenuRef = useRef();
 
   const location = useLocation();
   const navigate = useNavigate();
   const { darkMode, setDarkMode } = useTheme();
   const { user, logout, refreshUser } = useAuth();
 
-  // ✅ Use refs to track if initial fetches are done
   const hasFetchedRef = useRef(false);
   const hasRefreshedRef = useRef(false);
   
-  // ✅ FIXED: Use useMemo to stabilize userId
   const userId = useMemo(() => user?._id, [user?._id]);
 
-  /* ================= FETCH NOTIFICATIONS ================= */
-  const fetchNotifications = useCallback(async () => {
-    // ✅ FIXED: Check if user is authenticated before fetching
-    if (!user) {
-      console.log('ℹ️ No user, skipping notifications');
-      return;
+  // Close mobile menu on route change
+  useEffect(() => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      document.body.style.overflow = 'auto';
     }
+  }, [location.pathname]);
 
-    // ✅ FIXED: Check for token
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.log('ℹ️ No token found, skipping notifications');
-      return;
+  // Prevent body scroll when mobile menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
     }
+    return () => {
+      document.body.style.overflow = 'auto';
+    };
+  }, [menuOpen]);
+
+  // Fetch Notifications
+  const fetchNotifications = useCallback(async () => {
+    if (!user) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) return;
 
     try {
       setLoading(true);
       const response = await notificationService.getNotifications();
-      
       setNotifications(response.notifications || []);
       setUnreadCount(response.unreadCount || 0);
     } catch (error) {
-      // ✅ FIXED: Graceful 401 handling
       if (error.response?.status === 401) {
-        console.log('ℹ️ User not authenticated, skipping notifications');
         setNotifications([]);
         setUnreadCount(0);
         return;
@@ -171,22 +179,33 @@ const Navbar = () => {
     }
   }, [user]);
 
-  // ✅ FIXED: Fetch notifications only once on mount
+  // Fetch Chat Unread Count
+  const fetchChatUnreadCount = useCallback(async () => {
+    if (!user) return;
+    try {
+      const response = await getTotalUnreadCount();
+      if (response.success) {
+        setChatUnreadCount(response.data?.count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching chat unread count:', error);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user && !hasFetchedRef.current) {
       fetchNotifications();
+      fetchChatUnreadCount();
       hasFetchedRef.current = true;
     }
-  }, [user, fetchNotifications]);
+  }, [user, fetchNotifications, fetchChatUnreadCount]);
 
-  // ✅ FIXED: Refresh notifications when notification panel opens
   useEffect(() => {
     if (notificationOpen && user) {
       fetchNotifications();
     }
   }, [notificationOpen, user, fetchNotifications]);
 
-  // ✅ FIXED: Refresh user data only once on mount
   useEffect(() => {
     if (user && !hasRefreshedRef.current) {
       refreshUser();
@@ -194,7 +213,7 @@ const Navbar = () => {
     }
   }, [user, refreshUser]);
 
-  /* ================= CLOSE DROPDOWNS ================= */
+  // Close dropdowns
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (notificationRef.current && !notificationRef.current.contains(e.target)) {
@@ -209,55 +228,37 @@ const Navbar = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  /* ================= CLOSE MOBILE MENU ================= */
-  useEffect(() => {
-    setMenuOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [location]);
-
-  /* ================= MARK NOTIFICATION AS READ ================= */
+  // Mark notification as read
   const markAsRead = useCallback(async (notificationId) => {
     try {
       await notificationService.markAsRead(notificationId);
-      
       setNotifications(prev => 
         prev.map(n => 
           n._id === notificationId ? { ...n, read: true } : n
         )
       );
-      
       setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (error) {
-      // ✅ FIXED: Graceful 401 handling
-      if (error.response?.status === 401) {
-        console.log('ℹ️ User not authenticated, cannot mark as read');
-        return;
-      }
+      if (error.response?.status === 401) return;
       console.error('Error marking notification as read:', error);
     }
   }, []);
 
-  /* ================= MARK ALL AS READ ================= */
+  // Mark all as read
   const markAllAsRead = useCallback(async () => {
     try {
       await notificationService.markAllAsRead();
-      
       setNotifications(prev => 
         prev.map(n => ({ ...n, read: true }))
       );
-      
       setUnreadCount(0);
     } catch (error) {
-      // ✅ FIXED: Graceful 401 handling
-      if (error.response?.status === 401) {
-        console.log('ℹ️ User not authenticated, cannot mark all as read');
-        return;
-      }
+      if (error.response?.status === 401) return;
       console.error('Error marking all as read:', error);
     }
   }, []);
 
-  /* ================= HANDLE NOTIFICATION CLICK ================= */
+  // Handle notification click
   const handleNotificationClick = useCallback((notification) => {
     if (!notification.read) {
       markAsRead(notification._id);
@@ -276,7 +277,7 @@ const Navbar = () => {
     setNotificationOpen(false);
   }, [navigate, markAsRead]);
 
-  /* ================= NAV LINKS ================= */
+  // Nav links
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Explore', path: '/explore' },
@@ -285,30 +286,21 @@ const Navbar = () => {
     { name: 'Reviews', path: '/reviews' },
   ];
 
-  /* ================= LOGOUT ================= */
+  // Logout
   const handleLogout = useCallback(() => {
     logout();
     navigate('/login');
   }, [logout, navigate]);
 
-  /* ================= GET USER PROFILE IMAGE ================= */
+  // Get user profile image
   const getUserProfileImage = useCallback(() => {
     if (!user) return null;
-    
-    if (user.profileImage) {
-      return user.profileImage;
-    }
-    
-    if (user.avatar) {
-      return user.avatar;
-    }
-    
-    return null;
+    return user.profileImage || user.avatar || null;
   }, [user]);
 
   const profileImage = getUserProfileImage();
 
-  /* ================= FORMAT TIME AGO ================= */
+  // Format time ago
   const timeAgo = useCallback((date) => {
     const now = new Date();
     const diff = now - new Date(date);
@@ -323,6 +315,14 @@ const Navbar = () => {
     if (days < 7) return `${days}d ago`;
     return new Date(date).toLocaleDateString();
   }, []);
+
+  // Get chat link based on user role
+  const getChatLink = useCallback(() => {
+    if (!user) return '/chat';
+    if (user.role === 'provider') return '/provider/chat';
+    if (user.role === 'admin') return '/admin/chat';
+    return '/chat';
+  }, [user]);
 
   return (
     <nav className="
@@ -339,19 +339,19 @@ const Navbar = () => {
       dark:border-gray-800
       shadow-sm
     ">
-      <div className="max-w-7xl mx-auto px-4 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+        <div className="flex items-center justify-between h-14 sm:h-16">
 
-          {/* ================= LOGO ================= */}
-          <Link to="/" className="flex items-center gap-3">
+          {/* LOGO */}
+          <Link to="/" className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             <img
               src={logo}
               alt="AI Tour"
-              className="w-10 h-10 object-contain"
+              className="w-8 h-8 sm:w-10 sm:h-10 object-contain"
             />
             <div>
               <h1 className="
-                text-xl
+                text-base sm:text-xl
                 font-black
                 bg-gradient-to-r
                 from-[#0D9488]
@@ -361,14 +361,14 @@ const Navbar = () => {
               ">
                 AI Tour
               </h1>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400 -mt-1">
+              <p className="text-[8px] sm:text-[10px] text-gray-500 dark:text-gray-400 -mt-0.5 sm:-mt-1 hidden xs:block">
                 Rwanda Smart Travel
               </p>
             </div>
           </Link>
 
-          {/* ================= DESKTOP NAV ================= */}
-          <div className="hidden lg:flex items-center gap-8">
+          {/* DESKTOP NAV */}
+          <div className="hidden lg:flex items-center gap-6 xl:gap-8">
             {navLinks.map((link, index) => (
               <Link
                 key={index}
@@ -376,6 +376,7 @@ const Navbar = () => {
                 className={`
                   font-medium
                   transition
+                  text-sm
                   ${
                     location.pathname === link.path
                       ? 'text-[#0D9488]'
@@ -388,19 +389,19 @@ const Navbar = () => {
             ))}
           </div>
 
-          {/* ================= RIGHT SIDE ================= */}
-          <div className="flex items-center gap-2">
+          {/* RIGHT SIDE */}
+          <div className="flex items-center gap-1 sm:gap-2">
 
-            {/* AI BUTTON - Updated with AI Tour colors */}
+            {/* AI BUTTON */}
             <Link
               to="/ai-chat"
               className="
                 hidden
                 md:flex
                 items-center
-                gap-2
-                px-4
-                h-10
+                gap-1.5 sm:gap-2
+                px-3 sm:px-4
+                h-9 sm:h-10
                 rounded-full
                 bg-gradient-to-r
                 from-[#0D9488]
@@ -410,13 +411,57 @@ const Navbar = () => {
                 shadow-lg
                 hover:scale-105
                 transition
+                text-xs sm:text-sm
               "
             >
-              <Bot size={18} />
-              <span>AI Assistant</span>
+              <Bot size={16} className="sm:w-[18px] sm:h-[18px]" />
+              <span className="hidden xs:inline">AI Assistant</span>
+              <span className="inline xs:hidden">AI</span>
             </Link>
 
-            {/* ================= NOTIFICATIONS ================= */}
+            {/* ✅ MESSAGES ICON - With unread badge */}
+            <Link
+              to={getChatLink()}
+              className="
+                relative
+                p-2
+                rounded-full
+                hover:bg-gray-200
+                dark:hover:bg-gray-800
+                transition
+                min-h-[44px]
+                min-w-[44px]
+                flex
+                items-center
+                justify-center
+              "
+              aria-label="Messages"
+            >
+              <MessageCircle size={20} className="sm:w-[20px] sm:h-[20px] text-gray-700 dark:text-gray-200" />
+              {chatUnreadCount > 0 && (
+                <span className="
+                  absolute
+                  -top-0.5
+                  -right-0.5
+                  min-w-[18px]
+                  h-[18px]
+                  px-1
+                  flex
+                  items-center
+                  justify-center
+                  bg-red-500
+                  text-white
+                  text-[10px]
+                  font-bold
+                  rounded-full
+                  animate-pulse
+                ">
+                  {chatUnreadCount > 9 ? '9+' : chatUnreadCount}
+                </span>
+              )}
+            </Link>
+
+            {/* NOTIFICATIONS */}
             <div className="relative" ref={notificationRef}>
               <button
                 onClick={() => setNotificationOpen(!notificationOpen)}
@@ -427,9 +472,15 @@ const Navbar = () => {
                   hover:bg-gray-200
                   dark:hover:bg-gray-800
                   transition
+                  min-h-[44px]
+                  min-w-[44px]
+                  flex
+                  items-center
+                  justify-center
                 "
+                aria-label="Notifications"
               >
-                <Bell size={20} />
+                <Bell size={20} className="sm:w-[20px] sm:h-[20px]" />
                 {unreadCount > 0 && (
                   <span className="
                     absolute
@@ -453,7 +504,7 @@ const Navbar = () => {
                 )}
               </button>
 
-              <AnimatePresence>
+              <AnimatePresence mode="wait">
                 {notificationOpen && (
                   <motion.div
                     initial={{ opacity: 0, y: -10 }}
@@ -464,7 +515,8 @@ const Navbar = () => {
                       right-0
                       mt-3
                       w-80
-                      max-w-[90vw]
+                      max-w-[calc(100vw-2rem)]
+                      sm:max-w-[90vw]
                       bg-white
                       dark:bg-gray-900
                       border
@@ -481,11 +533,11 @@ const Navbar = () => {
                       flex
                       items-center
                       justify-between
-                      p-4
+                      p-3 sm:p-4
                       border-b
                       dark:border-gray-800
                     ">
-                      <h3 className="font-bold dark:text-white flex items-center gap-2">
+                      <h3 className="font-bold dark:text-white flex items-center gap-2 text-sm sm:text-base">
                         <Bell size={16} className="text-[#0D9488]" />
                         Notifications
                         {unreadCount > 0 && (
@@ -513,10 +565,12 @@ const Navbar = () => {
                             items-center
                             gap-1
                             transition
+                            min-h-[32px]
+                            min-w-[32px]
                           "
                         >
                           <CheckCheck size={14} />
-                          Mark all read
+                          <span className="hidden xs:inline">Mark all read</span>
                         </button>
                       )}
                     </div>
@@ -551,9 +605,9 @@ const Navbar = () => {
                               className={`
                                 flex
                                 items-start
-                                gap-3
-                                px-4
-                                py-3
+                                gap-2 sm:gap-3
+                                px-3 sm:px-4
+                                py-2.5 sm:py-3
                                 border-b
                                 border-gray-100
                                 dark:border-gray-800
@@ -565,8 +619,7 @@ const Navbar = () => {
                               `}
                             >
                               <div className={`
-                                w-10
-                                h-10
+                                w-8 h-8 sm:w-10 sm:h-10
                                 rounded-full
                                 flex
                                 items-center
@@ -575,28 +628,28 @@ const Navbar = () => {
                                 dark:bg-gray-800
                                 flex-shrink-0
                               `}>
-                                <Icon size={18} className={colorClass} />
+                                <Icon size={16} className={`sm:w-[18px] sm:h-[18px] ${colorClass}`} />
                               </div>
                               
                               <div className="flex-1 min-w-0">
                                 <p className={`
-                                  text-sm
+                                  text-xs sm:text-sm
                                   font-medium
                                   dark:text-white
                                   ${!notification.read ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}
                                 `}>
                                   {notification.title}
                                 </p>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                                   {notification.message}
                                 </p>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                                <p className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                                   {timeAgo(notification.createdAt)}
                                 </p>
                               </div>
                               
                               {!notification.read && (
-                                <div className="w-2 h-2 rounded-full bg-[#0D9488] flex-shrink-0 mt-2" />
+                                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#0D9488] flex-shrink-0 mt-1.5" />
                               )}
                             </motion.div>
                           );
@@ -610,11 +663,14 @@ const Navbar = () => {
                         <Link
                           to="/notifications"
                           className="
-                            text-sm
+                            text-xs sm:text-sm
                             text-[#0D9488]
                             hover:text-[#0D9488]/80
                             font-medium
                             transition
+                            min-h-[44px]
+                            inline-flex
+                            items-center
                           "
                           onClick={() => setNotificationOpen(false)}
                         >
@@ -627,15 +683,27 @@ const Navbar = () => {
               </AnimatePresence>
             </div>
 
-            {/* ================= THEME ================= */}
+            {/* THEME */}
             <button
               onClick={() => setDarkMode(!darkMode)}
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
+              className="
+                p-2
+                rounded-full
+                hover:bg-gray-200
+                dark:hover:bg-gray-800
+                transition
+                min-h-[44px]
+                min-w-[44px]
+                flex
+                items-center
+                justify-center
+              "
+              aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {darkMode ? <Sun size={20} /> : <Moon size={20} />}
             </button>
 
-            {/* ================= USER ================= */}
+            {/* USER */}
             {user ? (
               <div className="relative" ref={userMenuRef}>
                 <button
@@ -643,21 +711,302 @@ const Navbar = () => {
                   className="
                     flex
                     items-center
-                    gap-2
-                    px-3
-                    h-10
+                    gap-1.5 sm:gap-2
+                    px-2 sm:px-3
+                    h-9 sm:h-10
                     rounded-full
                     bg-gray-100
                     dark:bg-gray-800
                     hover:bg-gray-200
                     dark:hover:bg-gray-700
                     transition
+                    min-h-[44px]
                   "
                 >
-                  {/* Profile Image */}
                   <div className="
-                    w-8
-                    h-8
+                    w-7 h-7 sm:w-8 sm:h-8
+                    rounded-full
+                    overflow-hidden
+                    flex-shrink-0
+                    bg-gradient-to-r
+                    from-[#0D9488]
+                    to-[#F59E0B]
+                    flex
+                    items-center
+                    justify-center
+                  ">
+                    {profileImage && !profileImageError ? (
+                      <img
+                        src={profileImage}
+                        alt={user.fullName || 'User'}
+                        className="w-full h-full object-cover"
+                        onError={() => setProfileImageError(true)}
+                      />
+                    ) : (
+                      <span className="text-white font-bold text-xs sm:text-sm">
+                        {user.fullName?.charAt(0)?.toUpperCase() || 'U'}
+                      </span>
+                    )}
+                  </div>
+                  <span className="hidden md:block text-xs sm:text-sm font-semibold dark:text-white truncate max-w-[80px]">
+                    {user.fullName?.split(' ')[0] || 'User'}
+                  </span>
+                  <ChevronDown size={14} className="sm:w-[16px] sm:h-[16px] text-gray-500 hidden md:block" />
+                </button>
+
+                <AnimatePresence mode="wait">
+                  {userMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="
+                        absolute
+                        right-0
+                        mt-3
+                        w-56 sm:w-64
+                        bg-white
+                        dark:bg-gray-900
+                        border
+                        border-gray-200
+                        dark:border-gray-800
+                        rounded-2xl
+                        shadow-2xl
+                        overflow-hidden
+                        z-50
+                      "
+                    >
+                      {/* User Info */}
+                      <div className="flex items-center gap-2 sm:gap-3 p-3 sm:p-4 border-b dark:border-gray-800">
+                        <div className="
+                          w-10 h-10 sm:w-12 sm:h-12
+                          rounded-full
+                          overflow-hidden
+                          flex-shrink-0
+                          bg-gradient-to-r
+                          from-[#0D9488]
+                          to-[#F59E0B]
+                          flex
+                          items-center
+                          justify-center
+                        ">
+                          {profileImage && !profileImageError ? (
+                            <img
+                              src={profileImage}
+                              alt={user.fullName || 'User'}
+                              className="w-full h-full object-cover"
+                              onError={() => setProfileImageError(true)}
+                            />
+                          ) : (
+                            <span className="text-white font-bold text-base sm:text-lg">
+                              {user.fullName?.charAt(0)?.toUpperCase() || 'U'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-bold dark:text-white text-sm sm:text-base truncate">
+                            {user.fullName}
+                          </h3>
+                          <p className="text-xs sm:text-sm text-gray-500 truncate">
+                            {user.email}
+                          </p>
+                          {user.role && (
+                            <span className="
+                              text-[10px] sm:text-xs
+                              bg-[#0D9488]/10
+                              text-[#0D9488]
+                              px-1.5 sm:px-2
+                              py-0.5
+                              rounded-full
+                              capitalize
+                              inline-block
+                              mt-0.5
+                            ">
+                              {user.role}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Menu Items */}
+                      <div className="p-1.5 sm:p-2">
+                        <Link
+                          to="/profile"
+                          className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition text-sm sm:text-base min-h-[44px]"
+                          onClick={() => setUserMenu(false)}
+                        >
+                          <User size={16} className="sm:w-[18px] sm:h-[18px]" />
+                          Profile
+                        </Link>
+
+                        <Link
+                          to="/my-bookings"
+                          className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition text-sm sm:text-base min-h-[44px]"
+                          onClick={() => setUserMenu(false)}
+                        >
+                          <CalendarDays size={16} className="sm:w-[18px] sm:h-[18px]" />
+                          My Bookings
+                        </Link>
+
+                        <Link
+                          to="/settings"
+                          className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition text-sm sm:text-base min-h-[44px]"
+                          onClick={() => setUserMenu(false)}
+                        >
+                          <Settings size={16} className="sm:w-[18px] sm:h-[18px]" />
+                          Settings
+                        </Link>
+
+                        {user.role === 'provider' && (
+                          <Link
+                            to="/provider/dashboard"
+                            className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition text-sm sm:text-base min-h-[44px]"
+                            onClick={() => setUserMenu(false)}
+                          >
+                            <Bot size={16} className="sm:w-[18px] sm:h-[18px] text-[#F59E0B]" />
+                            Provider Dashboard
+                          </Link>
+                        )}
+
+                        {user.role === 'admin' && (
+                          <Link
+                            to="/admin/dashboard"
+                            className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition text-sm sm:text-base min-h-[44px]"
+                            onClick={() => setUserMenu(false)}
+                          >
+                            <Bot size={16} className="sm:w-[18px] sm:h-[18px] text-[#0D9488]" />
+                            Admin Dashboard
+                          </Link>
+                        )}
+
+                        <div className="border-t dark:border-gray-800 my-1.5 sm:my-2" />
+
+                        <button
+                          onClick={handleLogout}
+                          className="
+                            w-full
+                            flex
+                            items-center
+                            gap-2 sm:gap-3
+                            px-3 sm:px-4
+                            py-2.5 sm:py-3
+                            rounded-xl
+                            hover:bg-red-100
+                            dark:hover:bg-red-900/30
+                            text-red-600
+                            transition
+                            text-sm sm:text-base
+                            min-h-[44px]
+                          "
+                        >
+                          <LogOut size={16} className="sm:w-[18px] sm:h-[18px]" />
+                          Logout
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <div className="hidden md:flex items-center gap-2 sm:gap-3">
+                <Link
+                  to="/login"
+                  className="
+                    px-3 sm:px-5
+                    h-9 sm:h-10
+                    flex
+                    items-center
+                    rounded-full
+                    border
+                    border-gray-300
+                    dark:border-gray-700
+                    dark:text-white
+                    hover:bg-gray-100
+                    dark:hover:bg-gray-800
+                    transition
+                    text-xs sm:text-sm
+                    min-h-[44px]
+                  "
+                >
+                  Login
+                </Link>
+
+                <Link
+                  to="/register"
+                  className="
+                    px-3 sm:px-5
+                    h-9 sm:h-10
+                    flex
+                    items-center
+                    rounded-full
+                    bg-gradient-to-r
+                    from-[#0D9488]
+                    to-[#F59E0B]
+                    text-white
+                    font-semibold
+                    shadow-lg
+                    hover:scale-105
+                    transition
+                    text-xs sm:text-sm
+                    min-h-[44px]
+                  "
+                >
+                  Register
+                </Link>
+              </div>
+            )}
+
+            {/* MOBILE MENU BUTTON */}
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="
+                lg:hidden
+                p-2
+                rounded-full
+                hover:bg-gray-200
+                dark:hover:bg-gray-800
+                transition
+                min-h-[44px]
+                min-w-[44px]
+                flex
+                items-center
+                justify-center
+              "
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            >
+              {menuOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+
+          </div>
+        </div>
+      </div>
+
+      {/* MOBILE MENU */}
+      <AnimatePresence mode="wait">
+        {menuOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="
+              lg:hidden
+              bg-white
+              dark:bg-gray-950
+              border-t
+              border-gray-200
+              dark:border-gray-800
+              shadow-xl
+              overflow-y-auto
+              max-h-[calc(100vh-56px)]
+            "
+            ref={mobileMenuRef}
+          >
+            <div className="flex flex-col p-4 sm:p-5 gap-3 sm:gap-4">
+              {/* Mobile User Profile */}
+              {user && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-900">
+                  <div className="
+                    w-10 h-10
                     rounded-full
                     overflow-hidden
                     flex-shrink-0
@@ -681,276 +1030,14 @@ const Navbar = () => {
                       </span>
                     )}
                   </div>
-                  <span className="hidden md:block text-sm font-semibold dark:text-white">
-                    {user.fullName?.split(' ')[0] || 'User'}
-                  </span>
-                  <ChevronDown size={16} className="text-gray-500" />
-                </button>
-
-                <AnimatePresence>
-                  {userMenu && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="
-                        absolute
-                        right-0
-                        mt-3
-                        w-64
-                        bg-white
-                        dark:bg-gray-900
-                        border
-                        border-gray-200
-                        dark:border-gray-800
-                        rounded-2xl
-                        shadow-2xl
-                        overflow-hidden
-                        z-50
-                      "
-                    >
-                      {/* User Info */}
-                      <div className="flex items-center gap-3 p-4 border-b dark:border-gray-800">
-                        <div className="
-                          w-12
-                          h-12
-                          rounded-full
-                          overflow-hidden
-                          flex-shrink-0
-                          bg-gradient-to-r
-                          from-[#0D9488]
-                          to-[#F59E0B]
-                          flex
-                          items-center
-                          justify-center
-                        ">
-                          {profileImage && !profileImageError ? (
-                            <img
-                              src={profileImage}
-                              alt={user.fullName || 'User'}
-                              className="w-full h-full object-cover"
-                              onError={() => setProfileImageError(true)}
-                            />
-                          ) : (
-                            <span className="text-white font-bold text-lg">
-                              {user.fullName?.charAt(0)?.toUpperCase() || 'U'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold dark:text-white truncate">
-                            {user.fullName}
-                          </h3>
-                          <p className="text-sm text-gray-500 truncate">
-                            {user.email}
-                          </p>
-                          {user.role && (
-                            <span className="
-                              text-xs
-                              bg-[#0D9488]/10
-                              text-[#0D9488]
-                              px-2
-                              py-0.5
-                              rounded-full
-                              capitalize
-                            ">
-                              {user.role}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Menu Items */}
-                      <div className="p-2">
-                        <Link
-                          to="/profile"
-                          className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition"
-                          onClick={() => setUserMenu(false)}
-                        >
-                          <User size={18} />
-                          Profile
-                        </Link>
-
-                        <Link
-                          to="/my-bookings"
-                          className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition"
-                          onClick={() => setUserMenu(false)}
-                        >
-                          <CalendarDays size={18} />
-                          My Bookings
-                        </Link>
-
-                        <Link
-                          to="/settings"
-                          className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition"
-                          onClick={() => setUserMenu(false)}
-                        >
-                          <Settings size={18} />
-                          Settings
-                        </Link>
-
-                        {/* Role-specific menu items */}
-                        {user.role === 'provider' && (
-                          <Link
-                            to="/provider/dashboard"
-                            className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition"
-                            onClick={() => setUserMenu(false)}
-                          >
-                            <Bot size={18} className="text-[#F59E0B]" />
-                            Provider Dashboard
-                          </Link>
-                        )}
-
-                        {user.role === 'admin' && (
-                          <Link
-                            to="/admin/dashboard"
-                            className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-white transition"
-                            onClick={() => setUserMenu(false)}
-                          >
-                            <Bot size={18} className="text-[#0D9488]" />
-                            Admin Dashboard
-                          </Link>
-                        )}
-
-                        <div className="border-t dark:border-gray-800 my-2" />
-
-                        <button
-                          onClick={handleLogout}
-                          className="
-                            w-full
-                            flex
-                            items-center
-                            gap-3
-                            px-4
-                            py-3
-                            rounded-xl
-                            hover:bg-red-100
-                            dark:hover:bg-red-900/30
-                            text-red-600
-                            transition
-                          "
-                        >
-                          <LogOut size={18} />
-                          Logout
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            ) : (
-              <div className="hidden md:flex items-center gap-3">
-                <Link
-                  to="/login"
-                  className="
-                    px-5
-                    h-10
-                    flex
-                    items-center
-                    rounded-full
-                    border
-                    border-gray-300
-                    dark:border-gray-700
-                    dark:text-white
-                    hover:bg-gray-100
-                    dark:hover:bg-gray-800
-                    transition
-                  "
-                >
-                  Login
-                </Link>
-
-                <Link
-                  to="/register"
-                  className="
-                    px-5
-                    h-10
-                    flex
-                    items-center
-                    rounded-full
-                    bg-gradient-to-r
-                    from-[#0D9488]
-                    to-[#F59E0B]
-                    text-white
-                    font-semibold
-                    shadow-lg
-                    hover:scale-105
-                    transition
-                  "
-                >
-                  Register
-                </Link>
-              </div>
-            )}
-
-            {/* ================= MOBILE MENU BUTTON ================= */}
-            <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="lg:hidden p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
-            >
-              {menuOpen ? <X size={24} /> : <Menu size={24} />}
-            </button>
-
-          </div>
-        </div>
-      </div>
-
-      {/* ================= MOBILE MENU ================= */}
-      <AnimatePresence>
-        {menuOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="
-              lg:hidden
-              bg-white
-              dark:bg-gray-950
-              border-t
-              border-gray-200
-              dark:border-gray-800
-              shadow-xl
-              max-h-[85vh]
-              overflow-y-auto
-            "
-          >
-            <div className="flex flex-col p-5 gap-4">
-              {/* Mobile User Profile */}
-              {user && (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-900">
-                  <div className="
-                    w-10
-                    h-10
-                    rounded-full
-                    overflow-hidden
-                    flex-shrink-0
-                    bg-gradient-to-r
-                    from-[#0D9488]
-                    to-[#F59E0B]
-                    flex
-                    items-center
-                    justify-center
-                  ">
-                    {profileImage && !profileImageError ? (
-                      <img
-                        src={profileImage}
-                        alt={user.fullName || 'User'}
-                        className="w-full h-full object-cover"
-                        onError={() => setProfileImageError(true)}
-                      />
-                    ) : (
-                      <span className="text-white font-bold">
-                        {user.fullName?.charAt(0)?.toUpperCase() || 'U'}
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-semibold dark:text-white">{user.fullName}</p>
-                    <p className="text-sm text-gray-500">{user.email}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold dark:text-white text-sm truncate">{user.fullName}</p>
+                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
                   </div>
                 </div>
               )}
 
+              {/* Navigation Links */}
               {navLinks.map((link, index) => (
                 <Link
                   key={index}
@@ -961,9 +1048,17 @@ const Navbar = () => {
                     hover:text-[#0D9488]
                     transition
                     font-medium
+                    py-2.5
+                    px-3
+                    rounded-xl
+                    hover:bg-gray-100
+                    dark:hover:bg-gray-800
+                    min-h-[44px]
+                    flex
+                    items-center
                     ${
                       location.pathname === link.path
-                        ? 'text-[#0D9488]'
+                        ? 'text-[#0D9488] bg-[#0D9488]/5'
                         : ''
                     }
                   `}
@@ -977,13 +1072,15 @@ const Navbar = () => {
                 className="
                   flex items-center
                   gap-3
-                  px-4 py-3
+                  px-3
+                  py-2.5
                   rounded-xl
                   hover:bg-gray-100
                   dark:hover:bg-gray-800
                   text-gray-700
                   dark:text-gray-200
                   transition
+                  min-h-[44px]
                 "
               >
                 <CalendarDays size={18} className="text-[#0D9488]" />
@@ -1008,6 +1105,7 @@ const Navbar = () => {
                   shadow-lg
                   hover:scale-[1.02]
                   transition
+                  min-h-[44px]
                 "
               >
                 <Bot size={18} />
@@ -1015,7 +1113,7 @@ const Navbar = () => {
               </Link>
 
               {!user ? (
-                <div className="flex flex-col gap-3 pt-4">
+                <div className="flex flex-col gap-3 pt-2">
                   <Link
                     to="/login"
                     className="
@@ -1032,6 +1130,7 @@ const Navbar = () => {
                       hover:bg-gray-50
                       dark:hover:bg-gray-800
                       transition
+                      min-h-[44px]
                     "
                   >
                     Login
@@ -1054,6 +1153,7 @@ const Navbar = () => {
                       shadow-lg
                       hover:scale-[1.02]
                       transition
+                      min-h-[44px]
                     "
                   >
                     Create Account
@@ -1068,8 +1168,7 @@ const Navbar = () => {
                         w-full
                         h-12
                         rounded-2xl
-                        bg-gradient-to-r
-                        from-[#0D9488]
+                        bg-gradient-to-r                        from-[#0D9488]
                         to-[#F59E0B]
                         text-white
                         flex
@@ -1079,6 +1178,7 @@ const Navbar = () => {
                         shadow-lg
                         hover:scale-[1.02]
                         transition
+                        min-h-[44px]
                       "
                     >
                       Provider Dashboard
@@ -1103,6 +1203,7 @@ const Navbar = () => {
                         shadow-lg
                         hover:scale-[1.02]
                         transition
+                        min-h-[44px]
                       "
                     >
                       Admin Dashboard
@@ -1120,6 +1221,7 @@ const Navbar = () => {
                       font-semibold
                       hover:bg-red-600
                       transition
+                      min-h-[44px]
                     "
                   >
                     Logout

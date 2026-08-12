@@ -1,5 +1,5 @@
 // backend/src/controllers/auth.controller.js
-// ✅ COMPLETE FIXED - Fixed getCurrentUser with proper user ID handling
+// ✅ FIXED - Return tokens at top level, not nested in data
 
 import { AuthService } from '../services/auth.service.js';
 import { SecurityService } from '../services/security.service.js';
@@ -22,7 +22,8 @@ export class AuthController {
       const result = await AuthService.register(req.body);
       console.log(`✅ [AuthController] User registered: ${req.body.email}`);
       
-      return ResponseUtils.created(res, {
+      // ✅ Return tokens at top level (not nested in data)
+      return res.status(201).json({
         success: true,
         message: 'Registration successful. Please check your email for verification.',
         requiresVerification: true,
@@ -50,7 +51,8 @@ export class AuthController {
 
       console.log(`✅ [AuthController] User logged in: ${result.user.email} (verified: ${result.user.isEmailVerified})`);
       
-      return ResponseUtils.success(res, {
+      // ✅ Return tokens at top level (not nested in data)
+      return res.status(200).json({
         success: true,
         message: 'Login successful',
         user: result.user,
@@ -154,7 +156,9 @@ export class AuthController {
       }
 
       const result = await AuthService.refresh(refreshToken, ip, userAgent);
-      return ResponseUtils.success(res, {
+      
+      // ✅ Return tokens at top level
+      return res.status(200).json({
         success: true,
         accessToken: result.accessToken,
         refreshToken: result.refreshToken
@@ -233,13 +237,8 @@ export class AuthController {
     }
   }
 
-  /**
-   * ✅ FIXED: Get current user with proper error handling
-   * Now uses req.user._id or req.user.id for compatibility
-   */
   static async getCurrentUser(req, res) {
     try {
-      // ✅ FIXED: Use both _id and id for compatibility
       const userId = req.user?._id || req.user?.id;
       
       if (!userId) {
@@ -249,7 +248,6 @@ export class AuthController {
 
       console.log(`📌 [AuthController] Getting current user: ${userId}`);
 
-      // ✅ Find user directly to avoid service layer issues
       const user = await User.findById(userId)
         .select('-password -refreshTokenHash -refreshTokenId -tokenBlacklist')
         .lean();

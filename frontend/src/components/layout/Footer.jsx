@@ -1,6 +1,7 @@
 // src/components/layout/Footer.jsx
 // ✅ COMPLETE FIXED - Removed heart icon, kept text heart
 // ✅ ADDED: Developer portfolio attribution with Reponse Dev link
+// ✅ ADDED: Minor polish for text heart
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -37,7 +38,6 @@ import toast from 'react-hot-toast';
 // ===============================
 
 // ─── Static Quick Links (Always visible) ──────────────────────
-// ✅ FIXED: Plain array - no hooks outside component
 const QUICK_LINKS = [
   { name: 'Home', path: '/' },
   { name: 'Explore', path: '/explore' },
@@ -47,7 +47,6 @@ const QUICK_LINKS = [
 ];
 
 // ─── Social Links (including TikTok) ──────────────────────────
-// ✅ FIXED: Plain array - no hooks outside component
 const SOCIAL_ITEMS = [
   { key: 'facebook', Icon: Facebook, color: '#1877F2', label: 'Facebook' },
   { key: 'instagram', Icon: Instagram, color: '#E4405F', label: 'Instagram' },
@@ -121,13 +120,11 @@ const Footer = () => {
   const [newsletterLoading, setNewsletterLoading] = useState(false);
   const [newsletterError, setNewsletterError] = useState('');
 
-  // ✅ Track if footer has been fetched
   const hasFetchedRef = React.useRef(false);
 
-  // ✅ CORRECT: useMemo inside component
   const fallbackData = useMemo(() => getFallbackData(), []);
+  const currentYear = useMemo(() => new Date().getFullYear(), []);
 
-  // ✅ Fetch footer content with useCallback
   const fetchFooterContent = useCallback(async () => {
     try {
       const data = await getFooterContent();
@@ -144,7 +141,6 @@ const Footer = () => {
     }
   }, [fallbackData]);
 
-  // ✅ Fetch footer only once on mount
   useEffect(() => {
     if (!hasFetchedRef.current) {
       hasFetchedRef.current = true;
@@ -152,7 +148,6 @@ const Footer = () => {
     }
   }, [fetchFooterContent]);
 
-  // ✅ Memoize newsletter handlers with useCallback
   const handleNewsletterSubmit = useCallback(async (e) => {
     e.preventDefault();
     const email = newsletterEmail.trim();
@@ -192,27 +187,20 @@ const Footer = () => {
     }
   }, [newsletterEmail]);
 
-  // ✅ Memoize newsletter input change handler
   const handleNewsletterChange = useCallback((e) => {
     setNewsletterEmail(e.target.value);
     setNewsletterError('');
   }, []);
 
-  // ✅ Memoize data and sections
   const data = useMemo(() => footerData || fallbackData, [footerData, fallbackData]);
   const sections = useMemo(() => data.sections || [], [data.sections]);
 
-  // ✅ Memoize social links check
   const hasSocialLinks = useMemo(() => 
     data.socialLinks && 
     Object.values(data.socialLinks).some(url => url && url.trim() !== ''),
     [data.socialLinks]
   );
 
-  // ✅ Memoize current year
-  const currentYear = useMemo(() => new Date().getFullYear(), []);
-
-  // ─── Loading State ────────────────────────────────────────────
   if (loading) {
     return (
       <footer className="relative mt-24 bg-gradient-to-br from-[#374151]/95 via-[#1a1a2e] to-[#0D9488]/10 text-white overflow-hidden">
@@ -282,7 +270,7 @@ const Footer = () => {
               )}
             </div>
 
-            {/* SOCIALS - Dynamic from backend (including TikTok) */}
+            {/* SOCIALS - Dynamic from backend */}
             {hasSocialLinks && (
               <div className="flex items-center gap-4 mt-6 flex-wrap">
                 {SOCIAL_ITEMS.map(({ key, Icon, color, label }) => {
@@ -308,7 +296,7 @@ const Footer = () => {
             )}
           </div>
 
-          {/* ─── QUICK LINKS (Static) ─── */}
+          {/* QUICK LINKS (Static) */}
           <div>
             <h3 className="text-lg font-bold mb-5 text-white">Quick Links</h3>
             <div className="space-y-3">
@@ -324,7 +312,7 @@ const Footer = () => {
             </div>
           </div>
 
-          {/* ─── DYNAMIC SECTIONS ─── */}
+          {/* DYNAMIC SECTIONS */}
           {sections.map((section) => (
             <div key={section.sectionId}>
               <h3 className="text-lg font-bold mb-5 text-white">{section.title}</h3>
@@ -343,7 +331,7 @@ const Footer = () => {
           ))}
         </div>
 
-        {/* NEWSLETTER - With Real API Integration */}
+        {/* NEWSLETTER */}
         {data.newsletter?.enabled !== false && (
           <div className="mt-16 rounded-3xl bg-white/5 border border-white/10 p-8 flex flex-col lg:flex-row items-center justify-between gap-6">
             <div>
@@ -407,24 +395,25 @@ const Footer = () => {
           </div>
         )}
 
-        {/* ✅ BOTTOM - Removed animated heart, kept text heart */}
+        {/* ✅ BOTTOM - Text heart (no icon), developer attribution */}
         <div className="mt-12 pt-6 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-sm text-gray-500 text-center md:text-left">
             © {currentYear} {data.brandName}. {data.copyrightText || 'All rights reserved.'}
           </p>
 
           <div className="flex items-center gap-2 text-sm text-gray-500 flex-wrap justify-center">
-            <span>Built with in Rwanda 🇷🇼</span>
+            <span>Built with <span className="text-red-500 inline-block">❤️</span> in Rwanda 🇷🇼</span>
             <span className="text-[#0D9488] ml-1">✦</span>
             <span className="text-gray-500 ml-1">by</span>
             <a
               href="https://reponse-dev.vercel.app/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#0D9488] font-medium hover:text-[#0D9488]/80 transition-colors duration-300 hover:underline hover:underline-offset-2 hover:opacity-80"
+              className="text-[#0D9488] font-medium hover:text-[#F59E0B] transition-colors duration-300 hover:underline hover:underline-offset-2 group"
               aria-label="Reponse Dev - Developer Portfolio"
             >
-              Reponse Dev
+              <span className="group-hover:opacity-80 transition-opacity">Reponse Dev</span>
+              <span className="inline-block transition-transform duration-300 group-hover:translate-x-1">✨</span>
             </a>
           </div>
         </div>

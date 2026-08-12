@@ -1,7 +1,7 @@
 // src/pages/admin/ProviderRequestDetails.jsx
-// ✅ COMPLETE FIXED - Added mediaHelpers for images and documents
-// ✅ Supports: Images (JPG, PNG, WEBP, GIF, SVG, HEIC, HEIF) and PDFs
-// ✅ Features: Preview, Zoom, View, Download for all document types
+// ✅ COMPLETE FIXED - Fixed action handlers with optimistic updates
+// ✅ No more window.location.reload()
+// ✅ Actions update UI immediately
 
 import React, { useEffect, useState, useCallback, memo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -15,9 +15,8 @@ import {
   BadgeCheck, FileCheck, Sparkles, RefreshCw,
 } from "lucide-react";
 import { getProviderRequestById, updateProviderRequest } from "../../services/adminService";
-
-// ✅ FIXED: Import media helper for consistent image URLs
 import { getImageUrl } from "../../utils/mediaHelpers";
+import toast from "react-hot-toast";
 
 // ── Brand tokens ─────────────────────────────────────────────────
 const TEAL = "#0D9488";
@@ -25,7 +24,6 @@ const GOLD = "#F59E0B";
 const SLATE = "#374151";
 
 // ── Helpers ──────────────────────────────────────────────────────
-// ✅ FIXED: Use getImageUrl from mediaHelpers instead of custom toUrl
 const toUrl = (path) => {
   if (!path) return null;
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
@@ -130,7 +128,6 @@ const DocCard = memo(({ src, label, onZoom }) => {
   return (
     <div className="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden transition-all duration-200 hover:shadow-md hover:border-[#0D9488]/30">
       {isIm ? (
-        // ✅ IMAGE: Shows thumbnail with zoom
         <div onClick={() => onZoom(url)} className="h-24 cursor-zoom-in overflow-hidden relative bg-gray-200 dark:bg-gray-700">
           <img 
             src={url} 
@@ -138,7 +135,6 @@ const DocCard = memo(({ src, label, onZoom }) => {
             className="w-full h-full object-cover" 
             onError={(e) => {
               e.target.style.display = "none";
-              // Show fallback icon
               const parent = e.target.parentElement;
               if (parent) {
                 const fallback = document.createElement("div");
@@ -153,7 +149,6 @@ const DocCard = memo(({ src, label, onZoom }) => {
           </div>
         </div>
       ) : (
-        // ✅ PDF / DOC / OTHER: Shows file icon with extension
         <div className={`h-24 flex flex-col items-center justify-center ${fileBgColor}`}>
           <FileText size={32} className={fileColor} />
           <span className={`text-xs font-bold mt-1 ${fileColor}`}>{fileExt}</span>
@@ -253,55 +248,100 @@ const ProviderRequestDetails = () => {
     }
   }, [id]);
 
-  // ── Actions ────────────────────────────────────────────────────
+  // ── ✅ FIXED: Actions with optimistic updates ────────────────
   const handleApprove = useCallback(async () => {
     if (!window.confirm("Are you sure you want to approve this provider?")) return;
+    if (actionLoading) return; // ✅ Prevent duplicate submissions
+    
     try {
       setActionLoading("approve");
       await updateProviderRequest(id, "approved", notes);
-      window.location.reload();
+      
+      // ✅ Update local state immediately
+      setRequest(prev => ({
+        ...prev,
+        status: "approved",
+        reviewedAt: new Date().toISOString(),
+        adminNotes: notes,
+      }));
+      
+      toast.success("Provider approved successfully! 🎉");
+      
+      // ✅ Navigate back after 1.5 seconds
+      setTimeout(() => {
+        navigate('/admin/provider-requests');
+      }, 1500);
+      
     } catch (error) {
       console.error("Error approving:", error);
-      alert(error.response?.data?.message || "Failed to approve");
+      toast.error(error.response?.data?.message || "Failed to approve");
     } finally {
       setActionLoading(null);
     }
-  }, [id, notes]);
+  }, [id, notes, actionLoading, navigate]);
 
   const handleReject = useCallback(async () => {
     if (!notes.trim()) {
-      alert("Please add a reason in the Admin Notes before rejecting.");
+      toast.error("Please add a reason in the Admin Notes before rejecting.");
       return;
     }
     if (!window.confirm("Are you sure you want to reject this provider?")) return;
+    if (actionLoading) return; // ✅ Prevent duplicate submissions
+    
     try {
       setActionLoading("reject");
       await updateProviderRequest(id, "rejected", notes);
-      window.location.reload();
+      
+      // ✅ Update local state immediately
+      setRequest(prev => ({
+        ...prev,
+        status: "rejected",
+        reviewedAt: new Date().toISOString(),
+        adminNotes: notes,
+      }));
+      
+      toast.error("Provider rejected.");
+      
+      // ✅ Navigate back after 1.5 seconds
+      setTimeout(() => {
+        navigate('/admin/provider-requests');
+      }, 1500);
+      
     } catch (error) {
       console.error("Error rejecting:", error);
-      alert(error.response?.data?.message || "Failed to reject");
+      toast.error(error.response?.data?.message || "Failed to reject");
     } finally {
       setActionLoading(null);
     }
-  }, [id, notes]);
+  }, [id, notes, actionLoading, navigate]);
 
   const handleNeedInfo = useCallback(async () => {
     if (!notes.trim()) {
-      alert("Please add a note explaining what information is needed.");
+      toast.error("Please add a note explaining what information is needed.");
       return;
     }
+    if (actionLoading) return; // ✅ Prevent duplicate submissions
+    
     try {
       setActionLoading("needinfo");
       await updateProviderRequest(id, "needs_information", notes);
-      window.location.reload();
+      
+      // ✅ Update local state immediately
+      setRequest(prev => ({
+        ...prev,
+        status: "needs_information",
+        adminNotes: notes,
+      }));
+      
+      toast.success("Request for information sent.");
+      
     } catch (error) {
       console.error("Error requesting info:", error);
-      alert(error.response?.data?.message || "Failed to update");
+      toast.error(error.response?.data?.message || "Failed to update");
     } finally {
       setActionLoading(null);
     }
-  }, [id, notes]);
+  }, [id, notes, actionLoading]);
 
   const toggle = (key) => setSections(s => ({ ...s, [key]: !s[key] }));
 
@@ -390,7 +430,6 @@ const ProviderRequestDetails = () => {
     { key: "agreeToAccurate", label: "Accurate Information" },
   ];
 
-  // ✅ Documents that can be images OR PDFs
   const docs = [
     { key: "nationalIdFile", label: "National ID / Passport" },
     { key: "rdbCertificateFile", label: "RDB Certificate" },
@@ -485,7 +524,7 @@ const ProviderRequestDetails = () => {
           </Section>
 
           {/* ============================================ */}
-          {/* SECTION 3: LEGAL DOCUMENTS - Supports Images & PDFs */}
+          {/* SECTION 3: LEGAL DOCUMENTS */}
           {/* ============================================ */}
           <Section title="Legal Documents" icon={Shield} expanded={sections.legal} onToggle={() => toggle("legal")}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
@@ -630,25 +669,41 @@ const ProviderRequestDetails = () => {
             </div>
           </Section>
 
-          {/* ── Action Buttons ── */}
+          {/* ── ✅ FIXED: Action Buttons ── */}
           {request.status === "pending" && (
             <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-200 dark:border-gray-800">
-              <button onClick={handleApprove} disabled={!!actionLoading}
-                className="flex-1 min-w-[140px] h-12 rounded-xl bg-[#0D9488] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#0D9488]/40 hover:scale-[1.02] transition disabled:opacity-60">
-                {actionLoading === "approve" ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />} Approve
+              <button 
+                onClick={handleApprove} 
+                disabled={!!actionLoading}
+                className="flex-1 min-w-[140px] h-12 rounded-xl bg-[#0D9488] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#0D9488]/40 hover:scale-[1.02] transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {actionLoading === "approve" ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />} 
+                {actionLoading === "approve" ? "Approving..." : "Approve"}
               </button>
-              <button onClick={handleNeedInfo} disabled={!!actionLoading}
-                className="flex-1 min-w-[140px] h-12 rounded-xl bg-[#F59E0B] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#F59E0B]/40 hover:scale-[1.02] transition disabled:opacity-60">
-                <AlertCircle size={16} /> Need Info
+              <button 
+                onClick={handleNeedInfo} 
+                disabled={!!actionLoading}
+                className="flex-1 min-w-[140px] h-12 rounded-xl bg-[#F59E0B] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#F59E0B]/40 hover:scale-[1.02] transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <AlertCircle size={16} /> 
+                {actionLoading === "needinfo" ? "Sending..." : "Need Info"}
               </button>
-              <button onClick={handleReject} disabled={!!actionLoading}
-                className="flex-1 min-w-[140px] h-12 rounded-xl bg-red-600 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-600/40 hover:scale-[1.02] transition disabled:opacity-60">
-                <XCircle size={16} /> Reject
+              <button 
+                onClick={handleReject} 
+                disabled={!!actionLoading}
+                className="flex-1 min-w-[140px] h-12 rounded-xl bg-red-600 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-600/40 hover:scale-[1.02] transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <XCircle size={16} /> 
+                {actionLoading === "reject" ? "Rejecting..." : "Reject"}
               </button>
             </div>
           )}
 
-          <button onClick={() => navigate('/admin/provider-requests')} className="w-full h-11 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-[#374151] dark:text-white font-bold text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+          <button 
+            onClick={() => navigate('/admin/provider-requests')} 
+            className="w-full h-11 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-[#374151] dark:text-white font-bold text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            disabled={!!actionLoading}
+          >
             Back to Requests
           </button>
         </div>

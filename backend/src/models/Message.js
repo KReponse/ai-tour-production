@@ -1,43 +1,39 @@
-// src/models/Message.js
+// backend/src/models/Message.js
+// ✅ Message schema
+
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
-  room: {
+  conversation: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'ChatRoom',
-    required: true
+    ref: 'Conversation',
+    required: true,
   },
   sender: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: true,
   },
-  receiver: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  message: {
+  content: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
   },
   read: {
     type: Boolean,
-    default: false
+    default: false,
   },
   readAt: {
-    type: Date
-  },
-  createdAt: {
     type: Date,
-    default: Date.now
-  }
+    default: null,
+  },
+}, {
+  timestamps: true,
 });
 
-// Index for faster queries
-messageSchema.index({ room: 1, createdAt: -1 });
-messageSchema.index({ sender: 1, receiver: 1 });
+// Indexes
+messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ sender: 1 });
 
 const Message = mongoose.model('Message', messageSchema);
 export default Message;

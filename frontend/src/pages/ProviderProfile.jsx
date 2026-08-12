@@ -1,8 +1,7 @@
 // src/pages/ProviderProfile.jsx
-// ✅ COMPLETE FIXED - Correct useParams parameter name (providerId) and robust error handling
-// ✅ FIXED: Tours endpoint changed from /tours/provider/:id to /listings/provider/:id
-// ✅ FIXED: Uses API client instead of axios directly
-// ✅ ADDED: Stats fetching
+// ✅ COMPLETE FIXED - Logo displayed everywhere
+// ✅ Added avatar/logo support for provider
+// ✅ Added image error handling
 
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
@@ -30,9 +29,15 @@ import {
   Award,
 } from "lucide-react";
 
-// ✅ Use API client instead of axios
 import API from "../services/api";
 import { getImageUrl } from "../utils/mediaHelpers";
+
+// ✅ Helper to get provider logo
+const getProviderLogo = (provider) => {
+  if (!provider) return null;
+  // Priority: logo > profileImage > avatar
+  return provider.logo || provider.profileImage || provider.avatar || null;
+};
 
 const ProviderProfile = () => {
   const { providerId } = useParams();
@@ -41,6 +46,8 @@ const ProviderProfile = () => {
   const [error, setError] = useState(null);
   const [profile, setProfile] = useState(null);
   const [tours, setTours] = useState([]);
+  const [logoError, setLogoError] = useState(false);
+  const [coverError, setCoverError] = useState(false);
   const [stats, setStats] = useState({
     totalTours: 0,
     totalReviews: 0,
@@ -62,14 +69,12 @@ const ProviderProfile = () => {
       setLoading(true);
       setError(null);
 
-      // ✅ Use API client for profile
       console.log('📌 Fetching public profile for provider:', providerId);
       const profileRes = await API.get(`/provider-profiles/public/${providerId}`);
       
       if (profileRes.data.success) {
         setProfile(profileRes.data.profile);
         
-        // ✅ Set stats from profile data
         setStats({
           totalTours: profileRes.data.profile.totalTours || 0,
           totalReviews: profileRes.data.profile.totalReviews || 0,
@@ -80,13 +85,12 @@ const ProviderProfile = () => {
         setError("Provider profile not found");
       }
 
-      // ✅ Fetch provider listings
+      // Fetch provider listings
       try {
         const toursRes = await API.get(`/listings/provider/${providerId}`);
         setTours(toursRes.data.listings || toursRes.data.data || []);
       } catch (err) {
         console.error("Error fetching listings:", err);
-        // Don't set error for tours, just log
       }
     } catch (err) {
       console.error("Error fetching profile:", err);
@@ -109,7 +113,6 @@ const ProviderProfile = () => {
     });
   };
 
-  // ✅ Helper to get WhatsApp number
   const getWhatsAppNumber = () => {
     if (profile?.whatsapp) return profile.whatsapp;
     if (profile?.phone) return profile.phone;
@@ -117,10 +120,26 @@ const ProviderProfile = () => {
     return null;
   };
 
-  // ✅ Helper to get display phone
   const getDisplayPhone = () => {
     if (profile?.phone) return profile.phone;
     if (profile?.user?.phone) return profile.user.phone;
+    return null;
+  };
+
+  // ✅ Get logo URL with fallback
+  const getLogoUrl = () => {
+    const logoPath = getProviderLogo(profile);
+    if (logoPath && !logoError) {
+      return getImageUrl(logoPath);
+    }
+    return null;
+  };
+
+  // ✅ Get cover URL with fallback
+  const getCoverUrl = () => {
+    if (profile?.coverImage && !coverError) {
+      return getImageUrl(profile.coverImage);
+    }
     return null;
   };
 
@@ -158,7 +177,6 @@ const ProviderProfile = () => {
     );
   }
 
-  // ✅ Social links
   const socialLinks = [
     { key: "facebook", icon: Facebook, label: "Facebook" },
     { key: "instagram", icon: Instagram, label: "Instagram" },
@@ -170,35 +188,34 @@ const ProviderProfile = () => {
   const whatsappNumber = getWhatsAppNumber();
   const displayPhone = getDisplayPhone();
   const isVerified = stats.verified || profile.verified;
+  const logoUrl = getLogoUrl();
+  const coverUrl = getCoverUrl();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {/* ── Cover Image ── */}
       <div className="relative h-64 md:h-80 w-full overflow-hidden bg-gradient-to-r from-[#0D9488] to-[#F59E0B]">
-        {profile.coverImage && (
+        {coverUrl ? (
           <img
-            src={getImageUrl(profile.coverImage)}
+            src={coverUrl}
             alt="Cover"
             className="w-full h-full object-cover"
-            onError={(e) => {
-              e.target.style.display = "none";
-            }}
+            onError={() => setCoverError(true)}
           />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-r from-[#0D9488] to-[#F59E0B]" />
         )}
         <div className="absolute inset-0 bg-black/40" />
         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8">
           <div className="max-w-7xl mx-auto flex items-end gap-6">
             {/* ── Logo ── */}
             <div className="w-24 h-24 md:w-32 md:h-32 rounded-2xl bg-white dark:bg-gray-900 shadow-xl overflow-hidden flex-shrink-0 border-4 border-white dark:border-gray-900">
-              {profile.logo ? (
+              {logoUrl ? (
                 <img
-                  src={getImageUrl(profile.logo)}
+                  src={logoUrl}
                   alt={profile.businessName}
                   className="w-full h-full object-cover"
-                  onError={(e) => {
-                    e.target.src = "";
-                    e.target.alt = "No logo";
-                  }}
+                  onError={() => setLogoError(true)}
                 />
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-4xl font-bold text-white">
@@ -409,9 +426,21 @@ const ProviderProfile = () => {
                   </a>
                 )}
 
+                {/* ✅ Chat with Provider Button */}
                 <button
-                  onClick={() => navigate(`/explore?provider=${profile.userId}`)}
+                  onClick={() => {
+                    // Navigate to chat with this provider
+                    navigate(`/chat?providerId=${providerId}`);
+                  }}
                   className="w-full h-12 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold text-sm flex items-center justify-center gap-2 hover:scale-[1.02] transition shadow-lg shadow-[#0D9488]/30"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                  Chat with Provider
+                </button>
+
+                <button
+                  onClick={() => navigate(`/explore?provider=${providerId}`)}
+                  className="w-full h-12 rounded-xl border-2 border-[#0D9488] text-[#0D9488] font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#0D9488] hover:text-white transition"
                 >
                   <Briefcase className="w-5 h-5" />
                   View All ({stats.totalTours} experiences)

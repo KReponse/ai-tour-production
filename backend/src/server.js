@@ -1,13 +1,5 @@
 // backend/src/server.js
-// ✅ MIGRATED TO AUTHENTICATION v2
-// ✅ ADDED Currency Routes
-// ✅ ADDED Ledger Routes
-// ✅ ADDED Wallet Routes
-// ✅ ADDED Settlement Routes
-// ✅ ADDED Rate Lock Routes
-// ✅ ADDED Webhook Routes
-// ✅ ADDED Hero Routes
-// ✅ ADDED Media Routes
+// ✅ COMPLETE FIXED - Added conversation routes and socket events
 
 import "dotenv/config";
 
@@ -78,6 +70,10 @@ import privacyRoutes from './routes/privacyRoutes.js';
 import termsRoutes from './routes/termsRoutes.js';
 import careersRoutes from './routes/careersRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
+
+// ✅ NEW: Conversation Routes
+import conversationRoutes from './routes/conversationRoutes.js';
+
 import exchangeRateRoutes from "./routes/exchangeRateRoutes.js";
 
 /* ================= DATABASE ================= */
@@ -182,7 +178,10 @@ app.use(cors({
     "https://aitourrwanda.com",
     "https://www.aitourrwanda.com",
     "https://ai-tour-eight.vercel.app",
-    "http://localhost:3000"
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173"
   ],
   credentials: true
 }));
@@ -190,6 +189,14 @@ app.use(cors({
 // ✅ JSON with increased limit
 app.use(express.json({ limit: '550mb' }));
 app.use(express.urlencoded({ extended: true, limit: '550mb' }));
+
+// ✅ Request logging (optional)
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`📝 ${req.method} ${req.path}`);
+  }
+  next();
+});
 
 /* ================= STATIC FILES ================= */
 
@@ -299,12 +306,34 @@ app.use("/api/admin/exchange-rates", exchangeRateRoutes);
 // ✅ Legacy webhook route (for backward compatibility)
 app.use("/api/webhook", webhookRoutes);
 
+// ✅ CONVERSATION ROUTES (Real-time messaging)
+app.use("/api/conversations", conversationRoutes);
+
 /* ================= HOME TEST ================= */
 
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "AI Tour Backend Running 🚀 (Authentication v2)"
+    message: "AI Tour Backend Running 🚀 (Authentication v2)",
+    version: "2.0.0",
+    endpoints: {
+      auth: "/api/auth",
+      tours: "/api/tours",
+      bookings: "/api/bookings",
+      payments: "/api/payments",
+      reviews: "/api/reviews",
+      ai: "/api/ai",
+      conversations: "/api/conversations"
+    }
+  });
+});
+
+// ✅ 404 handler for unmatched routes
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.path}`,
+    path: req.path
   });
 });
 
@@ -368,6 +397,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ─── Room Events ──────────────────────────────────────────────
   socket.on("join-room", (roomId) => {
     socket.join(roomId);
     console.log(`🏠 User ${socket.user?._id} joined room ${roomId}`);
@@ -378,6 +408,40 @@ io.on("connection", (socket) => {
     console.log(`🚪 User ${socket.user?._id} left room ${roomId}`);
   });
 
+  // ─── Conversation Room Events ────────────────────────────────
+  socket.on("join-conversation", (conversationId) => {
+    socket.join(`conversation:${conversationId}`);
+    console.log(`📢 User ${socket.user?.name} joined conversation: ${conversationId}`);
+  });
+
+  socket.on("leave-conversation", (conversationId) => {
+    socket.leave(`conversation:${conversationId}`);
+    console.log(`🚪 User ${socket.user?.name} left conversation: ${conversationId}`);
+  });
+
+  socket.on("join-user-room", (userId) => {
+    socket.join(`user:${userId}`);
+    console.log(`📢 User ${socket.user?.name} joined user room: ${userId}`);
+  });
+
+  // ─── Typing Indicators ──────────────────────────────────────
+  socket.on("typing-start", ({ conversationId }) => {
+    socket.to(`conversation:${conversationId}`).emit("user-typing", {
+      userId: socket.user._id,
+      name: socket.user.name,
+      isTyping: true,
+    });
+  });
+
+  socket.on("typing-stop", ({ conversationId }) => {
+    socket.to(`conversation:${conversationId}`).emit("user-typing", {
+      userId: socket.user._id,
+      name: socket.user.name,
+      isTyping: false,
+    });
+  });
+
+  // ─── Send Message ─────────────────────────────────────────────
   socket.on("send-message", async (data) => {
     try {
       const { roomId, message, receiverId } = data;
@@ -530,3 +594,15 @@ server.on("error", (err) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
+// ✅ Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Rejection:', err);
+});
+
+// ✅ Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+});
+
+export { app, server, io };

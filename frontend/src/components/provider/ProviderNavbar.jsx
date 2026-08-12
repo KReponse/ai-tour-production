@@ -1,6 +1,8 @@
 // src/components/provider/ProviderNavbar.jsx
-// ✅ FIXED - Prevent infinite re-fetching with useMemo and proper dependencies
+// ✅ COMPLETE FIXED - Prevent infinite re-fetching with useMemo and proper dependencies
 // ✅ FIXED: Added token check and graceful 401 handling for notifications
+// ✅ ADDED: Messages icon with unread badge for provider chat
+// ✅ FIXED: Chat unread count correctly uses response.unreadCount
 
 import React, {
   useState,
@@ -31,6 +33,7 @@ import {
   AlertCircle,
   DollarSign,
   Users,
+  MessageCircle,
 } from "lucide-react";
 
 import {
@@ -42,6 +45,7 @@ import {
 } from "../../contexts/AuthContext";
 
 import notificationService from "../../services/notification.service";
+import { getTotalUnreadCount } from "../../services/chatService";
 import logo from "../../assets/images/logo.png";
 
 // ===============================
@@ -140,6 +144,7 @@ const ProviderNavbar = ({
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [profileImageError, setProfileImageError] = useState(false);
   
@@ -168,18 +173,10 @@ const ProviderNavbar = ({
 
   /* ================= FETCH NOTIFICATIONS ================= */
   const fetchNotifications = useCallback(async () => {
-    // ✅ FIXED: Check if user is authenticated before fetching
-    if (!user) {
-      console.log('ℹ️ No user, skipping notifications');
-      return;
-    }
+    if (!user) return;
 
-    // ✅ FIXED: Check for token
     const token = localStorage.getItem('token');
-    if (!token) {
-      console.log('ℹ️ No token found, skipping notifications');
-      return;
-    }
+    if (!token) return;
 
     try {
       setLoading(true);
@@ -188,7 +185,6 @@ const ProviderNavbar = ({
       setNotifications(response.notifications || []);
       setUnreadCount(response.unreadCount || 0);
     } catch (error) {
-      // ✅ FIXED: Graceful 401 handling
       if (error.response?.status === 401) {
         console.log('ℹ️ User not authenticated, skipping notifications');
         setNotifications([]);
@@ -199,30 +195,53 @@ const ProviderNavbar = ({
     } finally {
       setLoading(false);
     }
-  }, [user]); // ✅ Depends on user
+  }, [user]);
 
-  // ✅ FIXED: Fetch notifications only once on mount
+  /* ================= FETCH CHAT UNREAD COUNT ================= */
+  const fetchChatUnreadCount = useCallback(async () => {
+    if (!user) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const response = await getTotalUnreadCount();
+      if (response.success) {
+        // ✅ FIXED: Use response.unreadCount directly
+        setChatUnreadCount(response.unreadCount || 0);
+      }
+    } catch (error) {
+      if (error.response?.status === 401) {
+        console.log('ℹ️ User not authenticated, skipping chat unread count');
+        return;
+      }
+      console.error('Error fetching chat unread count:', error);
+    }
+  }, [user]);
+
+  // ✅ Fetch notifications only once on mount
   useEffect(() => {
     if (user && !hasFetchedRef.current) {
       fetchNotifications();
+      fetchChatUnreadCount();
       hasFetchedRef.current = true;
     }
-  }, [user, fetchNotifications]);
+  }, [user, fetchNotifications, fetchChatUnreadCount]);
 
-  // ✅ FIXED: Refresh notifications when notification panel opens
+  // ✅ Refresh notifications when notification panel opens
   useEffect(() => {
     if (notificationOpen && user) {
       fetchNotifications();
     }
   }, [notificationOpen, user, fetchNotifications]);
 
-  // ✅ FIXED: Refresh user data only once on mount
+  // ✅ Refresh user data only once on mount
   useEffect(() => {
     if (user && !hasRefreshedRef.current) {
       refreshUser();
       hasRefreshedRef.current = true;
     }
-  }, [user]); // ✅ Only depends on user, NOT refreshUser
+  }, [user]);
 
   /* ================= DARK MODE ================= */
   useEffect(() => {
@@ -262,7 +281,6 @@ const ProviderNavbar = ({
       
       setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (error) {
-      // ✅ FIXED: Graceful 401 handling
       if (error.response?.status === 401) {
         console.log('ℹ️ User not authenticated, cannot mark as read');
         return;
@@ -282,7 +300,6 @@ const ProviderNavbar = ({
       
       setUnreadCount(0);
     } catch (error) {
-      // ✅ FIXED: Graceful 401 handling
       if (error.response?.status === 401) {
         console.log('ℹ️ User not authenticated, cannot mark all as read');
         return;
@@ -410,6 +427,20 @@ const ProviderNavbar = ({
               <Sun className="w-5 h-5 text-[#F59E0B]" />
             ) : (
               <Moon className="w-5 h-5 dark:text-white" />
+            )}
+          </button>
+
+          {/* ✅ MESSAGES - Provider Chat */}
+          <button
+            onClick={() => navigate('/provider/chat')}
+            className="relative w-11 h-11 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:scale-105 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-300"
+            aria-label="Messages"
+          >
+            <MessageCircle className="w-5 h-5 dark:text-white" />
+            {chatUnreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-5 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center border-2 border-white dark:border-gray-950 px-1 animate-pulse">
+                {chatUnreadCount > 9 ? '9+' : chatUnreadCount}
+              </span>
             )}
           </button>
 

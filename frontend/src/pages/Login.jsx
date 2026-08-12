@@ -1,5 +1,5 @@
 // frontend/src/pages/Login.jsx
-// ✅ UPDATED - Enhanced error handling for login attempts and account lock
+// ✅ COMPLETE FIXED - Handles nested and flat response structures
 
 import React, { useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -8,15 +8,6 @@ import { loginUser } from "../services/authService";
 import { useAuth } from "../contexts/AuthContext";
 import toast from "react-hot-toast";
 import logo from "../assets/images/logo.png";
-
-// ===============================
-// AI TOUR COLORS
-// ===============================
-// Teal  : #0D9488
-// Gold  : #F59E0B
-// Slate : #374151
-// White : #FFFFFF
-// ===============================
 
 const Login = () => {
   const navigate = useNavigate();
@@ -30,7 +21,6 @@ const Login = () => {
     password: "",
   });
 
-  // ✅ Prevent duplicate submissions
   const isSubmitting = useRef(false);
 
   const handleChange = (e) => {
@@ -38,7 +28,6 @@ const Login = () => {
       ...formData,
       [e.target.name]: e.target.value,
     });
-    // ✅ Clear error on typing
     if (error) setError(null);
   };
 
@@ -46,7 +35,6 @@ const Login = () => {
     e.preventDefault();
 
     if (isSubmitting.current || loading) {
-      console.log("⏳ Submission already in progress");
       return;
     }
 
@@ -55,44 +43,125 @@ const Login = () => {
       setLoading(true);
       setError(null);
 
-      const data = await loginUser(formData);
+      const response = await loginUser(formData);
+      
+      console.log("🔐 Full login response:", JSON.stringify(response, null, 2));
 
-      console.log("🔐 Login response:", data);
+      // ✅ Handle multiple response structures
+      let accessToken = null;
+      let refreshToken = null;
+      let user = null;
 
-      if (data.accessToken) {
-        localStorage.setItem("token", data.accessToken);
-        if (data.refreshToken) {
-          localStorage.setItem("refreshToken", data.refreshToken);
-        }
+      // Case 1: Flat structure { accessToken, refreshToken, user }
+      if (response.accessToken && response.user) {
+        accessToken = response.accessToken;
+        refreshToken = response.refreshToken;
+        user = response.user;
+        console.log("📦 Case 1: Flat structure");
+      }
+      // Case 2: Nested in data { data: { accessToken, refreshToken, user } }
+      else if (response.data?.accessToken && response.data?.user) {
+        accessToken = response.data.accessToken;
+        refreshToken = response.data.refreshToken;
+        user = response.data.user;
+        console.log("📦 Case 2: Nested in data");
+      }
+      // Case 3: Nested in userData { userData: { accessToken, refreshToken, user } }
+      else if (response.userData?.accessToken && response.userData?.user) {
+        accessToken = response.userData.accessToken;
+        refreshToken = response.userData.refreshToken;
+        user = response.userData.user;
+        console.log("📦 Case 3: Nested in userData");
+      }
+      // Case 4: Nested in result { result: { accessToken, refreshToken, user } }
+      else if (response.result?.accessToken && response.result?.user) {
+        accessToken = response.result.accessToken;
+        refreshToken = response.result.refreshToken;
+        user = response.result.user;
+        console.log("📦 Case 4: Nested in result");
+      }
+      // Case 5: Token in token field
+      else if (response.token && response.user) {
+        accessToken = response.token;
+        refreshToken = response.refreshToken;
+        user = response.user;
+        console.log("📦 Case 5: token field");
+      }
+      // Case 6: Check if response itself is the data from ResponseUtils.success
+      else if (response.data?.data?.accessToken) {
+        accessToken = response.data.data.accessToken;
+        refreshToken = response.data.data.refreshToken;
+        user = response.data.data.user;
+        console.log("📦 Case 6: Deep nested in data.data");
+      }
+      // Case 7: Check if response is wrapped in success
+      else if (response.success && response.data?.accessToken) {
+        accessToken = response.data.accessToken;
+        refreshToken = response.data.refreshToken;
+        user = response.data.user;
+        console.log("📦 Case 7: success wrapper");
+      }
+
+      console.log("📦 Extracted - Token:", !!accessToken, "User:", !!user);
+
+      if (accessToken && user) {
+        // ✅ Login successful
+        const loggedIn = login(user, accessToken, refreshToken);
         
-        login(data.user, data.accessToken);
-
-        if (data.user?.role === "admin") {
-          navigate("/admin");
-        } else if (data.user?.role === "provider") {
-          navigate("/provider/dashboard");
-        } else {
-          navigate("/");
-        }
-      } else {
-        if (data.token) {
-          login(data.user, data.token);
-          navigate("/");
-        } else {
-          setError({
-            type: "error",
-            message: "Login successful but no token received"
-          });
+        if (loggedIn) {
+          toast.success(`Welcome back, ${user.name || 'Traveler'}! 🎉`);
+          
+          // ✅ Navigate based on role
+          if (user?.role === "admin") {
+            navigate("/admin");
+          } else if (user?.role === "provider") {
+            navigate("/provider/dashboard");
+          } else {
+            navigate("/");
+          }
+          return;
         }
       }
+
+      // ✅ If we have token but no user, try to get user from /auth/me
+      if (accessToken && !user) {
+        try {
+          console.log("🔄 Token exists, fetching user from /auth/me...");
+          const { getCurrentUser } = await import('../services/authService');
+          const fetchedUser = await getCurrentUser();
+          
+          if (fetchedUser) {
+            login(fetchedUser, accessToken, refreshToken);
+            toast.success(`Welcome back, ${fetchedUser.name || 'Traveler'}! 🎉`);
+            
+            if (fetchedUser?.role === "admin") {
+              navigate("/admin");
+            } else if (fetchedUser?.role === "provider") {
+              navigate("/provider/dashboard");
+            } else {
+              navigate("/");
+            }
+            return;
+          }
+        } catch (userError) {
+          console.error("❌ Failed to fetch user:", userError);
+        }
+      }
+
+      // ✅ If we reached here, something went wrong
+      console.error("❌ Could not extract user data from response:", response);
+      setError({
+        type: "error",
+        message: "Login successful but could not retrieve user data. Please try again."
+      });
+
     } catch (error) {
       console.error("❌ Login error:", error);
       
-      const errorData = error.response?.data;
+      const errorData = error?.data || error?.response?.data || error;
       
       // ✅ Handle structured error responses
       if (errorData) {
-        // ✅ Account locked
         if (errorData.code === 'ACCOUNT_LOCKED') {
           const lockedUntil = errorData.lockedUntil 
             ? new Date(errorData.lockedUntil).toLocaleTimeString()
@@ -103,23 +172,19 @@ const Login = () => {
             message: errorData.message || 'Account temporarily locked.',
             lockedUntil: lockedUntil,
             canResetPassword: errorData.canResetPassword || true,
-            action: errorData.action
           });
           return;
         }
         
-        // ✅ Invalid credentials with remaining attempts
         if (errorData.code === 'INVALID_CREDENTIALS' || errorData.remainingAttempts !== undefined) {
           const remaining = errorData.remainingAttempts || 0;
-          const suggestReset = errorData.suggestResetPassword || false;
           
           setError({
             type: 'attempts',
             message: errorData.message || 'Invalid credentials.',
             remainingAttempts: remaining,
             maxAttempts: errorData.maxAttempts || 5,
-            suggestResetPassword: suggestReset,
-            action: errorData.action
+            suggestResetPassword: errorData.suggestResetPassword || false,
           });
           return;
         }
@@ -128,7 +193,7 @@ const Login = () => {
       // ✅ Fallback error
       setError({
         type: 'error',
-        message: error.response?.data?.message || error.message || "Login failed"
+        message: error?.message || errorData?.message || "Login failed"
       });
     } finally {
       setLoading(false);
@@ -141,7 +206,6 @@ const Login = () => {
   const renderError = () => {
     if (!error) return null;
 
-    // ✅ Account Locked
     if (error.type === 'locked') {
       return (
         <div className="mb-5 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4">
@@ -162,9 +226,6 @@ const Login = () => {
                   >
                     Forgot Password? Reset it now →
                   </Link>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Password reset works even when your account is locked.
-                  </p>
                 </div>
               )}
             </div>
@@ -173,10 +234,7 @@ const Login = () => {
       );
     }
 
-    // ✅ Attempts remaining
     if (error.type === 'attempts') {
-      const showResetSuggestion = error.suggestResetPassword;
-      
       return (
         <div className={`mb-5 rounded-2xl border p-4 ${
           error.remainingAttempts <= 1
@@ -196,30 +254,11 @@ const Login = () => {
                 {error.message}
               </p>
               <div className="mt-2 flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[#374151] dark:text-white">
-                    Attempts remaining:
-                  </span>
-                  <span className={`text-sm font-bold ${
-                    error.remainingAttempts <= 1 
-                      ? 'text-red-500' 
-                      : 'text-[#F59E0B]'
-                  }`}>
-                    {error.remainingAttempts} / {error.maxAttempts}
-                  </span>
-                </div>
-                {error.remainingAttempts <= 3 && (
-                  <div className="w-24 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-300 ${
-                        error.remainingAttempts <= 1 ? 'bg-red-500' : 'bg-[#F59E0B]'
-                      }`}
-                      style={{ width: `${(error.remainingAttempts / error.maxAttempts) * 100}%` }}
-                    />
-                  </div>
-                )}
+                <span className="text-sm font-medium text-[#374151] dark:text-white">
+                  Attempts remaining: <span className="font-bold">{error.remainingAttempts} / {error.maxAttempts}</span>
+                </span>
               </div>
-              {showResetSuggestion && (
+              {error.suggestResetPassword && (
                 <div className="mt-3">
                   <Link
                     to="/forgot-password"
@@ -235,7 +274,6 @@ const Login = () => {
       );
     }
 
-    // ✅ Generic error
     return (
       <div className="mb-5 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 text-sm">
         {error.message}
@@ -245,17 +283,13 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0D9488]/5 via-white to-[#F59E0B]/5 dark:from-gray-950 dark:via-gray-900 dark:to-black px-4 py-10">
-
       <div className="w-full max-w-md">
         {/* LOGO */}
         <div className="text-center mb-8">
           <div className="w-28 h-28 mx-auto rounded-[32px] bg-white dark:bg-gray-900 flex items-center justify-center shadow-2xl shadow-[#0D9488]/20 mb-5 p-3 border border-gray-100 dark:border-gray-800">
             <img src={logo} alt="AI Tour Logo" className="w-full h-full object-contain" />
           </div>
-
-          <h1 className="text-4xl font-black text-[#374151] dark:text-white">
-            AI Tour
-          </h1>
+          <h1 className="text-4xl font-black text-[#374151] dark:text-white">AI Tour</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2 flex items-center justify-center gap-2">
             <Sparkles className="w-4 h-4 text-[#0D9488]" />
             Discover. Plan. Travel Smarter.
@@ -264,23 +298,16 @@ const Login = () => {
 
         {/* CARD */}
         <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-[32px] shadow-2xl border border-white/20 dark:border-gray-800 p-8">
-
           <div className="mb-6">
-            <h2 className="text-3xl font-black text-[#374151] dark:text-white">
-              Welcome Back
-            </h2>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">
-              Sign in to continue your journey
-            </p>
+            <h2 className="text-3xl font-black text-[#374151] dark:text-white">Welcome Back</h2>
+            <p className="text-gray-500 dark:text-gray-400 mt-1">Sign in to continue your journey</p>
           </div>
 
           {renderError()}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
-                Email Address
-              </label>
+              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">Email Address</label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -297,9 +324,7 @@ const Login = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
-                Password
-              </label>
+              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">Password</label>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -324,10 +349,7 @@ const Login = () => {
             </div>
 
             <div className="flex justify-end">
-              <Link
-                to="/forgot-password"
-                className="text-[#0D9488] font-semibold hover:text-[#0D9488]/80 transition"
-              >
+              <Link to="/forgot-password" className="text-[#0D9488] font-semibold hover:text-[#0D9488]/80 transition">
                 Forgot Password?
               </Link>
             </div>
@@ -344,8 +366,7 @@ const Login = () => {
                 </div>
               ) : (
                 <div className="flex items-center justify-center gap-2">
-                  Login
-                  <ArrowRight className="w-5 h-5" />
+                  Login <ArrowRight className="w-5 h-5" />
                 </div>
               )}
             </button>
@@ -353,10 +374,7 @@ const Login = () => {
 
           <div className="mt-8 text-center">
             <p className="text-gray-500 dark:text-gray-400">Don't have an account?</p>
-            <Link
-              to="/register"
-              className="inline-block mt-2 font-bold text-[#0D9488] hover:text-[#0D9488]/80 transition"
-            >
+            <Link to="/register" className="inline-block mt-2 font-bold text-[#0D9488] hover:text-[#0D9488]/80 transition">
               Create Account →
             </Link>
           </div>

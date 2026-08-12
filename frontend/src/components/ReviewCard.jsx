@@ -1,8 +1,10 @@
 // frontend/src/components/ReviewCard.jsx
 // ✅ PRODUCTION READY - Full review card with moderation support
 // ✅ FIXED: Replaced process.env with import.meta.env for Vite compatibility
+// ✅ OPTIMIZED: Added React.memo for performance
+// ✅ OPTIMIZED: Memoized child components
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Star,
@@ -24,9 +26,9 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 
 // ===============================
-// STATUS BADGE COMPONENT
+// STATUS BADGE COMPONENT - Memoized
 // ===============================
-const StatusBadge = ({ status }) => {
+const StatusBadge = memo(({ status }) => {
   const configs = {
     published: {
       bg: 'bg-[#0D9488]/10',
@@ -62,9 +64,127 @@ const StatusBadge = ({ status }) => {
       {config.label}
     </span>
   );
-};
+});
 
-const ReviewCard = ({
+StatusBadge.displayName = 'StatusBadge';
+
+// ===============================
+// STARS COMPONENT - Memoized
+// ===============================
+const Stars = memo(({ rating, size = 'w-4 h-4' }) => {
+  return (
+    <div className="flex gap-0.5">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          className={`${size} ${
+            star <= rating
+              ? 'text-[#F59E0B] fill-[#F59E0B]'
+              : 'text-gray-300 dark:text-gray-600'
+          }`}
+        />
+      ))}
+    </div>
+  );
+});
+
+Stars.displayName = 'Stars';
+
+// ===============================
+// IMAGE GALLERY COMPONENT - Memoized
+// ===============================
+const ImageGallery = memo(({ images, onImageClick, maxDisplay = 4 }) => {
+  if (!images || images.length === 0) return null;
+
+  const displayImages = images.slice(0, maxDisplay);
+  const remaining = images.length - maxDisplay;
+
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+      {displayImages.map((img, index) => (
+        <button
+          key={index}
+          onClick={() => onImageClick(index)}
+          className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden hover:opacity-90 transition relative group"
+        >
+          <img
+            src={img.url}
+            alt={img.caption || `Review photo ${index + 1}`}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              e.target.src = 'https://via.placeholder.com/80x80?text=No+Image';
+            }}
+          />
+          {index === maxDisplay - 1 && remaining > 0 && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-bold">
+              +{remaining}
+            </div>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+});
+
+ImageGallery.displayName = 'ImageGallery';
+
+// ===============================
+// PROVIDER REPLY COMPONENT - Memoized
+// ===============================
+const ProviderReply = memo(({ reply, providerName, replyAt, updatedAt, onEdit }) => {
+  const formatDate = (date) => {
+    if (!date) return '';
+    try {
+      return new Date(date).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <div className="mt-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+      <div className="flex items-start gap-2">
+        <Reply className="w-4 h-4 text-[#0D9488] flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-[#0D9488]">
+              {providerName} (Provider)
+            </p>
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                className="text-xs text-gray-400 hover:text-[#0D9488] transition"
+              >
+                Edit Reply
+              </button>
+            )}
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+            {reply}
+          </p>
+          <div className="flex gap-2 text-xs text-gray-400 mt-1">
+            <span>Responded on {formatDate(replyAt)}</span>
+            {updatedAt && (
+              <span>(updated {formatDate(updatedAt)})</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+ProviderReply.displayName = 'ProviderReply';
+
+// ===============================
+// MAIN REVIEW CARD COMPONENT
+// ===============================
+const ReviewCard = memo(({
   review,
   onEdit,
   onDelete,
@@ -301,23 +421,6 @@ const ReviewCard = ({
   // ✅ Memoized render helpers
   // ============================================================
   
-  const renderStars = useCallback((rating, size = 'w-4 h-4') => {
-    return (
-      <div className="flex gap-0.5">
-        {[1, 2, 3, 4, 5].map((star) => (
-          <Star
-            key={star}
-            className={`${size} ${
-              star <= rating
-                ? 'text-[#F59E0B] fill-[#F59E0B]'
-                : 'text-gray-300 dark:text-gray-600'
-            }`}
-          />
-        ))}
-      </div>
-    );
-  }, []);
-
   const formatDate = useCallback((date) => {
     if (!date) return '';
     try {
@@ -378,6 +481,7 @@ const ReviewCard = ({
                     src={reviewerAvatar}
                     alt={reviewerName}
                     className="w-10 h-10 rounded-full object-cover border-2 border-[#0D9488]"
+                    loading="lazy"
                   />
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white font-bold text-sm">
@@ -394,7 +498,7 @@ const ReviewCard = ({
                 </h4>
               )}
               <div className="flex items-center gap-2 flex-wrap">
-                {renderStars(review.rating)}
+                <Stars rating={review.rating} />
                 <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
                   {review.rating}.0
                 </span>
@@ -456,32 +560,14 @@ const ReviewCard = ({
           )}
         </div>
 
-        {/* IMAGES GALLERY */}
+        {/* IMAGES GALLERY - Using memoized component */}
         {hasImages && !compact && (
           <div className="mt-3">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              {images.slice(0, 4).map((img, index) => (
-                <button
-                  key={index}
-                  onClick={() => openLightbox(index)}
-                  className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden hover:opacity-90 transition relative group"
-                >
-                  <img
-                    src={img.url}
-                    alt={img.caption || `Review photo ${index + 1}`}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      e.target.src = 'https://via.placeholder.com/80x80?text=No+Image';
-                    }}
-                  />
-                  {index === 3 && images.length > 4 && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-bold">
-                      +{images.length - 4}
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
+            <ImageGallery 
+              images={images} 
+              onImageClick={openLightbox} 
+              maxDisplay={4}
+            />
           </div>
         )}
 
@@ -496,45 +582,23 @@ const ReviewCard = ({
           </Link>
         )}
 
-        {/* PROVIDER REPLY */}
+        {/* PROVIDER REPLY - Using memoized component */}
         {showProviderReply && hasProviderReply && (
-          <div className="mt-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-            <div className="flex items-start gap-2">
-              <Reply className="w-4 h-4 text-[#0D9488] flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-[#0D9488]">
-                    {providerName} (Provider)
-                  </p>
-                  {canEditReply && onReply && (
-                    <button
-                      onClick={() => {
-                        setReplyText(review.providerReply);
-                        setIsReplying(true);
-                      }}
-                      className="text-xs text-gray-400 hover:text-[#0D9488] transition"
-                    >
-                      Edit Reply
-                    </button>
-                  )}
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
-                  {review.providerReply}
-                </p>
-                <div className="flex gap-2 text-xs text-gray-400 mt-1">
-                  <span>Responded on {formatDate(review.providerReplyAt)}</span>
-                  {review.providerReplyUpdatedAt && (
-                    <span>(updated {formatDate(review.providerReplyUpdatedAt)})</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <ProviderReply
+            reply={review.providerReply}
+            providerName={providerName}
+            replyAt={review.providerReplyAt}
+            updatedAt={review.providerReplyUpdatedAt}
+            onEdit={canEditReply && onReply ? () => {
+              setReplyText(review.providerReply);
+              setIsReplying(true);
+            } : null}
+          />
         )}
 
         {/* REPLY INPUT */}
         {isReplying && (
-          <form onSubmit={handleReplySubmit} className="mt-4 flex gap-2">
+          <form onSubmit={handleReplySubmit} className="mt-4 flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               value={replyText}
@@ -542,23 +606,25 @@ const ReviewCard = ({
               placeholder="Write your response..."
               className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none"
             />
-            <button
-              type="submit"
-              disabled={!replyText.trim()}
-              className="px-4 py-2 rounded-xl bg-[#0D9488] text-white text-sm font-medium hover:bg-[#0D9488]/80 transition disabled:opacity-50"
-            >
-              Send
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsReplying(false);
-                setReplyText('');
-              }}
-              className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-            >
-              Cancel
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={!replyText.trim()}
+                className="px-4 py-2 rounded-xl bg-[#0D9488] text-white text-sm font-medium hover:bg-[#0D9488]/80 transition disabled:opacity-50"
+              >
+                Send
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsReplying(false);
+                  setReplyText('');
+                }}
+                className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              >
+                Cancel
+              </button>
+            </div>
           </form>
         )}
 
@@ -676,6 +742,7 @@ const ReviewCard = ({
               src={images[imageLightbox.index]?.url}
               alt={images[imageLightbox.index]?.caption || `Review photo ${imageLightbox.index + 1}`}
               className="w-full h-full object-contain max-h-[80vh]"
+              loading="lazy"
               onError={(e) => {
                 e.target.src = 'https://via.placeholder.com/800x600?text=No+Image';
               }}
@@ -690,7 +757,7 @@ const ReviewCard = ({
       {/* REPORT MODAL */}
       {showReportModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-3xl max-w-md w-full p-6">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-[#374151] dark:text-white flex items-center gap-2">
                 <Flag className="w-5 h-5 text-orange-500" />
@@ -718,7 +785,7 @@ const ReviewCard = ({
                 />
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   type="button"
                   onClick={() => setShowReportModal(false)}
@@ -740,6 +807,9 @@ const ReviewCard = ({
       )}
     </>
   );
-};
+});
+
+// ✅ Memoize the entire component
+ReviewCard.displayName = 'ReviewCard';
 
 export default ReviewCard;

@@ -1,5 +1,7 @@
 // backend/src/models/Review.js
 // ✅ PRODUCTION READY - Review Model with Moderation Workflow
+// ✅ COMPLETE FIXED - Removed index: true from status field
+// ✅ All indexes defined ONLY in schema.index() section
 // ✅ Supports: published, hidden, deleted, reported statuses
 // ✅ Provider replies, report system, edit tracking, soft delete
 // ✅ FIXED: Added getListingStats static method
@@ -80,7 +82,7 @@ const reviewSchema = new mongoose.Schema(
       type: String,
       enum: ["published", "hidden", "deleted", "reported"],
       default: "published",
-      index: true,
+      // ✅ REMOVED: index: true - defined in schema.index() below
     },
 
     // =========================
@@ -256,23 +258,38 @@ const reviewSchema = new mongoose.Schema(
 );
 
 // =========================
-// ✅ INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
-reviewSchema.index({ traveler: 1, createdAt: -1 });
-reviewSchema.index({ provider: 1, createdAt: -1 });
-reviewSchema.index({ listing: 1, createdAt: -1 });
+// NO index:true in field definitions above
+// All indexes defined ONLY here
+
+// Single field indexes
+reviewSchema.index({ traveler: 1 });
+reviewSchema.index({ provider: 1 });
+reviewSchema.index({ listing: 1 });
 reviewSchema.index({ booking: 1 }, { unique: true });
-reviewSchema.index({ status: 1, createdAt: -1 });
+reviewSchema.index({ status: 1 });
 reviewSchema.index({ rating: 1 });
 reviewSchema.index({ createdAt: -1 });
 reviewSchema.index({ reportedCount: -1 });
-reviewSchema.index({ provider: 1, status: 1 });
-reviewSchema.index({ listing: 1, status: 1 });
 
 // Compound indexes for common queries
+reviewSchema.index({ traveler: 1, createdAt: -1 });
+reviewSchema.index({ provider: 1, createdAt: -1 });
+reviewSchema.index({ listing: 1, createdAt: -1 });
+reviewSchema.index({ status: 1, createdAt: -1 });
+reviewSchema.index({ provider: 1, status: 1 });
+reviewSchema.index({ listing: 1, status: 1 });
 reviewSchema.index({ listing: 1, status: 1, rating: 1 });
 reviewSchema.index({ provider: 1, status: 1, createdAt: -1 });
 reviewSchema.index({ status: 1, reportedCount: 1 });
+
+// =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. booking has unique:true - this automatically creates an index
+// 2. No field has both index:true AND a schema.index() call
+// 3. All indexes are defined ONLY in this section
 
 // =========================
 // ✅ VIRTUALS
@@ -334,9 +351,6 @@ reviewSchema.virtual("shouldFlag").get(function () {
 // ✅ INSTANCE METHODS
 // =========================
 
-/**
- * Publish review (set status to published)
- */
 reviewSchema.methods.publish = async function () {
   this.status = "published";
   this.publishedAt = new Date();
@@ -345,9 +359,6 @@ reviewSchema.methods.publish = async function () {
   return this;
 };
 
-/**
- * Hide review with reason
- */
 reviewSchema.methods.hide = async function (adminId, reason = "No reason provided") {
   this.status = "hidden";
   this.hiddenBy = adminId;
@@ -359,9 +370,6 @@ reviewSchema.methods.hide = async function (adminId, reason = "No reason provide
   return this;
 };
 
-/**
- * Restore hidden review
- */
 reviewSchema.methods.restore = async function (adminId) {
   this.status = "published";
   this.hiddenBy = null;
@@ -374,9 +382,6 @@ reviewSchema.methods.restore = async function (adminId) {
   return this;
 };
 
-/**
- * Soft delete review
- */
 reviewSchema.methods.softDelete = async function (userId, reason = "No reason provided") {
   this.status = "deleted";
   this.deletedBy = userId;
@@ -388,11 +393,7 @@ reviewSchema.methods.softDelete = async function (userId, reason = "No reason pr
   return this;
 };
 
-/**
- * Report review
- */
 reviewSchema.methods.report = async function (userId, reason) {
-  // Check if user already reported
   const alreadyReported = this.reportedBy.some(
     (r) => r.user.toString() === userId.toString()
   );
@@ -414,9 +415,6 @@ reviewSchema.methods.report = async function (userId, reason) {
   return this;
 };
 
-/**
- * Add provider reply
- */
 reviewSchema.methods.addReply = async function (reply) {
   if (!this.canReply) {
     throw new Error("Cannot reply to this review in its current state");
@@ -428,9 +426,6 @@ reviewSchema.methods.addReply = async function (reply) {
   return this;
 };
 
-/**
- * Update provider reply
- */
 reviewSchema.methods.updateReply = async function (reply) {
   if (!this.hasProviderReply) {
     throw new Error("No reply exists to update");
@@ -442,15 +437,11 @@ reviewSchema.methods.updateReply = async function (reply) {
   return this;
 };
 
-/**
- * Edit review content
- */
 reviewSchema.methods.edit = async function (data) {
   if (!this.canEdit) {
     throw new Error("Review edit window has expired");
   }
   
-  // Save edit history
   this.editHistory.push({
     title: this.title,
     comment: this.comment,
@@ -475,9 +466,6 @@ reviewSchema.methods.edit = async function (data) {
 // ✅ STATIC METHODS
 // =========================
 
-/**
- * Get published reviews for a listing
- */
 reviewSchema.statics.getPublishedByListing = async function (listingId, options = {}) {
   const { page = 1, limit = 20, sort = "-createdAt" } = options;
   
@@ -497,15 +485,11 @@ reviewSchema.statics.getPublishedByListing = async function (listingId, options 
   return { reviews, total, page, limit, totalPages: Math.ceil(total / limit) };
 };
 
-/**
- * Get reviews for provider with proper visibility
- */
 reviewSchema.statics.getByProvider = async function (providerId, options = {}) {
   const { page = 1, limit = 20, status = null } = options;
   
   const filter = { provider: providerId };
   
-  // Provider can see: published, reported, hidden (their own)
   if (status) {
     filter.status = status;
   } else {
@@ -527,9 +511,6 @@ reviewSchema.statics.getByProvider = async function (providerId, options = {}) {
   return { reviews, total, page, limit, totalPages: Math.ceil(total / limit) };
 };
 
-/**
- * Get all reviews for admin with filters
- */
 reviewSchema.statics.getForAdmin = async function (options = {}) {
   const {
     page = 1,
@@ -587,9 +568,6 @@ reviewSchema.statics.getForAdmin = async function (options = {}) {
   return { reviews, total, page, limit, totalPages: Math.ceil(total / limit) };
 };
 
-/**
- * Get review statistics for admin dashboard
- */
 reviewSchema.statics.getStats = async function () {
   const [total, published, hidden, deleted, reported, reportedCount, avgRating] = await Promise.all([
     this.countDocuments({}),
@@ -633,31 +611,21 @@ reviewSchema.statics.getStats = async function () {
 };
 
 // =========================
-// ✅ NEW: getListingStats - FIXES THE ERROR
+// ✅ getListingStats
 // =========================
 
-/**
- * Get review statistics for a specific listing
- * @param {string} listingId - The listing ID
- * @param {string} status - Optional status filter (default: published)
- * @returns {Promise<Object>} - Statistics object with average rating, total, and distribution
- */
 reviewSchema.statics.getListingStats = async function (listingId, status = "published") {
   try {
-    // Validate listingId
     if (!listingId || typeof listingId !== 'string') {
       throw new Error('Invalid listing ID');
     }
 
-    // Convert to ObjectId
     const listingObjectId = new mongoose.Types.ObjectId(listingId);
 
-    // Build match filter
     const matchFilter = { 
       listing: listingObjectId,
     };
     
-    // Only include approved/published reviews for public stats
     if (status) {
       matchFilter.status = status;
     } else {
@@ -680,7 +648,6 @@ reviewSchema.statics.getListingStats = async function (listingId, status = "publ
       },
     ]);
 
-    // Return default stats if no reviews found
     if (!stats || stats.length === 0) {
       return {
         averageRating: 0,
@@ -710,7 +677,6 @@ reviewSchema.statics.getListingStats = async function (listingId, status = "publ
         4: result.rating4 || 0,
         5: result.rating5 || 0,
       },
-      // Helper: percentage breakdown
       percentages: {
         1: totalReviews > 0 ? ((result.rating1 || 0) / totalReviews) * 100 : 0,
         2: totalReviews > 0 ? ((result.rating2 || 0) / totalReviews) * 100 : 0,
@@ -721,7 +687,6 @@ reviewSchema.statics.getListingStats = async function (listingId, status = "publ
     };
   } catch (error) {
     console.error('❌ Error in getListingStats:', error.message);
-    // Return default stats on error
     return {
       averageRating: 0,
       totalReviews: 0,
@@ -737,22 +702,18 @@ reviewSchema.statics.getListingStats = async function (listingId, status = "publ
 // =========================
 
 reviewSchema.pre("save", function (next) {
-  // If status is changing to published, set publishedAt
   if (this.isModified("status") && this.status === "published" && !this.publishedAt) {
     this.publishedAt = new Date();
   }
   
-  // If status is changing to hidden, set hiddenAt
   if (this.isModified("status") && this.status === "hidden" && !this.hiddenAt) {
     this.hiddenAt = new Date();
   }
   
-  // If status is changing to deleted, set deletedAt
   if (this.isModified("status") && this.status === "deleted" && !this.deletedAt) {
     this.deletedAt = new Date();
   }
   
-  // Ensure max images
   if (this.images && this.images.length > 10) {
     this.images = this.images.slice(0, 10);
   }

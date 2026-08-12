@@ -1,5 +1,6 @@
 // src/pages/Careers.jsx
 // ✅ UPDATED - Connected to Careers CMS API
+// ✅ REMOVED - Open Positions section
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -73,7 +74,6 @@ const Careers = () => {
   const hero = data.hero || {};
   const stats = data.statistics || [];
   const benefits = data.benefits || [];
-  const jobs = data.jobs || [];
   const cta = data.cta || {};
 
   return (
@@ -130,53 +130,7 @@ const Careers = () => {
         </section>
       )}
 
-      {/* OPEN POSITIONS */}
-      {jobs.filter(j => j.active !== false && j.isOpen !== false).length > 0 && (
-        <section>
-          <h2 className="text-3xl font-black text-[#374151] dark:text-white mb-8">
-            Open Positions
-          </h2>
-          <div className="space-y-4">
-            {jobs.filter(j => j.active !== false && j.isOpen !== false).map((job, idx) => (
-              <div key={idx} className="bg-white dark:bg-gray-900 rounded-2xl p-6 border border-gray-100 dark:border-gray-800 hover:shadow-lg transition group">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-bold text-[#374151] dark:text-white group-hover:text-[#0D9488] transition">
-                      {job.title}
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500 dark:text-gray-400">
-                      <span className="flex items-center gap-1">
-                        <Briefcase className="w-4 h-4" />
-                        {job.department}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-4 h-4" />
-                        {job.location}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" />
-                        {job.type}
-                      </span>
-                      {job.salary && (
-                        <span className="flex items-center gap-1 text-[#0D9488] font-semibold">
-                          <DollarSign className="w-4 h-4" />
-                          {job.salary}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <a href={job.applyLink || 'mailto:careers@aitour.rw'}>
-                    <Button className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white hover:scale-[1.02] transition">
-                      Apply Now
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </Button>
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* ❌ REMOVED: Open Positions section */}
 
       {/* CTA */}
       {cta.active !== false && (

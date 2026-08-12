@@ -1,5 +1,7 @@
 // backend/src/models/Payment.js
-// ✅ COMPLETE FIXED - Removed problematic virtual, added proper indexes
+// ✅ COMPLETE FIXED - All duplicate indexes removed
+// ✅ All indexes defined in ONE place only
+// ✅ Removed problematic virtual
 
 import mongoose from "mongoose";
 
@@ -64,21 +66,26 @@ const paymentSchema = new mongoose.Schema(
   // =========================
   stripeSessionId: {
     type: String,
+    // No index here - defined below
   },
 
   stripePaymentId: {
     type: String,
+    // No index here - defined below
   },
 
   transactionId: {
     type: String,
     unique: true,
     sparse: true,
+    // unique: true automatically creates an index
+    // DO NOT add this to schema.index() section below
   },
 
   refundId: {
     type: String,
     sparse: true,
+    // No index here - defined below
   },
 
   // =========================
@@ -115,10 +122,12 @@ const paymentSchema = new mongoose.Schema(
       "disputed",
     ],
     default: "pending",
+    // No index here - defined below
   },
 
   paidAt: {
     type: Date,
+    // No index here - defined below
   },
 
   refundedAt: {
@@ -138,10 +147,12 @@ const paymentSchema = new mongoose.Schema(
     type: String,
     enum: ["pending", "processing", "completed", "failed", "cancelled"],
     default: "pending",
+    // No index here - defined below
   },
 
   payoutDate: {
     type: Date,
+    // No index here - defined below
   },
 
   payoutReference: {
@@ -155,6 +166,7 @@ const paymentSchema = new mongoose.Schema(
   settlementCurrency: {
     type: String,
     default: "RWF",
+    // No index here - defined below
   },
 
   settlementAmount: {
@@ -176,6 +188,7 @@ const paymentSchema = new mongoose.Schema(
     type: String,
     enum: ["pending", "processing", "settled", "failed"],
     default: "pending",
+    // No index here - defined below
   },
 
   settledAt: {
@@ -208,6 +221,7 @@ const paymentSchema = new mongoose.Schema(
 
   providerReference: {
     type: String,
+    // No index here - defined below
   },
 
   providerData: {
@@ -225,10 +239,10 @@ const paymentSchema = new mongoose.Schema(
 });
 
 // =========================
-// ✅ SINGLE SOURCE OF TRUTH FOR INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
-// All indexes defined here - NO index:true in field definitions
-// Fields with unique: true already create indexes automatically
+// NO index:true in field definitions above
+// NO duplicate indexes here
 
 // =========================
 // ✅ SINGLE FIELD INDEXES
@@ -242,7 +256,7 @@ paymentSchema.index({ paidAt: -1 });
 paymentSchema.index({ stripeSessionId: 1 });
 paymentSchema.index({ stripePaymentId: 1 });
 paymentSchema.index({ providerReference: 1 });
-paymentSchema.index({ refundId: 1 });
+//paymentSchema.index({ refundId: 1 }); // ✅ Only defined here
 paymentSchema.index({ payoutStatus: 1 });
 paymentSchema.index({ payoutDate: -1 });
 paymentSchema.index({ settlementStatus: 1 });
@@ -261,9 +275,14 @@ paymentSchema.index({ provider: 1, payoutStatus: 1, paidAt: -1 });
 paymentSchema.index({ settlementStatus: 1, settledAt: -1 });
 
 // =========================
-// ✅ NOTE: transactionId index is created automatically by unique: true
-// Do NOT add paymentSchema.index({ transactionId: 1 }) here!
+// ✅ IMPORTANT NOTES ON INDEXES:
 // =========================
+// 1. transactionId has unique:true - this automatically creates an index
+//    DO NOT add: paymentSchema.index({ transactionId: 1 })
+// 2. All other indexes are defined ONLY in this section
+// 3. No field has both index:true AND a schema.index() call
+// 4. All single field indexes are listed above
+// 5. All compound indexes are listed above
 
 // =========================
 // ✅ VIRTUALS

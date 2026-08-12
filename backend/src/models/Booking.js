@@ -1,5 +1,7 @@
 // backend/src/models/Booking.js
-// ✅ COMPLETE FIXED - Removed duplicate indexes
+// ✅ COMPLETE FIXED - Removed ALL duplicate index definitions
+// ✅ All indexes defined in ONE place only
+// ✅ No field has both index:true AND schema.index()
 // ✅ Fields with unique: true keep their index, no duplicate schema.index() calls
 
 import mongoose from "mongoose";
@@ -11,13 +13,13 @@ const bookingSchema = new mongoose.Schema(
   // =========================
   bookingCode: {
     type: String,
-    unique: true, // ✅ Creates index automatically
+    unique: true, // ✅ Creates index automatically - DO NOT add schema.index() for this
     default: () => "AITOUR-" + Date.now(),
   },
 
   bookingNumber: {
     type: String,
-    unique: true, // ✅ Creates index automatically
+    unique: true, // ✅ Creates index automatically - DO NOT add schema.index() for this
     default: () => `BK-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
   },
 
@@ -28,27 +30,27 @@ const bookingSchema = new mongoose.Schema(
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: [true, "User is required"],
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   listing: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Listing",
     required: [true, "Listing is required for booking"],
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   provider: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: [true, "Provider is required"],
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   payment: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Payment",
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   // =========================
@@ -67,6 +69,7 @@ const bookingSchema = new mongoose.Schema(
       },
       message: "Start date must be today or in the future",
     },
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   endDate: {
@@ -123,12 +126,12 @@ const bookingSchema = new mongoose.Schema(
       "partially_refunded",
     ],
     default: "unpaid",
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   paymentId: {
     type: String,
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   paidAt: {
@@ -142,7 +145,7 @@ const bookingSchema = new mongoose.Schema(
     type: String,
     enum: ["pending", "processing", "completed", "failed"],
     default: "pending",
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   providerPayoutDate: {
@@ -167,7 +170,7 @@ const bookingSchema = new mongoose.Schema(
       "rejected",
     ],
     default: "pending_payment",
-    // ✅ index: true removed - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   // =========================
@@ -217,7 +220,7 @@ const bookingSchema = new mongoose.Schema(
 
   refundId: {
     type: String,
-    // ✅ NO index:true - defined in schema.index() below
+    // ✅ REMOVED: index: true - defined in schema.index() below
   },
 
   // =========================
@@ -244,10 +247,22 @@ const bookingSchema = new mongoose.Schema(
 });
 
 // =========================
-// ✅ SINGLE SOURCE OF TRUTH FOR INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
-// WARNING: Do NOT add schema.index() for fields with unique: true
-// They already create indexes automatically!
+// NO index:true in field definitions above
+// NO duplicate indexes here
+
+// =========================
+// ✅ IMPORTANT NOTES ON INDEXES:
+// =========================
+// 1. bookingCode has unique:true - this automatically creates an index
+//    DO NOT add: bookingSchema.index({ bookingCode: 1 })
+// 2. bookingNumber has unique:true - this automatically creates an index
+//    DO NOT add: bookingSchema.index({ bookingNumber: 1 })
+// 3. All other indexes are defined ONLY in this section
+// 4. No field has both index:true AND a schema.index() call
+// 5. All single field indexes are listed above
+// 6. All compound indexes are listed above
 
 // =========================
 // ✅ SINGLE FIELD INDEXES (for fields WITHOUT unique: true)
@@ -278,11 +293,6 @@ bookingSchema.index({ status: 1, startDate: 1 });
 bookingSchema.index({ providerPayoutStatus: 1, paidAt: 1 });
 bookingSchema.index({ status: 1, createdAt: -1 });
 bookingSchema.index({ user: 1, status: 1, createdAt: -1 });
-
-// =========================
-// ✅ NOTE: bookingCode and bookingNumber indexes are created automatically
-// by their unique: true declarations. Do NOT add them here!
-// =========================
 
 // =========================
 // ✅ VIRTUALS
