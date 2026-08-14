@@ -1,5 +1,5 @@
 // frontend/src/services/contactService.js
-// ✅ COMPLETE FIXED - Added submitContactForm
+// ✅ COMPLETE FIXED
 
 import API from './api';
 
@@ -20,6 +20,34 @@ export const getContactContent = async () => {
 };
 
 /**
+ * Update contact page content
+ * Admin only
+ */
+export const updateContactContent = async (contentData) => {
+  try {
+    const response = await API.put('/contact', contentData);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Error updating contact content:', error);
+    throw error;
+  }
+};
+
+/**
+ * Reset contact page content to defaults
+ * Admin only
+ */
+export const resetContactContent = async () => {
+  try {
+    const response = await API.post('/contact/reset');
+    return response.data;
+  } catch (error) {
+    console.error('❌ Error resetting contact content:', error);
+    throw error;
+  }
+};
+
+/**
  * Submit contact form
  */
 export const submitContactForm = async (formData) => {
@@ -33,7 +61,8 @@ export const submitContactForm = async (formData) => {
 };
 
 /**
- * Get all contact messages (admin only)
+ * Get all contact messages
+ * Admin only
  */
 export const getContactMessages = async () => {
   try {
@@ -46,7 +75,8 @@ export const getContactMessages = async () => {
 };
 
 /**
- * Get single contact message (admin only)
+ * Get single contact message
+ * Admin only
  */
 export const getContactMessage = async (id) => {
   try {
@@ -56,4 +86,13 @@ export const getContactMessage = async (id) => {
     console.error('❌ Error fetching contact message:', error);
     throw error;
   }
+};
+
+export default {
+  getContactContent,
+  updateContactContent,
+  resetContactContent,
+  submitContactForm,
+  getContactMessages,
+  getContactMessage,
 };
