@@ -1,9 +1,17 @@
 // backend/src/services/media/storage/cloudinaryStorage.js
-// ✅ Cloudinary Storage Provider - Production media storage
-// ✅ Fixed: Cloudinary video thumbnail startOffset (so_)
-// ✅ Fixed: Cloudinary public ID extraction for delete()
-// ✅ Fixed: Video/image transformed URLs
-// ✅ Added: Cloudinary upload/delete/getInfo timeouts
+// ============================================================
+// Cloudinary Storage Provider - Production Media Storage
+// ============================================================
+// FIXES:
+// ✅ Correct Cloudinary video thumbnail transformation: so_1
+// ✅ Supports video thumbnail generation with /video/upload/
+// ✅ Correct Cloudinary URL construction
+// ✅ Safer Cloudinary URL -> public_id extraction
+// ✅ Correct deletion of videos and thumbnails
+// ✅ Supports multer diskStorage, memoryStorage and streams
+// ✅ 120s upload timeout
+// ✅ 60s API/delete timeout
+// ============================================================
 
 import { v2 as cloudinary } from "cloudinary";
 import streamifier from "streamifier";
@@ -24,16 +32,9 @@ cloudinary.config({
 });
 
 // ============================================================
-// UPLOAD TO CLOUDINARY
+// UPLOAD FILE TO CLOUDINARY
 // ============================================================
 
-/**
- * Upload a file to Cloudinary from buffer, stream, or file path.
- *
- * @param {Buffer|Stream|string} fileData
- * @param {Object} options
- * @returns {Promise<Object>}
- */
 const uploadToCloudinary = (fileData, options = {}) => {
   return new Promise((resolve, reject) => {
     const uploadOptions = {
@@ -44,7 +45,7 @@ const uploadToCloudinary = (fileData, options = {}) => {
       invalidate: options.invalidate !== false,
       transformation: options.transformation || [],
       timeout: 120000,
-      ...options.extraOptions,
+      ...(options.extraOptions || {}),
     };
 
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -58,26 +59,26 @@ const uploadToCloudinary = (fileData, options = {}) => {
 
         console.log(
           "✅ Cloudinary upload success:",
-          result?.secure_url
+          result.secure_url
         );
 
         resolve(result);
       }
     );
 
-    // --------------------------------------------------------
-    // Buffer
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // BUFFER
+    // ----------------------------------------------------------
 
     if (Buffer.isBuffer(fileData)) {
-      const readableStream = streamifier.createReadStream(fileData);
-      readableStream.pipe(uploadStream);
+      const bufferStream = streamifier.createReadStream(fileData);
+      bufferStream.pipe(uploadStream);
       return;
     }
 
-    // --------------------------------------------------------
-    // Node Stream
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // STREAM
+    // ----------------------------------------------------------
 
     if (
       fileData &&
@@ -87,9 +88,33 @@ const uploadToCloudinary = (fileData, options = {}) => {
       return;
     }
 
-    // --------------------------------------------------------
-    // File Path
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // FILE PATH
+    // ----------------------------------------------------------
+
+    if (
+      fileData &&
+      fileData.path &&
+      fs.existsSync(fileData.path)
+    ) {
+      const fileStream = fs.createReadStream(fileData.path);
+
+      fileStream.on("error", (error) => {
+        console.error(
+          "❌ File stream error:",
+          error.message
+        );
+
+        reject(error);
+      });
+
+      fileStream.pipe(uploadStream);
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // STRING PATH
+    // ----------------------------------------------------------
 
     if (
       typeof fileData === "string" &&
@@ -105,61 +130,27 @@ const uploadToCloudinary = (fileData, options = {}) => {
       return;
     }
 
-    // --------------------------------------------------------
-    // Object with path
-    // --------------------------------------------------------
-
-    if (
-      fileData &&
-      fileData.path &&
-      fs.existsSync(fileData.path)
-    ) {
-      const fileStream = fs.createReadStream(fileData.path);
-
-      fileStream.on("error", (error) => {
-        reject(error);
-      });
-
-      fileStream.pipe(uploadStream);
-      return;
-    }
-
-    // --------------------------------------------------------
-    // Object with buffer
-    // --------------------------------------------------------
-
-    if (fileData && Buffer.isBuffer(fileData.buffer)) {
-      const readableStream = streamifier.createReadStream(
-        fileData.buffer
-      );
-
-      readableStream.pipe(uploadStream);
-      return;
-    }
-
-    reject(new Error("Unsupported file data format"));
+    reject(
+      new Error("Unsupported file data format")
+    );
   });
 };
 
 // ============================================================
-// FOLDER HELPER
+// GET CLOUDINARY FOLDER
 // ============================================================
 
-/**
- * Determine Cloudinary folder based on file type.
- *
- * Video:
- * ai-tour/videos/{category}
- *
- * Image:
- * ai-tour/images/{category}
- */
-const getFolder = (type, category = "") => {
+const getFolder = (
+  type,
+  category = ""
+) => {
   const baseFolder =
     mediaConfig.cloudinary.folder || "ai-tour";
 
   const subFolder =
-    type === "video" ? "videos" : "images";
+    type === "video"
+      ? "videos"
+      : "images";
 
   return category
     ? `${baseFolder}/${subFolder}/${category}`
@@ -167,10 +158,13 @@ const getFolder = (type, category = "") => {
 };
 
 // ============================================================
-// RESOURCE TYPE HELPER
+// GET CLOUDINARY RESOURCE TYPE
 // ============================================================
 
-const getResourceType = (type, mimetype) => {
+const getResourceType = (
+  type,
+  mimetype = ""
+) => {
   if (type === "video") {
     return "video";
   }
@@ -186,104 +180,112 @@ const getResourceType = (type, mimetype) => {
 };
 
 // ============================================================
-// EXTRACT CLOUDINARY PUBLIC ID
+// EXTRACT CLOUDINARY PUBLIC ID FROM URL
+// ============================================================
+// Example:
+// https://res.cloudinary.com/demo/video/upload/so_1/
+// ai-tour/videos/hero-videos/example.mp4
+//
+// Returns:
+// ai-tour/videos/hero-videos/example
 // ============================================================
 
-/**
- * Extract the complete public_id from a Cloudinary URL.
- *
- * Example:
- *
- * https://res.cloudinary.com/demo/video/upload/v123/
- * ai-tour/videos/hero-videos/my-video.mp4
- *
- * returns:
- *
- * ai-tour/videos/hero-videos/my-video
- */
-const extractCloudinaryPublicId = (fileUrl) => {
+const extractPublicIdFromUrl = (
+  fileUrl
+) => {
   if (!fileUrl) {
     return null;
   }
 
-  if (
-    !fileUrl.startsWith("http://") &&
-    !fileUrl.startsWith("https://")
-  ) {
-    return fileUrl;
-  }
-
   try {
+    // Not a URL
+    if (
+      !fileUrl.startsWith("http://") &&
+      !fileUrl.startsWith("https://")
+    ) {
+      return fileUrl;
+    }
+
     const parsedUrl = new URL(fileUrl);
 
-    const pathname = parsedUrl.pathname;
+    const pathname = decodeURIComponent(
+      parsedUrl.pathname
+    );
 
-    const uploadMarker = "/upload/";
-
-    const uploadIndex = pathname.indexOf(uploadMarker);
+    const uploadIndex =
+      pathname.indexOf("/upload/");
 
     if (uploadIndex === -1) {
       return null;
     }
 
-    let publicPath = pathname.substring(
-      uploadIndex + uploadMarker.length
-    );
+    let afterUpload =
+      pathname.substring(
+        uploadIndex + "/upload/".length
+      );
 
-    // --------------------------------------------------------
-    // Remove transformations
-    // --------------------------------------------------------
+    // Remove leading slash
+    afterUpload =
+      afterUpload.replace(/^\/+/, "");
 
-    const segments = publicPath.split("/");
+    const segments =
+      afterUpload.split("/");
 
-    while (
-      segments.length > 0 &&
-      (
-        segments[0].startsWith("w_") ||
-        segments[0].startsWith("h_") ||
-        segments[0].startsWith("c_") ||
-        segments[0].startsWith("q_") ||
-        segments[0].startsWith("f_") ||
-        segments[0].startsWith("so_") ||
-        segments[0].startsWith("e_") ||
-        segments[0].startsWith("g_") ||
-        segments[0].startsWith("a_") ||
-        segments[0].startsWith("o_") ||
-        segments[0].startsWith("br_") ||
-        segments[0].startsWith("sa_") ||
-        segments[0].startsWith("co_") ||
-        segments[0].startsWith("sh_") ||
-        segments[0].startsWith("r_") ||
-        segments[0].startsWith("bo_")
-      )
+    // ----------------------------------------------------------
+    // Remove version segment
+    // Example: v1234567890
+    // ----------------------------------------------------------
+
+    if (
+      segments[0] &&
+      /^v\d+$/.test(segments[0])
     ) {
       segments.shift();
     }
 
-    publicPath = segments.join("/");
+    // ----------------------------------------------------------
+    // Remove transformation segments
+    //
+    // Examples:
+    // w_1280,h_720,c_fill,q_auto,f_jpg
+    // so_1
+    // q_auto
+    // ----------------------------------------------------------
 
-    // --------------------------------------------------------
-    // Remove version segment
-    // --------------------------------------------------------
+    while (segments.length > 0) {
+      const segment = segments[0];
 
-    publicPath = publicPath.replace(
-      /^v\d+\//,
-      ""
-    );
+      const looksLikeTransformation =
+        segment.includes(",") ||
+        /^(w|h|c|q|f|e|g|a|o|br|sa|co|sh|r|bo|so|vc|du)_/.test(
+          segment
+        );
 
-    // --------------------------------------------------------
-    // Remove extension
-    // --------------------------------------------------------
+      if (!looksLikeTransformation) {
+        break;
+      }
 
-    publicPath = publicPath.replace(
-      /\.(mp4|webm|mov|avi|mkv|jpg|jpeg|png|webp|gif)$/i,
-      ""
-    );
+      segments.shift();
+    }
 
-    return publicPath || null;
+    if (segments.length === 0) {
+      return null;
+    }
+
+    let publicId =
+      segments.join("/");
+
+    // Remove file extension
+    publicId =
+      publicId.replace(
+        /\.(mp4|mov|avi|webm|mkv|jpg|jpeg|png|webp|gif)$/i,
+        ""
+      );
+
+    return publicId;
   } catch (error) {
-    console.warn(
-      "⚠️ Failed to extract Cloudinary public ID:",
+    console.error(
+      "❌ Failed to extract Cloudinary public ID:",
       error.message
     );
 
@@ -299,16 +301,9 @@ export const cloudinaryStorageProvider = {
   name: "cloudinary",
 
   // ==========================================================
-  // SAVE
+  // SAVE FILE
   // ==========================================================
 
-  /**
-   * Save a file to Cloudinary.
-   *
-   * @param {Object} file
-   * @param {Object} options
-   * @returns {Promise<Object>}
-   */
   async save(file, options = {}) {
     if (!file) {
       throw new Error("No file provided");
@@ -321,6 +316,10 @@ export const cloudinaryStorageProvider = {
       transformation = [],
     } = options;
 
+    // ----------------------------------------------------------
+    // Determine resource type
+    // ----------------------------------------------------------
+
     const isVideo =
       type === "video" ||
       (
@@ -328,43 +327,57 @@ export const cloudinaryStorageProvider = {
         file.mimetype.startsWith("video/")
       );
 
-    const resourceType = getResourceType(
-      type,
-      file.mimetype
-    );
+    const resourceType =
+      getResourceType(
+        type,
+        file.mimetype
+      );
 
-    const folder = getFolder(
-      isVideo ? "video" : "image",
-      category
-    );
+    const folder =
+      getFolder(
+        isVideo ? "video" : "image",
+        category
+      );
 
-    // --------------------------------------------------------
-    // Generate Public ID
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // Generate public ID
+    // ----------------------------------------------------------
 
     const timestamp = Date.now();
-    const random = Math.round(Math.random() * 1e9);
 
-    const ext = file.originalname
-      ? path.extname(file.originalname)
-      : "";
+    const random =
+      Math.round(
+        Math.random() * 1e9
+      );
 
-    const baseName = file.originalname
-      ? path.basename(file.originalname, ext)
-      : "file";
+    const ext =
+      file.originalname
+        ? path.extname(
+            file.originalname
+          )
+        : "";
 
-    const safeBaseName = baseName
-      .replace(/[^a-zA-Z0-9_-]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "");
+    const baseName =
+      file.originalname
+        ? path.basename(
+            file.originalname,
+            ext
+          )
+        : "file";
+
+    // Sanitize public ID
+    const safeBaseName =
+      baseName
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .replace(/-+/g, "-");
 
     const finalPublicId =
       publicId ||
-      `${safeBaseName || "file"}-${timestamp}-${random}`;
+      `${safeBaseName}-${timestamp}-${random}`;
 
-    // --------------------------------------------------------
-    // Upload Options
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // Upload options
+    // ----------------------------------------------------------
 
     const uploadOptions = {
       folder,
@@ -372,15 +385,17 @@ export const cloudinaryStorageProvider = {
       resource_type: resourceType,
       overwrite: true,
       invalidate: true,
-      transformation: Array.isArray(transformation)
+      transformation: Array.isArray(
+        transformation
+      )
         ? transformation
         : [],
       timeout: 120000,
     };
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Image transformations
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
     if (
       resourceType === "image" &&
@@ -388,13 +403,14 @@ export const cloudinaryStorageProvider = {
     ) {
       uploadOptions.transformation = [
         ...uploadOptions.transformation,
-        ...mediaConfig.cloudinary.imageTransformation,
+        ...mediaConfig.cloudinary
+          .imageTransformation,
       ];
     }
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Video transformations
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
     if (
       resourceType === "video" &&
@@ -402,13 +418,14 @@ export const cloudinaryStorageProvider = {
     ) {
       uploadOptions.transformation = [
         ...uploadOptions.transformation,
-        ...mediaConfig.cloudinary.videoTransformation,
+        ...mediaConfig.cloudinary
+          .videoTransformation,
       ];
     }
 
-    // --------------------------------------------------------
-    // Get File Data
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // Get file data
+    // ----------------------------------------------------------
 
     let fileData;
 
@@ -427,30 +444,31 @@ export const cloudinaryStorageProvider = {
       );
     }
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Upload
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
-    const result = await uploadToCloudinary(
-      fileData,
-      uploadOptions
-    );
-
-    if (!result) {
-      throw new Error(
-        "Cloudinary upload returned no result"
+    const result =
+      await uploadToCloudinary(
+        fileData,
+        uploadOptions
       );
-    }
 
-    // --------------------------------------------------------
-    // Return Normalized Result
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // Return normalized result
+    // ----------------------------------------------------------
 
     return {
       filename: result.public_id,
+
       url: result.secure_url,
+
       provider: "cloudinary",
-      type: isVideo ? "video" : "image",
+
+      type: isVideo
+        ? "video"
+        : "image",
+
       size:
         result.bytes ||
         file.size ||
@@ -461,26 +479,50 @@ export const cloudinaryStorageProvider = {
         "",
 
       cloudinary: {
-        publicId: result.public_id,
-        version: result.version,
-        format: result.format,
-        width: result.width,
-        height: result.height,
-        duration: result.duration,
-        bytes: result.bytes,
-        url: result.secure_url,
-        originalUrl: result.url,
-        assetId: result.asset_id,
-        etag: result.etag,
+        publicId:
+          result.public_id,
+
+        version:
+          result.version,
+
+        format:
+          result.format,
+
+        width:
+          result.width,
+
+        height:
+          result.height,
+
+        duration:
+          result.duration,
+
+        bytes:
+          result.bytes,
+
+        url:
+          result.secure_url,
+
+        originalUrl:
+          result.url,
+
+        assetId:
+          result.asset_id,
+
+        etag:
+          result.etag,
       },
     };
   },
 
   // ==========================================================
-  // SAVE MULTIPLE
+  // SAVE MULTIPLE FILES
   // ==========================================================
 
-  async saveMultiple(files, options = {}) {
+  async saveMultiple(
+    files,
+    options = {}
+  ) {
     if (
       !files ||
       files.length === 0
@@ -493,17 +535,22 @@ export const cloudinaryStorageProvider = {
     for (const file of files) {
       try {
         const result =
-          await this.save(file, options);
+          await this.save(
+            file,
+            options
+          );
 
         results.push(result);
       } catch (error) {
         console.error(
-          "❌ Failed to save file to Cloudinary:",
+          "❌ Failed to save file:",
           error.message
         );
 
         results.push({
-          error: error.message,
+          error:
+            error.message,
+
           filename:
             file.originalname ||
             "unknown",
@@ -515,74 +562,123 @@ export const cloudinaryStorageProvider = {
   },
 
   // ==========================================================
-  // DELETE
+  // DELETE FILE
   // ==========================================================
 
-  /**
-   * Delete a Cloudinary asset.
-   *
-   * Accepts either:
-   *
-   * - public_id
-   * - full Cloudinary URL
-   */
-  async delete(publicId, options = {}) {
-    if (!publicId) {
+  async delete(
+    publicIdOrUrl,
+    options = {}
+  ) {
+    if (!publicIdOrUrl) {
       return false;
     }
 
-    const {
-      type = "image",
-    } = options;
+    // ----------------------------------------------------------
+    // Determine resource type
+    // ----------------------------------------------------------
 
-    const resourceType =
-      getResourceType(type);
+    let resourceType =
+      getResourceType(
+        options.type || "image"
+      );
 
-    let id =
-      extractCloudinaryPublicId(publicId);
-
-    if (!id) {
-      id = publicId;
+    // Automatically detect resource type from URL
+    if (
+      typeof publicIdOrUrl === "string" &&
+      publicIdOrUrl.includes(
+        "/video/upload/"
+      )
+    ) {
+      resourceType = "video";
     }
 
+    // ----------------------------------------------------------
+    // Extract public ID
+    // ----------------------------------------------------------
+
+    let publicId =
+      publicIdOrUrl;
+
+    if (
+      typeof publicIdOrUrl === "string" &&
+      (
+        publicIdOrUrl.startsWith(
+          "http://"
+        ) ||
+        publicIdOrUrl.startsWith(
+          "https://"
+        )
+      )
+    ) {
+      publicId =
+        extractPublicIdFromUrl(
+          publicIdOrUrl
+        );
+    }
+
+    if (!publicId) {
+      console.warn(
+        "⚠️ Could not extract Cloudinary public ID:",
+        publicIdOrUrl
+      );
+
+      return false;
+    }
+
+    // ----------------------------------------------------------
+    // Delete
+    // ----------------------------------------------------------
+
     try {
+      console.log(
+        `🗑️ Deleting Cloudinary ${resourceType}:`,
+        publicId
+      );
+
       const result =
         await cloudinary.uploader.destroy(
-          id,
+          publicId,
           {
-            resource_type: resourceType,
+            resource_type:
+              resourceType,
+
             invalidate: true,
+
             timeout: 60000,
           }
         );
 
-      if (result.result === "ok") {
+      if (
+        result.result === "ok"
+      ) {
         console.log(
-          `🗑️ Deleted from Cloudinary: ${id}`
+          `✅ Deleted from Cloudinary: ${publicId}`
         );
 
         return true;
       }
 
       if (
-        result.result === "not found"
+        result.result ===
+        "not found"
       ) {
         console.warn(
-          `⚠️ File not found in Cloudinary: ${id}`
+          `⚠️ Cloudinary file not found: ${publicId}`
         );
 
+        // Already deleted
         return true;
       }
 
       console.error(
-        `❌ Failed to delete from Cloudinary: ${id}`,
+        `❌ Cloudinary delete failed:`,
         result
       );
 
       return false;
     } catch (error) {
       console.error(
-        `❌ Cloudinary delete error for ${id}:`,
+        `❌ Cloudinary delete error for ${publicId}:`,
         error.message
       );
 
@@ -591,7 +687,7 @@ export const cloudinaryStorageProvider = {
   },
 
   // ==========================================================
-  // DELETE MULTIPLE
+  // DELETE MULTIPLE FILES
   // ==========================================================
 
   async deleteMultiple(
@@ -607,20 +703,24 @@ export const cloudinaryStorageProvider = {
 
     const results = [];
 
-    for (const id of publicIds) {
+    for (const publicId of publicIds) {
       try {
-        const result =
-          await this.delete(id, options);
+        const success =
+          await this.delete(
+            publicId,
+            options
+          );
 
         results.push({
-          publicId: id,
-          success: result,
+          publicId,
+          success,
         });
       } catch (error) {
         results.push({
-          publicId: id,
+          publicId,
           success: false,
-          error: error.message,
+          error:
+            error.message,
         });
       }
     }
@@ -629,7 +729,7 @@ export const cloudinaryStorageProvider = {
   },
 
   // ==========================================================
-  // EXISTS
+  // CHECK IF FILE EXISTS
   // ==========================================================
 
   async exists(
@@ -640,19 +740,19 @@ export const cloudinaryStorageProvider = {
       return false;
     }
 
-    const {
-      type = "image",
-    } = options;
-
     const resourceType =
-      getResourceType(type);
+      getResourceType(
+        options.type || "image"
+      );
 
     try {
       const result =
         await cloudinary.api.resource(
           publicId,
           {
-            resource_type: resourceType,
+            resource_type:
+              resourceType,
+
             timeout: 60000,
           }
         );
@@ -666,7 +766,7 @@ export const cloudinaryStorageProvider = {
       }
 
       console.error(
-        "❌ Cloudinary exists check error:",
+        "❌ Cloudinary exists error:",
         error.message
       );
 
@@ -675,7 +775,7 @@ export const cloudinaryStorageProvider = {
   },
 
   // ==========================================================
-  // GET INFO
+  // GET FILE INFO
   // ==========================================================
 
   async getInfo(
@@ -686,19 +786,19 @@ export const cloudinaryStorageProvider = {
       return null;
     }
 
-    const {
-      type = "image",
-    } = options;
-
     const resourceType =
-      getResourceType(type);
+      getResourceType(
+        options.type || "image"
+      );
 
     try {
       const result =
         await cloudinary.api.resource(
           publicId,
           {
-            resource_type: resourceType,
+            resource_type:
+              resourceType,
+
             timeout: 60000,
           }
         );
@@ -768,29 +868,6 @@ export const cloudinaryStorageProvider = {
   // GET TRANSFORMED URL
   // ==========================================================
 
-  /**
-   * Generate a Cloudinary transformed URL.
-   *
-   * Supports:
-   *
-   * width
-   * height
-   * crop
-   * quality
-   * format
-   * startOffset
-   * effect
-   * gravity
-   * angle
-   * opacity
-   * brightness
-   * saturation
-   * contrast
-   * sharpness
-   * blur
-   * radius
-   * border
-   */
   getTransformedUrl(
     publicId,
     transformations = {},
@@ -800,23 +877,21 @@ export const cloudinaryStorageProvider = {
       return "";
     }
 
-    const {
-      type = "image",
-    } = options;
-
     const resourceType =
-      getResourceType(type);
+      getResourceType(
+        options.type || "image"
+      );
 
-    const trans = [];
+    const transformationsList = [];
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Dimensions
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
     if (
       transformations.width
     ) {
-      trans.push(
+      transformationsList.push(
         `w_${transformations.width}`
       );
     }
@@ -824,246 +899,205 @@ export const cloudinaryStorageProvider = {
     if (
       transformations.height
     ) {
-      trans.push(
+      transformationsList.push(
         `h_${transformations.height}`
       );
     }
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Crop
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
     if (
       transformations.crop
     ) {
-      trans.push(
+      transformationsList.push(
         `c_${transformations.crop}`
       );
     }
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Quality
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
     if (
       transformations.quality
     ) {
-      trans.push(
+      transformationsList.push(
         `q_${transformations.quality}`
       );
     }
 
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
     // Format
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
 
     if (
       transformations.format
     ) {
-      trans.push(
+      transformationsList.push(
         `f_${transformations.format}`
       );
     }
 
-    // ========================================================
-    // ✅ IMPORTANT VIDEO THUMBNAIL FIX
-    // ========================================================
+    // ----------------------------------------------------------
+    // IMPORTANT:
+    // Video seek/thumbnail uses SO, NOT E_SO
+    //
+    // Correct:
+    // so_1
+    //
+    // Wrong:
+    // e_so_1
+    // ----------------------------------------------------------
 
-    /**
-     * Cloudinary video start offset must be:
-     *
-     * so_1
-     *
-     * NOT:
-     *
-     * e_so_1
-     */
     if (
-      transformations.startOffset !== undefined &&
+      transformations.startOffset !==
+      undefined &&
       transformations.startOffset !== null
     ) {
-      trans.push(
+      transformationsList.push(
         `so_${transformations.startOffset}`
       );
     }
 
-    // --------------------------------------------------------
-    // Effect
-    // --------------------------------------------------------
-
+    // Support direct start_offset too
     if (
-      transformations.effect
+      transformations.start_offset !==
+      undefined &&
+      transformations.start_offset !== null
     ) {
-      trans.push(
-        `e_${transformations.effect}`
+      transformationsList.push(
+        `so_${transformations.start_offset}`
       );
     }
 
-    // --------------------------------------------------------
-    // Gravity
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // Other transformations
+    // ----------------------------------------------------------
 
     if (
       transformations.gravity
     ) {
-      trans.push(
+      transformationsList.push(
         `g_${transformations.gravity}`
       );
     }
 
-    // --------------------------------------------------------
-    // Angle
-    // --------------------------------------------------------
-
     if (
-      transformations.angle !== undefined &&
-      transformations.angle !== null
+      transformations.angle
     ) {
-      trans.push(
+      transformationsList.push(
         `a_${transformations.angle}`
       );
     }
 
-    // --------------------------------------------------------
-    // Opacity
-    // --------------------------------------------------------
-
     if (
-      transformations.opacity !== undefined &&
-      transformations.opacity !== null
+      transformations.opacity
     ) {
-      trans.push(
+      transformationsList.push(
         `o_${transformations.opacity}`
       );
     }
 
-    // --------------------------------------------------------
-    // Brightness
-    // --------------------------------------------------------
-
     if (
-      transformations.brightness !== undefined &&
-      transformations.brightness !== null
+      transformations.brightness
     ) {
-      trans.push(
+      transformationsList.push(
         `br_${transformations.brightness}`
       );
     }
 
-    // --------------------------------------------------------
-    // Saturation
-    // --------------------------------------------------------
-
     if (
-      transformations.saturation !== undefined &&
-      transformations.saturation !== null
+      transformations.saturation
     ) {
-      trans.push(
+      transformationsList.push(
         `sa_${transformations.saturation}`
       );
     }
 
-    // --------------------------------------------------------
-    // Contrast
-    // --------------------------------------------------------
-
     if (
-      transformations.contrast !== undefined &&
-      transformations.contrast !== null
+      transformations.contrast
     ) {
-      trans.push(
+      transformationsList.push(
         `co_${transformations.contrast}`
       );
     }
 
-    // --------------------------------------------------------
-    // Sharpness
-    // --------------------------------------------------------
-
     if (
-      transformations.sharpness !== undefined &&
-      transformations.sharpness !== null
+      transformations.sharpness
     ) {
-      trans.push(
+      transformationsList.push(
         `sh_${transformations.sharpness}`
       );
     }
 
-    // --------------------------------------------------------
-    // Blur
-    // --------------------------------------------------------
-
     if (
-      transformations.blur !== undefined &&
-      transformations.blur !== null
+      transformations.blur
     ) {
-      trans.push(
+      transformationsList.push(
         `e_blur:${transformations.blur}`
       );
     }
 
-    // --------------------------------------------------------
-    // Radius
-    // --------------------------------------------------------
-
     if (
-      transformations.radius !== undefined &&
-      transformations.radius !== null
+      transformations.radius
     ) {
-      trans.push(
+      transformationsList.push(
         `r_${transformations.radius}`
       );
     }
 
-    // --------------------------------------------------------
-    // Border
-    // --------------------------------------------------------
-
     if (
       transformations.border
     ) {
-      trans.push(
+      transformationsList.push(
         `bo_${transformations.border}`
       );
     }
 
-    // --------------------------------------------------------
-    // Build URL
-    // --------------------------------------------------------
+    // ----------------------------------------------------------
+    // Cloudinary URL
+    // ----------------------------------------------------------
+
+    const cloudName =
+      mediaConfig.cloudinary
+        .cloudName;
 
     const baseUrl =
-      `https://res.cloudinary.com/${mediaConfig.cloudinary.cloudName}`;
+      `https://res.cloudinary.com/${cloudName}`;
 
     const typePath =
       resourceType === "video"
         ? "video/upload"
         : "image/upload";
 
-    const transStr =
-      trans.length > 0
-        ? `${trans.join(",")}/`
+    const transformationString =
+      transformationsList.length > 0
+        ? `${transformationsList.join(",")}/`
         : "";
 
-    return `${baseUrl}/${typePath}/${transStr}${publicId}`;
+    return `${baseUrl}/${typePath}/${transformationString}${publicId}`;
   },
 
   // ==========================================================
-  // VIDEO THUMBNAIL
+  // GENERATE VIDEO THUMBNAIL
+  // ==========================================================
+  //
+  // IMPORTANT:
+  //
+  // This generates:
+  //
+  // /video/upload/
+  // w_1280,h_720,c_fill,q_auto,f_jpg,so_1/
+  // public-id
+  //
+  // NOT:
+  //
+  // e_so_1
+  //
   // ==========================================================
 
-  /**
-   * Generate a thumbnail URL for a Cloudinary video.
-   *
-   * IMPORTANT:
-   *
-   * Uses:
-   *
-   * so_1
-   *
-   * instead of:
-   *
-   * e_so_1
-   */
   getVideoThumbnail(
     publicId,
     options = {}
@@ -1090,7 +1124,8 @@ export const cloudinaryStorageProvider = {
         quality: "auto",
         format: "jpg",
 
-        // ✅ Cloudinary video start offset
+        // IMPORTANT:
+        // Cloudinary video seek transformation
         startOffset: time,
       },
       {
@@ -1100,12 +1135,9 @@ export const cloudinaryStorageProvider = {
   },
 
   // ==========================================================
-  // OPTIMIZED IMAGE URL
+  // GET OPTIMIZED IMAGE URL
   // ==========================================================
 
-  /**
-   * Generate an optimized image URL.
-   */
   getOptimizedImageUrl(
     publicId,
     options = {}
@@ -1115,19 +1147,19 @@ export const cloudinaryStorageProvider = {
     }
 
     const width =
-      options.width || 800;
+      options.width ?? 800;
 
     const height =
-      options.height || 600;
+      options.height ?? 600;
 
     const quality =
-      options.quality || "auto";
+      options.quality ?? "auto";
 
     const format =
-      options.format || "auto";
+      options.format ?? "auto";
 
     const crop =
-      options.crop || "limit";
+      options.crop ?? "limit";
 
     return this.getTransformedUrl(
       publicId,
@@ -1145,4 +1177,9 @@ export const cloudinaryStorageProvider = {
   },
 };
 
+// ============================================================
+// DEFAULT EXPORT
+// ============================================================
+
 export default cloudinaryStorageProvider;
+
