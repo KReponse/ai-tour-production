@@ -1,7 +1,12 @@
 // backend/src/routes/bookingRoutes.js
-// ✅ UPDATED - Added requireVerified to protected booking routes
+// ✅ PRODUCTION FIX
+// - Authentication remains required for bookings
+// - Email verification is NOT required for booking creation
+// - Role protection remains enabled for provider/admin routes
+// - Keeps booking available while email verification system is being fixed
 
 import express from "express";
+
 import {
   createBooking,
   getBookings,
@@ -18,84 +23,245 @@ import {
   markInProgress,
   getAllBookings,
   updateBookingStatus,
-  checkDuplicateBooking
+  checkDuplicateBooking,
 } from "../controllers/bookingController.js";
-// ✅ Using v2 middleware
+
 import { AuthMiddleware } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
-console.log('✅ Booking routes loading...');
+console.log("✅ Booking routes loading...");
 
-// ============================================
-// ✅ STATIC ROUTES (NO :id parameter)
-// ============================================
+// ============================================================
+// STATIC ROUTES
+// ============================================================
 
-// ── Provider Routes ──
-router.get("/provider", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), getProviderBookings);
-console.log('✅ GET /provider registered');
+// ────────────────────────────────────────────────────────────
+// PROVIDER ROUTES
+// ────────────────────────────────────────────────────────────
 
-router.get("/provider/travelers", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), getProviderTravelers);
-console.log('✅ GET /provider/travelers registered');
+router.get(
+  "/provider",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  getProviderBookings
+);
 
-router.get("/provider/analytics", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), getProviderAnalytics);
-console.log('✅ GET /provider/analytics registered');
+console.log("✅ GET /provider registered");
 
-router.get("/provider/earnings", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), getProviderEarnings);
-console.log('✅ GET /provider/earnings registered');
+router.get(
+  "/provider/travelers",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  getProviderTravelers
+);
 
-// ── User Routes ──
-router.get("/my-bookings", AuthMiddleware.authenticate, getMyBookings);
-console.log('✅ GET /my-bookings registered');
+console.log("✅ GET /provider/travelers registered");
 
-// ── Check Duplicate Booking ──
-router.get("/check-duplicate/:entityId", AuthMiddleware.authenticate, checkDuplicateBooking);
-console.log('✅ GET /check-duplicate/:entityId registered');
+router.get(
+  "/provider/analytics",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  getProviderAnalytics
+);
 
-// ── Create Booking ──
-// ✅ Added requireVerified - users must verify email to book
-router.post("/", AuthMiddleware.authenticate, AuthMiddleware.requireVerified, createBooking);
-console.log('✅ POST / registered (requires verified email)');
+console.log("✅ GET /provider/analytics registered");
 
-// ============================================
-// ✅ ADMIN ROUTES
-// ============================================
+router.get(
+  "/provider/earnings",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  getProviderEarnings
+);
 
-router.get("/admin/all", AuthMiddleware.authenticate, AuthMiddleware.requireRole('admin'), getAllBookings);
-console.log('✅ GET /admin/all registered');
+console.log("✅ GET /provider/earnings registered");
 
-router.put("/admin/:id/status", AuthMiddleware.authenticate, AuthMiddleware.requireRole('admin'), updateBookingStatus);
-console.log('✅ PUT /admin/:id/status registered');
+// ────────────────────────────────────────────────────────────
+// USER ROUTES
+// ────────────────────────────────────────────────────────────
 
-router.get("/admin/:id", AuthMiddleware.authenticate, AuthMiddleware.requireRole('admin'), getBookingById);
-console.log('✅ GET /admin/:id registered');
+router.get(
+  "/my-bookings",
+  AuthMiddleware.authenticate,
+  getMyBookings
+);
 
-// ============================================
-// ✅ DYNAMIC ROUTES (WITH :id parameter)
-// ⚠️ MUST BE LAST - they will match ANY path
-// ============================================
+console.log("✅ GET /my-bookings registered");
 
-// ── Get single booking ──
-router.get("/:id", AuthMiddleware.authenticate, getBookingById);
-console.log('✅ GET /:id registered');
+// ────────────────────────────────────────────────────────────
+// CHECK DUPLICATE BOOKING
+// ────────────────────────────────────────────────────────────
 
-// ── Booking Actions ──
-// ✅ Added requireVerified - users must verify email to cancel/modify bookings
-router.put("/:id/cancel", AuthMiddleware.authenticate, AuthMiddleware.requireVerified, cancelBooking);
-console.log('✅ PUT /:id/cancel registered (requires verified email)');
+router.get(
+  "/check-duplicate/:entityId",
+  AuthMiddleware.authenticate,
+  checkDuplicateBooking
+);
 
-router.put("/:id/confirm", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), AuthMiddleware.requireVerified, confirmBooking);
-console.log('✅ PUT /:id/confirm registered (requires verified email)');
+console.log("✅ GET /check-duplicate/:entityId registered");
 
-router.put("/:id/reject", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), AuthMiddleware.requireVerified, rejectBooking);
-console.log('✅ PUT /:id/reject registered (requires verified email)');
+// ────────────────────────────────────────────────────────────
+// CREATE BOOKING
+// ────────────────────────────────────────────────────────────
+//
+// IMPORTANT:
+// Do NOT use requireVerified here.
+//
+// Authentication is still required, so only logged-in users
+// can create bookings.
+//
+// Email verification is temporarily NOT a booking requirement
+// because the email-verification flow is currently being fixed.
+//
+// This removes the current:
+// 403 "Please verify your email address first"
+// ────────────────────────────────────────────────────────────
 
-router.put("/:id/complete", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), AuthMiddleware.requireVerified, completeBooking);
-console.log('✅ PUT /:id/complete registered (requires verified email)');
+router.post(
+  "/",
+  AuthMiddleware.authenticate,
+  createBooking
+);
 
-router.put("/:id/mark-in-progress", AuthMiddleware.authenticate, AuthMiddleware.requireRole('provider'), AuthMiddleware.requireVerified, markInProgress);
-console.log('✅ PUT /:id/mark-in-progress registered (requires verified email)');
+console.log(
+  "✅ POST / registered (authenticated users can create bookings)"
+);
 
-console.log('✅ All booking routes registered');
+// ============================================================
+// ADMIN ROUTES
+// ============================================================
+
+router.get(
+  "/admin/all",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("admin"),
+  getAllBookings
+);
+
+console.log("✅ GET /admin/all registered");
+
+router.put(
+  "/admin/:id/status",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("admin"),
+  updateBookingStatus
+);
+
+console.log("✅ PUT /admin/:id/status registered");
+
+router.get(
+  "/admin/:id",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("admin"),
+  getBookingById
+);
+
+console.log("✅ GET /admin/:id registered");
+
+// ============================================================
+// DYNAMIC ROUTES
+// ⚠️ Keep these after static routes.
+// ============================================================
+
+// ────────────────────────────────────────────────────────────
+// GET SINGLE BOOKING
+// ────────────────────────────────────────────────────────────
+
+router.get(
+  "/:id",
+  AuthMiddleware.authenticate,
+  getBookingById
+);
+
+console.log("✅ GET /:id registered");
+
+// ============================================================
+// BOOKING ACTIONS
+// ============================================================
+
+// ────────────────────────────────────────────────────────────
+// CANCEL BOOKING
+// ────────────────────────────────────────────────────────────
+//
+// Authentication is enough.
+// We intentionally do NOT require email verification here
+// while the verification system is being fixed.
+// ────────────────────────────────────────────────────────────
+
+router.put(
+  "/:id/cancel",
+  AuthMiddleware.authenticate,
+  cancelBooking
+);
+
+console.log(
+  "✅ PUT /:id/cancel registered"
+);
+
+// ────────────────────────────────────────────────────────────
+// PROVIDER CONFIRM BOOKING
+// ────────────────────────────────────────────────────────────
+
+router.put(
+  "/:id/confirm",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  confirmBooking
+);
+
+console.log(
+  "✅ PUT /:id/confirm registered"
+);
+
+// ────────────────────────────────────────────────────────────
+// PROVIDER REJECT BOOKING
+// ────────────────────────────────────────────────────────────
+
+router.put(
+  "/:id/reject",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  rejectBooking
+);
+
+console.log(
+  "✅ PUT /:id/reject registered"
+);
+
+// ────────────────────────────────────────────────────────────
+// PROVIDER COMPLETE BOOKING
+// ────────────────────────────────────────────────────────────
+
+router.put(
+  "/:id/complete",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  completeBooking
+);
+
+console.log(
+  "✅ PUT /:id/complete registered"
+);
+
+// ────────────────────────────────────────────────────────────
+// PROVIDER MARK IN PROGRESS
+// ────────────────────────────────────────────────────────────
+
+router.put(
+  "/:id/mark-in-progress",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("provider"),
+  markInProgress
+);
+
+console.log(
+  "✅ PUT /:id/mark-in-progress registered"
+);
+
+// ============================================================
+// COMPLETE
+// ============================================================
+
+console.log("✅ All booking routes registered");
 
 export default router;
