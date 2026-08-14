@@ -1,38 +1,49 @@
 // backend/src/services/media/storage/cloudinaryStorage.js
 // ✅ Cloudinary Storage Provider - Production media storage
-// ✅ ADDED: timeout: 120000 to prevent timeouts
+// ✅ Fixed: Cloudinary video thumbnail startOffset (so_)
+// ✅ Fixed: Cloudinary public ID extraction for delete()
+// ✅ Fixed: Video/image transformed URLs
+// ✅ Added: Cloudinary upload/delete/getInfo timeouts
 
-import { v2 as cloudinary } from 'cloudinary';
-import streamifier from 'streamifier';
-import fs from 'fs';
-import path from 'path';
-import mediaConfig from '../config.js';
+import { v2 as cloudinary } from "cloudinary";
+import streamifier from "streamifier";
+import fs from "fs";
+import path from "path";
+import mediaConfig from "../config.js";
 
-// Configure Cloudinary
+// ============================================================
+// CLOUDINARY CONFIGURATION
+// ============================================================
+
 cloudinary.config({
   cloud_name: mediaConfig.cloudinary.cloudName,
   api_key: mediaConfig.cloudinary.apiKey,
   api_secret: mediaConfig.cloudinary.apiSecret,
   secure: true,
-  timeout: 120000, // ✅ 2 minutes
+  timeout: 120000,
 });
 
+// ============================================================
+// UPLOAD TO CLOUDINARY
+// ============================================================
+
 /**
- * Upload a file to Cloudinary from buffer or stream
- * @param {Buffer|Stream} fileData - File data
- * @param {Object} options - Upload options
- * @returns {Promise<Object>} - Cloudinary upload result
+ * Upload a file to Cloudinary from buffer, stream, or file path.
+ *
+ * @param {Buffer|Stream|string} fileData
+ * @param {Object} options
+ * @returns {Promise<Object>}
  */
 const uploadToCloudinary = (fileData, options = {}) => {
   return new Promise((resolve, reject) => {
     const uploadOptions = {
-      folder: options.folder || 'ai-tour',
-      resource_type: options.resource_type || 'auto',
+      folder: options.folder || "ai-tour",
+      resource_type: options.resource_type || "auto",
       public_id: options.public_id || undefined,
       overwrite: options.overwrite !== false,
       invalidate: options.invalidate !== false,
       transformation: options.transformation || [],
-      timeout: 120000, // ✅ 2 minutes
+      timeout: 120000,
       ...options.extraOptions,
     };
 
@@ -40,180 +51,415 @@ const uploadToCloudinary = (fileData, options = {}) => {
       uploadOptions,
       (error, result) => {
         if (error) {
-          console.error('❌ Cloudinary upload error:', error);
+          console.error("❌ Cloudinary upload error:", error);
           reject(error);
-        } else {
-          console.log('✅ Cloudinary upload success:', result.secure_url);
-          resolve(result);
+          return;
         }
+
+        console.log(
+          "✅ Cloudinary upload success:",
+          result?.secure_url
+        );
+
+        resolve(result);
       }
     );
 
-    // Handle Buffer or Stream
+    // --------------------------------------------------------
+    // Buffer
+    // --------------------------------------------------------
+
     if (Buffer.isBuffer(fileData)) {
-      // Write buffer to stream
-      const readableStream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(fileData);
-          controller.close();
-        },
-      });
-      const reader = readableStream.getReader();
-      const pump = () => {
-        reader.read().then(({ done, value }) => {
-          if (done) {
-            uploadStream.end();
-            return;
-          }
-          uploadStream.write(value);
-          pump();
-        });
-      };
-      pump();
-    } else if (fileData.pipe && typeof fileData.pipe === 'function') {
-      // It's a stream
-      fileData.pipe(uploadStream);
-    } else if (fileData.path && fs.existsSync(fileData.path)) {
-      // It's a file path
-      const fileStream = fs.createReadStream(fileData.path);
-      fileStream.pipe(uploadStream);
-    } else {
-      // Try to use as buffer
-      try {
-        const buffer = Buffer.from(fileData);
-        const bufferStream = new ReadableStream({
-          start(controller) {
-            controller.enqueue(buffer);
-            controller.close();
-          },
-        });
-        const reader = bufferStream.getReader();
-        const pump = () => {
-          reader.read().then(({ done, value }) => {
-            if (done) {
-              uploadStream.end();
-              return;
-            }
-            uploadStream.write(value);
-            pump();
-          });
-        };
-        pump();
-      } catch (error) {
-        reject(new Error('Unsupported file data format'));
-      }
+      const readableStream = streamifier.createReadStream(fileData);
+      readableStream.pipe(uploadStream);
+      return;
     }
+
+    // --------------------------------------------------------
+    // Node Stream
+    // --------------------------------------------------------
+
+    if (
+      fileData &&
+      typeof fileData.pipe === "function"
+    ) {
+      fileData.pipe(uploadStream);
+      return;
+    }
+
+    // --------------------------------------------------------
+    // File Path
+    // --------------------------------------------------------
+
+    if (
+      typeof fileData === "string" &&
+      fs.existsSync(fileData)
+    ) {
+      const fileStream = fs.createReadStream(fileData);
+
+      fileStream.on("error", (error) => {
+        reject(error);
+      });
+
+      fileStream.pipe(uploadStream);
+      return;
+    }
+
+    // --------------------------------------------------------
+    // Object with path
+    // --------------------------------------------------------
+
+    if (
+      fileData &&
+      fileData.path &&
+      fs.existsSync(fileData.path)
+    ) {
+      const fileStream = fs.createReadStream(fileData.path);
+
+      fileStream.on("error", (error) => {
+        reject(error);
+      });
+
+      fileStream.pipe(uploadStream);
+      return;
+    }
+
+    // --------------------------------------------------------
+    // Object with buffer
+    // --------------------------------------------------------
+
+    if (fileData && Buffer.isBuffer(fileData.buffer)) {
+      const readableStream = streamifier.createReadStream(
+        fileData.buffer
+      );
+
+      readableStream.pipe(uploadStream);
+      return;
+    }
+
+    reject(new Error("Unsupported file data format"));
   });
 };
 
-/**
- * Determine folder based on file type
- * @param {string} type - 'image' or 'video'
- * @param {string} category - Optional category
- * @returns {string} - Cloudinary folder path
- */
-const getFolder = (type, category = '') => {
-  const baseFolder = mediaConfig.cloudinary.folder || 'ai-tour';
-  const subFolder = type === 'video' ? 'videos' : 'images';
-  return category ? `${baseFolder}/${subFolder}/${category}` : `${baseFolder}/${subFolder}`;
-};
+// ============================================================
+// FOLDER HELPER
+// ============================================================
 
 /**
- * Determine resource type for Cloudinary
- * @param {string} type - 'image' or 'video'
- * @param {string} mimetype - File mimetype
- * @returns {string} - Cloudinary resource type
+ * Determine Cloudinary folder based on file type.
+ *
+ * Video:
+ * ai-tour/videos/{category}
+ *
+ * Image:
+ * ai-tour/images/{category}
  */
+const getFolder = (type, category = "") => {
+  const baseFolder =
+    mediaConfig.cloudinary.folder || "ai-tour";
+
+  const subFolder =
+    type === "video" ? "videos" : "images";
+
+  return category
+    ? `${baseFolder}/${subFolder}/${category}`
+    : `${baseFolder}/${subFolder}`;
+};
+
+// ============================================================
+// RESOURCE TYPE HELPER
+// ============================================================
+
 const getResourceType = (type, mimetype) => {
-  if (type === 'video') return 'video';
-  if (mimetype && mimetype.startsWith('video/')) return 'video';
-  return 'image';
+  if (type === "video") {
+    return "video";
+  }
+
+  if (
+    mimetype &&
+    mimetype.startsWith("video/")
+  ) {
+    return "video";
+  }
+
+  return "image";
 };
 
+// ============================================================
+// EXTRACT CLOUDINARY PUBLIC ID
+// ============================================================
+
 /**
- * Cloudinary Storage Provider
+ * Extract the complete public_id from a Cloudinary URL.
+ *
+ * Example:
+ *
+ * https://res.cloudinary.com/demo/video/upload/v123/
+ * ai-tour/videos/hero-videos/my-video.mp4
+ *
+ * returns:
+ *
+ * ai-tour/videos/hero-videos/my-video
  */
+const extractCloudinaryPublicId = (fileUrl) => {
+  if (!fileUrl) {
+    return null;
+  }
+
+  if (
+    !fileUrl.startsWith("http://") &&
+    !fileUrl.startsWith("https://")
+  ) {
+    return fileUrl;
+  }
+
+  try {
+    const parsedUrl = new URL(fileUrl);
+
+    const pathname = parsedUrl.pathname;
+
+    const uploadMarker = "/upload/";
+
+    const uploadIndex = pathname.indexOf(uploadMarker);
+
+    if (uploadIndex === -1) {
+      return null;
+    }
+
+    let publicPath = pathname.substring(
+      uploadIndex + uploadMarker.length
+    );
+
+    // --------------------------------------------------------
+    // Remove transformations
+    // --------------------------------------------------------
+
+    const segments = publicPath.split("/");
+
+    while (
+      segments.length > 0 &&
+      (
+        segments[0].startsWith("w_") ||
+        segments[0].startsWith("h_") ||
+        segments[0].startsWith("c_") ||
+        segments[0].startsWith("q_") ||
+        segments[0].startsWith("f_") ||
+        segments[0].startsWith("so_") ||
+        segments[0].startsWith("e_") ||
+        segments[0].startsWith("g_") ||
+        segments[0].startsWith("a_") ||
+        segments[0].startsWith("o_") ||
+        segments[0].startsWith("br_") ||
+        segments[0].startsWith("sa_") ||
+        segments[0].startsWith("co_") ||
+        segments[0].startsWith("sh_") ||
+        segments[0].startsWith("r_") ||
+        segments[0].startsWith("bo_")
+      )
+    ) {
+      segments.shift();
+    }
+
+    publicPath = segments.join("/");
+
+    // --------------------------------------------------------
+    // Remove version segment
+    // --------------------------------------------------------
+
+    publicPath = publicPath.replace(
+      /^v\d+\//,
+      ""
+    );
+
+    // --------------------------------------------------------
+    // Remove extension
+    // --------------------------------------------------------
+
+    publicPath = publicPath.replace(
+      /\.(mp4|webm|mov|avi|mkv|jpg|jpeg|png|webp|gif)$/i,
+      ""
+    );
+
+    return publicPath || null;
+  } catch (error) {
+    console.warn(
+      "⚠️ Failed to extract Cloudinary public ID:",
+      error.message
+    );
+
+    return null;
+  }
+};
+
+// ============================================================
+// CLOUDINARY STORAGE PROVIDER
+// ============================================================
+
 export const cloudinaryStorageProvider = {
-  name: 'cloudinary',
+  name: "cloudinary",
+
+  // ==========================================================
+  // SAVE
+  // ==========================================================
 
   /**
-   * Save a file to Cloudinary
-   * @param {Object} file - Multer file object or file data
-   * @param {Object} options - { type: 'image'|'video', category: string, publicId: string }
-   * @returns {Promise<Object>} - Saved file info
+   * Save a file to Cloudinary.
+   *
+   * @param {Object} file
+   * @param {Object} options
+   * @returns {Promise<Object>}
    */
   async save(file, options = {}) {
     if (!file) {
-      throw new Error('No file provided');
+      throw new Error("No file provided");
     }
 
-    const { type = 'image', category = '', publicId = null, transformation = [] } = options;
+    const {
+      type = "image",
+      category = "",
+      publicId = null,
+      transformation = [],
+    } = options;
 
-    // Determine if it's a video
-    const isVideo = type === 'video' || (file.mimetype && file.mimetype.startsWith('video/'));
-    const resourceType = getResourceType(type, file.mimetype);
-    const folder = getFolder(isVideo ? 'video' : 'image', category);
+    const isVideo =
+      type === "video" ||
+      (
+        file.mimetype &&
+        file.mimetype.startsWith("video/")
+      );
 
-    // Generate public ID if not provided
+    const resourceType = getResourceType(
+      type,
+      file.mimetype
+    );
+
+    const folder = getFolder(
+      isVideo ? "video" : "image",
+      category
+    );
+
+    // --------------------------------------------------------
+    // Generate Public ID
+    // --------------------------------------------------------
+
     const timestamp = Date.now();
     const random = Math.round(Math.random() * 1e9);
-    const ext = file.originalname ? path.extname(file.originalname) : '';
-    const baseName = file.originalname ? path.basename(file.originalname, ext) : 'file';
-    const finalPublicId = publicId || `${baseName}-${timestamp}-${random}`;
 
-    // Prepare upload options
+    const ext = file.originalname
+      ? path.extname(file.originalname)
+      : "";
+
+    const baseName = file.originalname
+      ? path.basename(file.originalname, ext)
+      : "file";
+
+    const safeBaseName = baseName
+      .replace(/[^a-zA-Z0-9_-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    const finalPublicId =
+      publicId ||
+      `${safeBaseName || "file"}-${timestamp}-${random}`;
+
+    // --------------------------------------------------------
+    // Upload Options
+    // --------------------------------------------------------
+
     const uploadOptions = {
       folder,
       public_id: finalPublicId,
       resource_type: resourceType,
       overwrite: true,
       invalidate: true,
-      transformation,
-      timeout: 120000, // ✅ 2 minutes
+      transformation: Array.isArray(transformation)
+        ? transformation
+        : [],
+      timeout: 120000,
     };
 
-    // For images, add image transformations
-    if (resourceType === 'image' && mediaConfig.cloudinary.imageTransformation) {
+    // --------------------------------------------------------
+    // Image transformations
+    // --------------------------------------------------------
+
+    if (
+      resourceType === "image" &&
+      mediaConfig.cloudinary.imageTransformation
+    ) {
       uploadOptions.transformation = [
-        ...(Array.isArray(transformation) ? transformation : []),
+        ...uploadOptions.transformation,
         ...mediaConfig.cloudinary.imageTransformation,
       ];
     }
 
-    // For videos, add video transformations
-    if (resourceType === 'video' && mediaConfig.cloudinary.videoTransformation) {
+    // --------------------------------------------------------
+    // Video transformations
+    // --------------------------------------------------------
+
+    if (
+      resourceType === "video" &&
+      mediaConfig.cloudinary.videoTransformation
+    ) {
       uploadOptions.transformation = [
-        ...(Array.isArray(transformation) ? transformation : []),
+        ...uploadOptions.transformation,
         ...mediaConfig.cloudinary.videoTransformation,
       ];
     }
 
-    // Get file data
+    // --------------------------------------------------------
+    // Get File Data
+    // --------------------------------------------------------
+
     let fileData;
-    if (file.path && fs.existsSync(file.path)) {
-      // Multer saved file locally
+
+    if (
+      file.path &&
+      fs.existsSync(file.path)
+    ) {
       fileData = file.path;
     } else if (file.buffer) {
-      // File is in memory
       fileData = file.buffer;
     } else if (file.stream) {
-      // File is a stream
       fileData = file.stream;
     } else {
-      throw new Error('Unsupported file format');
+      throw new Error(
+        "Unsupported file format"
+      );
     }
 
-    // Upload to Cloudinary
-    const result = await uploadToCloudinary(fileData, uploadOptions);
+    // --------------------------------------------------------
+    // Upload
+    // --------------------------------------------------------
 
-    // Build response
+    const result = await uploadToCloudinary(
+      fileData,
+      uploadOptions
+    );
+
+    if (!result) {
+      throw new Error(
+        "Cloudinary upload returned no result"
+      );
+    }
+
+    // --------------------------------------------------------
+    // Return Normalized Result
+    // --------------------------------------------------------
+
     return {
       filename: result.public_id,
       url: result.secure_url,
-      provider: 'cloudinary',
-      type: isVideo ? 'video' : 'image',
-      size: result.bytes || file.size || 0,
-      mimetype: file.mimetype || '',
+      provider: "cloudinary",
+      type: isVideo ? "video" : "image",
+      size:
+        result.bytes ||
+        file.size ||
+        0,
+
+      mimetype:
+        file.mimetype ||
+        "",
+
       cloudinary: {
         publicId: result.public_id,
         version: result.version,
@@ -230,256 +476,671 @@ export const cloudinaryStorageProvider = {
     };
   },
 
-  /**
-   * Save multiple files to Cloudinary
-   * @param {Array} files - Array of Multer file objects
-   * @param {Object} options - { type: 'image'|'video', category: string }
-   * @returns {Promise<Array>} - Saved file info array
-   */
+  // ==========================================================
+  // SAVE MULTIPLE
+  // ==========================================================
+
   async saveMultiple(files, options = {}) {
-    if (!files || files.length === 0) return [];
+    if (
+      !files ||
+      files.length === 0
+    ) {
+      return [];
+    }
 
     const results = [];
+
     for (const file of files) {
       try {
-        const result = await this.save(file, options);
+        const result =
+          await this.save(file, options);
+
         results.push(result);
       } catch (error) {
-        console.error('❌ Failed to save file to Cloudinary:', error.message);
+        console.error(
+          "❌ Failed to save file to Cloudinary:",
+          error.message
+        );
+
         results.push({
           error: error.message,
-          filename: file.originalname || 'unknown',
+          filename:
+            file.originalname ||
+            "unknown",
         });
       }
     }
+
     return results;
   },
 
+  // ==========================================================
+  // DELETE
+  // ==========================================================
+
   /**
-   * Delete a file from Cloudinary
-   * @param {string} publicId - Cloudinary public ID or filename
-   * @param {Object} options - { type: 'image'|'video' }
-   * @returns {Promise<boolean>} - True if deleted
+   * Delete a Cloudinary asset.
+   *
+   * Accepts either:
+   *
+   * - public_id
+   * - full Cloudinary URL
    */
   async delete(publicId, options = {}) {
-    if (!publicId) return false;
-
-    const { type = 'image' } = options;
-    const resourceType = getResourceType(type);
-
-    // If publicId is a full URL, extract the public ID
-    let id = publicId;
-    if (publicId.startsWith('http://') || publicId.startsWith('https://')) {
-      // Extract public ID from Cloudinary URL
-      const matches = publicId.match(/\/v\d+\/([^/?]+)/);
-      if (matches && matches[1]) {
-        id = matches[1];
-      }
+    if (!publicId) {
+      return false;
     }
 
-    // If it contains folder, use as-is, otherwise try to find
-    try {
-      const result = await cloudinary.uploader.destroy(id, {
-        resource_type: resourceType,
-        invalidate: true,
-        timeout: 60000, // ✅ 1 minute
-      });
+    const {
+      type = "image",
+    } = options;
 
-      if (result.result === 'ok') {
-        console.log(`🗑️ Deleted from Cloudinary: ${id}`);
+    const resourceType =
+      getResourceType(type);
+
+    let id =
+      extractCloudinaryPublicId(publicId);
+
+    if (!id) {
+      id = publicId;
+    }
+
+    try {
+      const result =
+        await cloudinary.uploader.destroy(
+          id,
+          {
+            resource_type: resourceType,
+            invalidate: true,
+            timeout: 60000,
+          }
+        );
+
+      if (result.result === "ok") {
+        console.log(
+          `🗑️ Deleted from Cloudinary: ${id}`
+        );
+
         return true;
-      } else if (result.result === 'not found') {
-        console.warn(`⚠️ File not found in Cloudinary: ${id}`);
-        return true; // Already deleted
-      } else {
-        console.error(`❌ Failed to delete from Cloudinary: ${id}`, result);
-        return false;
       }
+
+      if (
+        result.result === "not found"
+      ) {
+        console.warn(
+          `⚠️ File not found in Cloudinary: ${id}`
+        );
+
+        return true;
+      }
+
+      console.error(
+        `❌ Failed to delete from Cloudinary: ${id}`,
+        result
+      );
+
+      return false;
     } catch (error) {
-      console.error(`❌ Cloudinary delete error for ${id}:`, error.message);
+      console.error(
+        `❌ Cloudinary delete error for ${id}:`,
+        error.message
+      );
+
       return false;
     }
   },
 
-  /**
-   * Delete multiple files from Cloudinary
-   * @param {Array} publicIds - Array of public IDs
-   * @param {Object} options - { type: 'image'|'video' }
-   * @returns {Promise<Array>} - Deletion results
-   */
-  async deleteMultiple(publicIds, options = {}) {
-    if (!publicIds || publicIds.length === 0) return [];
+  // ==========================================================
+  // DELETE MULTIPLE
+  // ==========================================================
+
+  async deleteMultiple(
+    publicIds,
+    options = {}
+  ) {
+    if (
+      !publicIds ||
+      publicIds.length === 0
+    ) {
+      return [];
+    }
 
     const results = [];
+
     for (const id of publicIds) {
       try {
-        const result = await this.delete(id, options);
-        results.push({ publicId: id, success: result });
+        const result =
+          await this.delete(id, options);
+
+        results.push({
+          publicId: id,
+          success: result,
+        });
       } catch (error) {
-        results.push({ publicId: id, success: false, error: error.message });
+        results.push({
+          publicId: id,
+          success: false,
+          error: error.message,
+        });
       }
     }
+
     return results;
   },
 
-  /**
-   * Check if a file exists in Cloudinary
-   * @param {string} publicId - Cloudinary public ID
-   * @param {Object} options - { type: 'image'|'video' }
-   * @returns {Promise<boolean>} - True if exists
-   */
-  async exists(publicId, options = {}) {
-    if (!publicId) return false;
+  // ==========================================================
+  // EXISTS
+  // ==========================================================
 
-    const { type = 'image' } = options;
-    const resourceType = getResourceType(type);
+  async exists(
+    publicId,
+    options = {}
+  ) {
+    if (!publicId) {
+      return false;
+    }
+
+    const {
+      type = "image",
+    } = options;
+
+    const resourceType =
+      getResourceType(type);
 
     try {
-      const result = await cloudinary.api.resource(publicId, {
-        resource_type: resourceType,
-        timeout: 60000, // ✅ 1 minute
-      });
+      const result =
+        await cloudinary.api.resource(
+          publicId,
+          {
+            resource_type: resourceType,
+            timeout: 60000,
+          }
+        );
+
       return !!result;
     } catch (error) {
-      if (error.http_code === 404) {
+      if (
+        error.http_code === 404
+      ) {
         return false;
       }
-      console.error('❌ Cloudinary exists check error:', error.message);
+
+      console.error(
+        "❌ Cloudinary exists check error:",
+        error.message
+      );
+
       return false;
     }
   },
 
-  /**
-   * Get file info from Cloudinary
-   * @param {string} publicId - Cloudinary public ID
-   * @param {Object} options - { type: 'image'|'video' }
-   * @returns {Promise<Object|null>} - File info or null
-   */
-  async getInfo(publicId, options = {}) {
-    if (!publicId) return null;
+  // ==========================================================
+  // GET INFO
+  // ==========================================================
 
-    const { type = 'image' } = options;
-    const resourceType = getResourceType(type);
+  async getInfo(
+    publicId,
+    options = {}
+  ) {
+    if (!publicId) {
+      return null;
+    }
+
+    const {
+      type = "image",
+    } = options;
+
+    const resourceType =
+      getResourceType(type);
 
     try {
-      const result = await cloudinary.api.resource(publicId, {
-        resource_type: resourceType,
-        timeout: 60000, // ✅ 1 minute
-      });
+      const result =
+        await cloudinary.api.resource(
+          publicId,
+          {
+            resource_type: resourceType,
+            timeout: 60000,
+          }
+        );
 
       return {
-        filename: result.public_id,
-        url: result.secure_url,
-        provider: 'cloudinary',
-        type: resourceType,
-        size: result.bytes,
-        created: result.created_at,
+        filename:
+          result.public_id,
+
+        url:
+          result.secure_url,
+
+        provider:
+          "cloudinary",
+
+        type:
+          resourceType,
+
+        size:
+          result.bytes,
+
+        created:
+          result.created_at,
+
         cloudinary: {
-          publicId: result.public_id,
-          version: result.version,
-          format: result.format,
-          width: result.width,
-          height: result.height,
-          duration: result.duration,
-          bytes: result.bytes,
-          url: result.secure_url,
+          publicId:
+            result.public_id,
+
+          version:
+            result.version,
+
+          format:
+            result.format,
+
+          width:
+            result.width,
+
+          height:
+            result.height,
+
+          duration:
+            result.duration,
+
+          bytes:
+            result.bytes,
+
+          url:
+            result.secure_url,
         },
       };
     } catch (error) {
-      if (error.http_code === 404) {
+      if (
+        error.http_code === 404
+      ) {
         return null;
       }
-      console.error('❌ Cloudinary getInfo error:', error.message);
+
+      console.error(
+        "❌ Cloudinary getInfo error:",
+        error.message
+      );
+
       return null;
     }
   },
 
+  // ==========================================================
+  // GET TRANSFORMED URL
+  // ==========================================================
+
   /**
-   * Get a transformed URL for a Cloudinary file
-   * @param {string} publicId - Cloudinary public ID
-   * @param {Object} transformations - Transformation options
-   * @param {Object} options - { type: 'image'|'video' }
-   * @returns {string} - Transformed URL
+   * Generate a Cloudinary transformed URL.
+   *
+   * Supports:
+   *
+   * width
+   * height
+   * crop
+   * quality
+   * format
+   * startOffset
+   * effect
+   * gravity
+   * angle
+   * opacity
+   * brightness
+   * saturation
+   * contrast
+   * sharpness
+   * blur
+   * radius
+   * border
    */
-  getTransformedUrl(publicId, transformations = {}, options = {}) {
-    if (!publicId) return '';
+  getTransformedUrl(
+    publicId,
+    transformations = {},
+    options = {}
+  ) {
+    if (!publicId) {
+      return "";
+    }
 
-    const { type = 'image' } = options;
-    const resourceType = getResourceType(type);
+    const {
+      type = "image",
+    } = options;
 
-    // Build transformation string
+    const resourceType =
+      getResourceType(type);
+
     const trans = [];
-    if (transformations.width) trans.push(`w_${transformations.width}`);
-    if (transformations.height) trans.push(`h_${transformations.height}`);
-    if (transformations.crop) trans.push(`c_${transformations.crop}`);
-    if (transformations.quality) trans.push(`q_${transformations.quality}`);
-    if (transformations.format) trans.push(`f_${transformations.format}`);
-    if (transformations.effect) trans.push(`e_${transformations.effect}`);
-    if (transformations.gravity) trans.push(`g_${transformations.gravity}`);
-    if (transformations.angle) trans.push(`a_${transformations.angle}`);
-    if (transformations.opacity) trans.push(`o_${transformations.opacity}`);
-    if (transformations.brightness) trans.push(`br_${transformations.brightness}`);
-    if (transformations.saturation) trans.push(`sa_${transformations.saturation}`);
-    if (transformations.contrast) trans.push(`co_${transformations.contrast}`);
-    if (transformations.sharpness) trans.push(`sh_${transformations.sharpness}`);
-    if (transformations.blur) trans.push(`e_blur:${transformations.blur}`);
-    if (transformations.radius) trans.push(`r_${transformations.radius}`);
-    if (transformations.border) trans.push(`bo_${transformations.border}`);
 
+    // --------------------------------------------------------
+    // Dimensions
+    // --------------------------------------------------------
+
+    if (
+      transformations.width
+    ) {
+      trans.push(
+        `w_${transformations.width}`
+      );
+    }
+
+    if (
+      transformations.height
+    ) {
+      trans.push(
+        `h_${transformations.height}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Crop
+    // --------------------------------------------------------
+
+    if (
+      transformations.crop
+    ) {
+      trans.push(
+        `c_${transformations.crop}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Quality
+    // --------------------------------------------------------
+
+    if (
+      transformations.quality
+    ) {
+      trans.push(
+        `q_${transformations.quality}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Format
+    // --------------------------------------------------------
+
+    if (
+      transformations.format
+    ) {
+      trans.push(
+        `f_${transformations.format}`
+      );
+    }
+
+    // ========================================================
+    // ✅ IMPORTANT VIDEO THUMBNAIL FIX
+    // ========================================================
+
+    /**
+     * Cloudinary video start offset must be:
+     *
+     * so_1
+     *
+     * NOT:
+     *
+     * e_so_1
+     */
+    if (
+      transformations.startOffset !== undefined &&
+      transformations.startOffset !== null
+    ) {
+      trans.push(
+        `so_${transformations.startOffset}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Effect
+    // --------------------------------------------------------
+
+    if (
+      transformations.effect
+    ) {
+      trans.push(
+        `e_${transformations.effect}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Gravity
+    // --------------------------------------------------------
+
+    if (
+      transformations.gravity
+    ) {
+      trans.push(
+        `g_${transformations.gravity}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Angle
+    // --------------------------------------------------------
+
+    if (
+      transformations.angle !== undefined &&
+      transformations.angle !== null
+    ) {
+      trans.push(
+        `a_${transformations.angle}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Opacity
+    // --------------------------------------------------------
+
+    if (
+      transformations.opacity !== undefined &&
+      transformations.opacity !== null
+    ) {
+      trans.push(
+        `o_${transformations.opacity}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Brightness
+    // --------------------------------------------------------
+
+    if (
+      transformations.brightness !== undefined &&
+      transformations.brightness !== null
+    ) {
+      trans.push(
+        `br_${transformations.brightness}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Saturation
+    // --------------------------------------------------------
+
+    if (
+      transformations.saturation !== undefined &&
+      transformations.saturation !== null
+    ) {
+      trans.push(
+        `sa_${transformations.saturation}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Contrast
+    // --------------------------------------------------------
+
+    if (
+      transformations.contrast !== undefined &&
+      transformations.contrast !== null
+    ) {
+      trans.push(
+        `co_${transformations.contrast}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Sharpness
+    // --------------------------------------------------------
+
+    if (
+      transformations.sharpness !== undefined &&
+      transformations.sharpness !== null
+    ) {
+      trans.push(
+        `sh_${transformations.sharpness}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Blur
+    // --------------------------------------------------------
+
+    if (
+      transformations.blur !== undefined &&
+      transformations.blur !== null
+    ) {
+      trans.push(
+        `e_blur:${transformations.blur}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Radius
+    // --------------------------------------------------------
+
+    if (
+      transformations.radius !== undefined &&
+      transformations.radius !== null
+    ) {
+      trans.push(
+        `r_${transformations.radius}`
+      );
+    }
+
+    // --------------------------------------------------------
+    // Border
+    // --------------------------------------------------------
+
+    if (
+      transformations.border
+    ) {
+      trans.push(
+        `bo_${transformations.border}`
+      );
+    }
+
+    // --------------------------------------------------------
     // Build URL
-    const baseUrl = `https://res.cloudinary.com/${mediaConfig.cloudinary.cloudName}`;
-    const typePath = resourceType === 'video' ? 'video/upload' : 'image/upload';
-    const transStr = trans.length > 0 ? `${trans.join(',')}/` : '';
+    // --------------------------------------------------------
+
+    const baseUrl =
+      `https://res.cloudinary.com/${mediaConfig.cloudinary.cloudName}`;
+
+    const typePath =
+      resourceType === "video"
+        ? "video/upload"
+        : "image/upload";
+
+    const transStr =
+      trans.length > 0
+        ? `${trans.join(",")}/`
+        : "";
 
     return `${baseUrl}/${typePath}/${transStr}${publicId}`;
   },
 
-  /**
-   * Generate a thumbnail URL for a video
-   * @param {string} publicId - Cloudinary public ID
-   * @param {Object} options - { time: seconds, width: number, height: number }
-   * @returns {string} - Thumbnail URL
-   */
-  getVideoThumbnail(publicId, options = {}) {
-    if (!publicId) return '';
+  // ==========================================================
+  // VIDEO THUMBNAIL
+  // ==========================================================
 
-    const time = options.time || 1;
-    const width = options.width || 1280;
-    const height = options.height || 720;
+  /**
+   * Generate a thumbnail URL for a Cloudinary video.
+   *
+   * IMPORTANT:
+   *
+   * Uses:
+   *
+   * so_1
+   *
+   * instead of:
+   *
+   * e_so_1
+   */
+  getVideoThumbnail(
+    publicId,
+    options = {}
+  ) {
+    if (!publicId) {
+      return "";
+    }
+
+    const time =
+      options.time ?? 1;
+
+    const width =
+      options.width ?? 1280;
+
+    const height =
+      options.height ?? 720;
 
     return this.getTransformedUrl(
       publicId,
       {
         width,
         height,
-        crop: 'fill',
-        quality: 'auto',
-        format: 'jpg',
-        effect: `so_${time}`,
+        crop: "fill",
+        quality: "auto",
+        format: "jpg",
+
+        // ✅ Cloudinary video start offset
+        startOffset: time,
       },
-      { type: 'video' }
+      {
+        type: "video",
+      }
     );
   },
 
-  /**
-   * Generate an optimized URL for images
-   * @param {string} publicId - Cloudinary public ID
-   * @param {Object} options - { width, height, quality, format }
-   * @returns {string} - Optimized URL
-   */
-  getOptimizedImageUrl(publicId, options = {}) {
-    if (!publicId) return '';
+  // ==========================================================
+  // OPTIMIZED IMAGE URL
+  // ==========================================================
 
-    const width = options.width || 800;
-    const height = options.height || 600;
-    const quality = options.quality || 'auto';
-    const format = options.format || 'auto';
-    const crop = options.crop || 'limit';
+  /**
+   * Generate an optimized image URL.
+   */
+  getOptimizedImageUrl(
+    publicId,
+    options = {}
+  ) {
+    if (!publicId) {
+      return "";
+    }
+
+    const width =
+      options.width || 800;
+
+    const height =
+      options.height || 600;
+
+    const quality =
+      options.quality || "auto";
+
+    const format =
+      options.format || "auto";
+
+    const crop =
+      options.crop || "limit";
 
     return this.getTransformedUrl(
       publicId,
-      { width, height, crop, quality, format },
-      { type: 'image' }
+      {
+        width,
+        height,
+        crop,
+        quality,
+        format,
+      },
+      {
+        type: "image",
+      }
     );
   },
 };
