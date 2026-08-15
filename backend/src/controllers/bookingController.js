@@ -11,6 +11,7 @@
 // - Pagination, search, filters and sorting supported
 // - Listing media fields are populated
 // - Notifications are protected from breaking booking operations
+// - ✅ FIXED: Date normalization for same-day bookings
 // ============================================================
 
 import Booking from "../models/Booking.js";
@@ -91,6 +92,19 @@ const validateBookingStatusTransition = (currentStatus, newStatus) => {
 
 
 // ============================================================
+// ✅ DATE NORMALIZATION HELPER
+// ============================================================
+
+const normalizeBookingDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+
+// ============================================================
 // CREATE BOOKING
 // ============================================================
 // IMPORTANT:
@@ -152,14 +166,6 @@ export const createBooking = async (req, res) => {
           "Providers cannot create bookings. Please use traveler account.",
       });
     }
-
-    // ----------------------------------------------------------
-    // IMPORTANT:
-    // DO NOT check user.isEmailVerified here.
-    //
-    // Email verification is currently NOT a requirement
-    // for creating a booking.
-    // ----------------------------------------------------------
 
     console.log(
       "✅ Booking allowed. Email verification status:",
@@ -249,58 +255,62 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // Dates
-    // ----------------------------------------------------------
+    // ==========================================================
+    // ✅ FIXED: Date Normalization
+    // ==========================================================
 
-    const start = startDate
-      ? new Date(startDate)
-      : new Date();
+    const start = normalizeBookingDate(startDate);
+    let end = normalizeBookingDate(endDate);
 
-    if (Number.isNaN(start.getTime())) {
+    console.log("📅 Normalized start:", start);
+    console.log("📅 Normalized end:", end);
+
+    // ✅ Validate start date
+    if (!start) {
       return res.status(400).json({
         success: false,
         message: "Invalid start date",
       });
     }
 
-    let end;
+    // ✅ Check if start date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    if (endDate) {
-      end = new Date(endDate);
+    if (start < today) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date cannot be in the past",
+      });
+    }
 
-      if (Number.isNaN(end.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid end date",
-        });
-      }
-    } else {
+    // ✅ If no end date, set to start + 1 day
+    if (!end) {
       end = new Date(start);
       end.setDate(end.getDate() + 1);
+      console.log("📅 No end date provided, set to:", end);
     }
 
-    // ----------------------------------------------------------
-    // Start date must be future
-    // ----------------------------------------------------------
+    // ✅ If same day, make it a 1-day booking (end = start + 1 day)
+    if (end.getTime() === start.getTime()) {
+      end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      console.log("📅 Same day booking, set end to:", end);
+    }
 
-    if (start <= new Date()) {
+    // ✅ Only reject if end is truly before start
+    if (end < start) {
       return res.status(400).json({
         success: false,
-        message: "Start date must be in the future",
+        message: "End date cannot be before start date",
       });
     }
 
-    // ----------------------------------------------------------
-    // End date validation
-    // ----------------------------------------------------------
+    console.log("📅 Final dates - start:", start, "end:", end);
 
-    if (end <= start) {
-      return res.status(400).json({
-        success: false,
-        message: "End date must be after start date",
-      });
-    }
+    // ==========================================================
+    // End of date fix
+    // ==========================================================
 
     // ----------------------------------------------------------
     // Duplicate booking check
@@ -2153,4 +2163,3 @@ export const checkDuplicateBooking = async (
 console.log(
   "✅ bookingController.js loaded successfully"
 );
-
