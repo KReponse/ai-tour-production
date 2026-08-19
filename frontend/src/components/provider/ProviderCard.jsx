@@ -1,5 +1,5 @@
 // src/components/provider/ProviderCard.jsx
-// ✅ NEW - Provider Card Component with WhatsApp Contact
+// ✅ NEW - Provider Card Component with WhatsApp Contact & In-App Messaging
 
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,8 +17,11 @@ import {
   BadgeCheck,
   Loader2,
   ExternalLink,
+  Send,
 } from 'lucide-react';
 import { getPublicProviderProfile } from '../../services/providerService';
+import { useAuth } from '../../contexts/AuthContext';
+import { createTravelerProviderConversation } from '../../services/conversationService';
 
 // ===============================
 // AI TOUR COLORS
@@ -112,15 +115,19 @@ const ProviderCard = ({
   variant = 'default', // 'default', 'compact', 'detailed'
   showContact = true,
   showViewProfile = true,
+  showInAppMessage = true, // ✅ NEW: Show in-app message button
   className = '',
   onContactClick,
   onViewProfileClick,
+  onMessageClick,
 }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [publicProfile, setPublicProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [showContactOptions, setShowContactOptions] = useState(false);
   const [contactError, setContactError] = useState(null);
+  const [messageLoading, setMessageLoading] = useState(false);
 
   if (!provider) return null;
 
@@ -171,18 +178,70 @@ const ProviderCard = ({
   // ─── Get Contact Information ──────────────────────────────────
 
   const getPhoneNumber = () => {
-    // Priority: businessPhone > phone > whatsapp
     return provider.businessPhone || provider.phone || provider.whatsapp || null;
   };
 
   const getWhatsAppNumber = () => {
-    // Priority: whatsapp > businessPhone > phone
     return provider.whatsapp || provider.businessPhone || provider.phone || null;
   };
 
   const getEmail = () => {
     return provider.businessEmail || provider.email || null;
   };
+
+  // ─── In-App Message Handler ───────────────────────────────────
+
+  const handleInAppMessage = useCallback(async (e) => {
+    e.stopPropagation();
+    
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (user.role === 'provider') {
+      // Provider messaging another provider
+      if (user._id === provider._id) {
+        alert('You cannot message yourself');
+        return;
+      }
+      alert('Providers can use WhatsApp or contact support');
+      return;
+    }
+
+    setMessageLoading(true);
+    try {
+      const response = await createTravelerProviderConversation(
+        provider._id,
+        listingId || null,
+        null, // no booking yet
+        null // no initial message
+      );
+
+      if (response.success && response.data) {
+        if (onMessageClick) {
+          onMessageClick(response.data);
+        } else {
+          navigate(`/messages/${response.data._id}`);
+        }
+      } else {
+        alert(response.message || 'Failed to start conversation');
+      }
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      
+      // Check if conversation already exists
+      if (error.response?.data?.data) {
+        // Existing conversation found
+        navigate(`/messages/${error.response.data.data._id}`);
+        return;
+      }
+      
+      alert(error.response?.data?.message || 'Failed to start conversation');
+    } finally {
+      setMessageLoading(false);
+    }
+  }, [user, provider._id, listingId, navigate, onMessageClick]);
 
   // ─── WhatsApp Contact Handler ─────────────────────────────────
 
@@ -269,6 +328,8 @@ const ProviderCard = ({
     const ratingDisplay = rating > 0 ? rating.toFixed(1) : 'New';
     const phone = getWhatsAppNumber();
     const hasWhatsApp = !!phone;
+    const isTraveler = user?.role === 'traveler';
+    const isOwnProfile = user?._id === provider._id;
 
     return (
       <div className={`flex items-center justify-between gap-3 ${className}`}>
@@ -299,16 +360,36 @@ const ProviderCard = ({
           </div>
         </div>
         
-        {showContact && hasWhatsApp && (
-          <button
-            onClick={handleWhatsAppContact}
-            className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-[#25D366] text-white text-xs font-medium hover:bg-[#1da851] transition flex items-center gap-1.5 shadow-sm hover:shadow-md"
-            title="Contact on WhatsApp"
-          >
-            <MessageCircle className="w-3.5 h-3.5" />
-            <span>Chat</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* ✅ In-App Message Button (Compact) */}
+          {showInAppMessage && isTraveler && !isOwnProfile && (
+            <button
+              onClick={handleInAppMessage}
+              disabled={messageLoading}
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-[#0D9488] text-white text-xs font-medium hover:bg-[#0f766e] transition flex items-center gap-1.5 shadow-sm hover:shadow-md"
+              title="Send in-app message"
+            >
+              {messageLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              <span>Message</span>
+            </button>
+          )}
+
+          {/* WhatsApp Button */}
+          {showContact && hasWhatsApp && (
+            <button
+              onClick={handleWhatsAppContact}
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-[#25D366] text-white text-xs font-medium hover:bg-[#1da851] transition flex items-center gap-1.5 shadow-sm hover:shadow-md"
+              title="Contact on WhatsApp"
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              <span>Chat</span>
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -328,6 +409,8 @@ const ProviderCard = ({
   const hasWhatsApp = !!phone;
   const businessType = provider.businessType || 'Service Provider';
   const description = provider.description || provider.bio;
+  const isTraveler = user?.role === 'traveler';
+  const isOwnProfile = user?._id === provider._id;
 
   return (
     <div className={`bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 hover:shadow-xl transition-all duration-300 ${className}`}>
@@ -403,6 +486,22 @@ const ProviderCard = ({
 
         {/* ─── Actions ─── */}
         <div className="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+          {/* ✅ In-App Message Button */}
+          {showInAppMessage && isTraveler && !isOwnProfile && (
+            <button
+              onClick={handleInAppMessage}
+              disabled={messageLoading}
+              className="flex-1 min-w-[120px] h-11 rounded-xl bg-[#0D9488] text-white font-medium text-sm hover:bg-[#0f766e] transition-all duration-300 flex items-center justify-center gap-2 shadow-md shadow-[#0D9488]/20 hover:shadow-lg hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
+            >
+              {messageLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Message Provider
+            </button>
+          )}
+
           {/* WhatsApp Contact Button */}
           {showContact && (
             <button

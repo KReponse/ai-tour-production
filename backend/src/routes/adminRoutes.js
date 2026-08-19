@@ -1,5 +1,6 @@
 // backend/src/routes/adminRoutes.js
-// ✅ FIXED - Using Authentication v2 middleware
+// ✅ COMPLETE FIXED - Using Authentication v2 middleware
+// ✅ ADDED: Settings management routes
 
 import express from 'express';
 import {
@@ -42,6 +43,13 @@ import {
   getPaymentDetails,
   getPaymentStats,
   getPaymentsList
+} from '../controllers/adminController.js';
+
+// ✅ NEW: Settings controllers
+import {
+  getAdminSettings,
+  updateAdminSettings,
+  resetAdminSettings
 } from '../controllers/adminController.js';
 
 import {
@@ -175,5 +183,18 @@ router.get('/payments/analytics', getPaymentAnalytics);
 
 // ✅ GET PAYMENT BY ID - Dynamic route (MUST come LAST)
 router.get('/payments/:id', getPaymentDetails);
+
+// =========================
+// ✅ SETTINGS MANAGEMENT (Admin)
+// =========================
+
+// Get all settings
+router.get('/settings', getAdminSettings);
+
+// Update settings
+router.put('/settings', updateAdminSettings);
+
+// Reset settings to defaults
+router.post('/settings/reset', resetAdminSettings);
 
 export default router;

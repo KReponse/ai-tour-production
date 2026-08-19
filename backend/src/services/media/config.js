@@ -1,21 +1,21 @@
 // backend/src/services/media/config.js
 // ✅ Media Configuration - Centralized settings
-// ✅ ADDED: Cloudinary configuration
+// ✅ FIXED: Removed hardcoded Cloudinary defaults, uses env variables only
 
 import dotenv from 'dotenv';
 dotenv.config();
 
 export const mediaConfig = {
   // Storage provider: 'local', 'cloudinary', 's3'
-  provider: process.env.MEDIA_PROVIDER || 'local',
+  provider: process.env.MEDIA_PROVIDER || process.env.MEDIA_STORAGE || 'local',
   
   // Base URLs for media (local fallback)
   baseUrl: process.env.MEDIA_BASE_URL || 'http://localhost:5000/uploads',
   videoBaseUrl: process.env.MEDIA_VIDEO_BASE_URL || 'http://localhost:5000/uploads/videos',
   
   // Upload paths (local storage)
-  uploadPath: process.env.MEDIA_UPLOAD_PATH || './uploads',
-  videoUploadPath: process.env.MEDIA_VIDEO_UPLOAD_PATH || './uploads/videos',
+  uploadPath: process.env.MEDIA_UPLOAD_PATH || './src/uploads',
+  videoUploadPath: process.env.MEDIA_VIDEO_UPLOAD_PATH || './src/uploads/videos',
   
   // File restrictions
   maxFileSize: parseInt(process.env.MEDIA_MAX_SIZE) || 50 * 1024 * 1024, // 50MB
@@ -35,10 +35,11 @@ export const mediaConfig = {
   
   // =========================
   // ✅ CLOUDINARY CONFIGURATION
+  // ✅ FIXED: No hardcoded defaults, uses env only
   // =========================
   cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'dw6po8hag',
-    apiKey: process.env.CLOUDINARY_API_KEY || '924138582998116',
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
     apiSecret: process.env.CLOUDINARY_API_SECRET || '',
     folder: process.env.CLOUDINARY_FOLDER || 'ai-tour',
     
@@ -81,5 +82,22 @@ export const mediaConfig = {
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
   },
 };
+
+// ✅ Log storage configuration
+console.log(`📦 Media storage provider: ${mediaConfig.provider}`);
+
+// ✅ Check if Cloudinary is selected but not configured
+if (mediaConfig.provider === 'cloudinary') {
+  const hasCloudinaryCreds = mediaConfig.cloudinary.cloudName && 
+                             mediaConfig.cloudinary.apiKey && 
+                             mediaConfig.cloudinary.apiSecret;
+  
+  if (!hasCloudinaryCreds) {
+    console.warn('⚠️ Cloudinary selected but credentials are missing! Falling back to local storage.');
+    mediaConfig.provider = 'local';
+  } else {
+    console.log('✅ Cloudinary configured successfully');
+  }
+}
 
 export default mediaConfig;

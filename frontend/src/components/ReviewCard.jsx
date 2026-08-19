@@ -3,6 +3,8 @@
 // ✅ FIXED: Replaced process.env with import.meta.env for Vite compatibility
 // ✅ OPTIMIZED: Added React.memo for performance
 // ✅ OPTIMIZED: Memoized child components
+// ✅ RESPONSIVE: Mobile-optimized layout with proper touch targets
+// ✅ RESPONSIVE: Stacked layout on mobile, row on desktop
 
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { Link } from 'react-router-dom';
@@ -59,9 +61,9 @@ const StatusBadge = memo(({ status }) => {
   const config = configs[status] || configs.published;
 
   return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
+    <span className={`inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${config.bg} ${config.text}`}>
       {config.icon}
-      {config.label}
+      <span className="hidden xs:inline">{config.label}</span>
     </span>
   );
 });
@@ -71,7 +73,7 @@ StatusBadge.displayName = 'StatusBadge';
 // ===============================
 // STARS COMPONENT - Memoized
 // ===============================
-const Stars = memo(({ rating, size = 'w-4 h-4' }) => {
+const Stars = memo(({ rating, size = 'w-3.5 h-3.5 sm:w-4 sm:h-4' }) => {
   return (
     <div className="flex gap-0.5">
       {[1, 2, 3, 4, 5].map((star) => (
@@ -91,7 +93,7 @@ const Stars = memo(({ rating, size = 'w-4 h-4' }) => {
 Stars.displayName = 'Stars';
 
 // ===============================
-// IMAGE GALLERY COMPONENT - Memoized
+// IMAGE GALLERY COMPONENT - Memoized & Responsive
 // ===============================
 const ImageGallery = memo(({ images, onImageClick, maxDisplay = 4 }) => {
   if (!images || images.length === 0) return null;
@@ -100,12 +102,12 @@ const ImageGallery = memo(({ images, onImageClick, maxDisplay = 4 }) => {
   const remaining = images.length - maxDisplay;
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+    <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2 scrollbar-hide">
       {displayImages.map((img, index) => (
         <button
           key={index}
           onClick={() => onImageClick(index)}
-          className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden hover:opacity-90 transition relative group"
+          className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden hover:opacity-90 transition relative group"
         >
           <img
             src={img.url}
@@ -117,7 +119,7 @@ const ImageGallery = memo(({ images, onImageClick, maxDisplay = 4 }) => {
             }}
           />
           {index === maxDisplay - 1 && remaining > 0 && (
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-sm font-bold">
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-xs sm:text-sm font-bold">
               +{remaining}
             </div>
           )}
@@ -130,7 +132,7 @@ const ImageGallery = memo(({ images, onImageClick, maxDisplay = 4 }) => {
 ImageGallery.displayName = 'ImageGallery';
 
 // ===============================
-// PROVIDER REPLY COMPONENT - Memoized
+// PROVIDER REPLY COMPONENT - Memoized & Responsive
 // ===============================
 const ProviderReply = memo(({ reply, providerName, replyAt, updatedAt, onEdit }) => {
   const formatDate = (date) => {
@@ -147,28 +149,28 @@ const ProviderReply = memo(({ reply, providerName, replyAt, updatedAt, onEdit })
   };
 
   return (
-    <div className="mt-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-      <div className="flex items-start gap-2">
-        <Reply className="w-4 h-4 text-[#0D9488] flex-shrink-0 mt-0.5" />
-        <div className="flex-1">
-          <div className="flex items-center justify-between">
+    <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+      <div className="flex items-start gap-1.5 sm:gap-2">
+        <Reply className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0D9488] flex-shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-1">
             <p className="text-xs font-medium text-[#0D9488]">
               {providerName} (Provider)
             </p>
             {onEdit && (
               <button
                 onClick={onEdit}
-                className="text-xs text-gray-400 hover:text-[#0D9488] transition"
+                className="text-[10px] sm:text-xs text-gray-400 hover:text-[#0D9488] transition"
               >
                 Edit Reply
               </button>
             )}
           </div>
-          <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+          <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 mt-0.5 break-words">
             {reply}
           </p>
-          <div className="flex gap-2 text-xs text-gray-400 mt-1">
-            <span>Responded on {formatDate(replyAt)}</span>
+          <div className="flex flex-wrap gap-1 sm:gap-2 text-[10px] sm:text-xs text-gray-400 mt-1">
+            <span>Responded {formatDate(replyAt)}</span>
             {updatedAt && (
               <span>(updated {formatDate(updatedAt)})</span>
             )}
@@ -469,70 +471,70 @@ const ReviewCard = memo(({
   
   return (
     <>
-      <div className={`bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 hover:shadow-md transition-shadow duration-300 ${className}`}>
+      <div className={`bg-white dark:bg-gray-900 rounded-xl sm:rounded-2xl border border-gray-200 dark:border-gray-800 p-3 sm:p-4 md:p-6 hover:shadow-md transition-shadow duration-300 ${className}`}>
         
-        {/* HEADER */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-          <div className="flex items-center gap-3">
+        {/* HEADER - Responsive */}
+        <div className="flex flex-col xs:flex-row xs:items-start xs:justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {showUserInfo && (
               <div className="flex-shrink-0">
                 {reviewerAvatar ? (
                   <img
                     src={reviewerAvatar}
                     alt={reviewerName}
-                    className="w-10 h-10 rounded-full object-cover border-2 border-[#0D9488]"
+                    className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover border-2 border-[#0D9488]"
                     loading="lazy"
                   />
                 ) : (
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white font-bold text-sm">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white font-bold text-xs sm:text-sm">
                     {reviewerName.charAt(0).toUpperCase()}
                   </div>
                 )}
               </div>
             )}
             
-            <div>
+            <div className="min-w-0">
               {showUserInfo && (
-                <h4 className="font-semibold text-[#374151] dark:text-white">
+                <h4 className="font-semibold text-sm sm:text-base text-[#374151] dark:text-white truncate">
                   {reviewerName}
                 </h4>
               )}
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
                 <Stars rating={review.rating} />
-                <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                <span className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400">
                   {review.rating}.0
                 </span>
                 {isVerified && (
-                  <span className="inline-flex items-center gap-1 text-xs text-[#0D9488] bg-[#0D9488]/10 px-2 py-0.5 rounded-full">
-                    <CheckCircle className="w-3 h-3" />
-                    Verified
+                  <span className="inline-flex items-center gap-0.5 text-[10px] sm:text-xs text-[#0D9488] bg-[#0D9488]/10 px-1.5 sm:px-2 py-0.5 rounded-full">
+                    <CheckCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    <span className="hidden xs:inline">Verified</span>
                   </span>
                 )}
                 {review.isEdited && (
-                  <span className="inline-flex items-center gap-1 text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-                    <Edit2 className="w-3 h-3" />
-                    Edited
+                  <span className="inline-flex items-center gap-0.5 text-[10px] sm:text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 sm:px-2 py-0.5 rounded-full">
+                    <Edit2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    <span className="hidden xs:inline">Edited</span>
                   </span>
                 )}
                 {(isAdmin || isProvider || permissions.isOwner) && (
                   <StatusBadge status={review.status} />
                 )}
                 {review.reportedCount > 0 && isAdmin && (
-                  <span className="inline-flex items-center gap-1 text-xs text-orange-500 bg-orange-100 dark:bg-orange-900/20 px-2 py-0.5 rounded-full">
-                    <AlertCircle className="w-3 h-3" />
-                    {review.reportedCount} reports
+                  <span className="inline-flex items-center gap-0.5 text-[10px] sm:text-xs text-orange-500 bg-orange-100 dark:bg-orange-900/20 px-1.5 sm:px-2 py-0.5 rounded-full">
+                    <AlertCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    <span className="hidden xs:inline">{review.reportedCount} reports</span>
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
-            <Calendar className="w-3 h-3" />
-            <span>{formatDate(review.createdAt)}</span>
+          <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-gray-400 flex-shrink-0">
+            <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+            <span className="whitespace-nowrap">{formatDate(review.createdAt)}</span>
             {review.editedAt && review.isEdited && (
-              <span className="text-gray-400 text-[10px]">
-                (edited {formatDate(review.editedAt)})
+              <span className="text-gray-400 text-[8px] sm:text-[10px] hidden xs:inline">
+                (edited)
               </span>
             )}
           </div>
@@ -540,29 +542,29 @@ const ReviewCard = memo(({
 
         {/* TITLE */}
         {review.title && (
-          <h3 className="text-lg font-semibold text-[#374151] dark:text-white mt-3">
+          <h3 className="text-base sm:text-lg font-semibold text-[#374151] dark:text-white mt-2 sm:mt-3 break-words">
             {review.title}
           </h3>
         )}
 
         {/* COMMENT */}
-        <div className="mt-2">
-          <p className="text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-line">
+        <div className="mt-1.5 sm:mt-2">
+          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-line break-words">
             {displayComment}
           </p>
           {shouldTruncate && !compact && (
             <button
               onClick={toggleShowFullComment}
-              className="text-sm text-[#0D9488] hover:underline font-medium mt-1"
+              className="text-xs sm:text-sm text-[#0D9488] hover:underline font-medium mt-1"
             >
               {showFullComment ? 'Show less' : 'Read more'}
             </button>
           )}
         </div>
 
-        {/* IMAGES GALLERY - Using memoized component */}
+        {/* IMAGES GALLERY - Responsive */}
         {hasImages && !compact && (
-          <div className="mt-3">
+          <div className="mt-2 sm:mt-3">
             <ImageGallery 
               images={images} 
               onImageClick={openLightbox} 
@@ -575,14 +577,14 @@ const ReviewCard = memo(({
         {showTourInfo && entity && (
           <Link
             to={entityLink}
-            className="inline-flex items-center gap-1 mt-3 text-sm text-[#0D9488] hover:underline"
+            className="inline-flex items-center gap-1 mt-2 sm:mt-3 text-xs sm:text-sm text-[#0D9488] hover:underline break-words"
           >
-            <Building2 className="w-3 h-3" />
-            <span>{entityTitle}</span>
+            <Building2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex-shrink-0" />
+            <span className="truncate">{entityTitle}</span>
           </Link>
         )}
 
-        {/* PROVIDER REPLY - Using memoized component */}
+        {/* PROVIDER REPLY */}
         {showProviderReply && hasProviderReply && (
           <ProviderReply
             reply={review.providerReply}
@@ -596,21 +598,21 @@ const ReviewCard = memo(({
           />
         )}
 
-        {/* REPLY INPUT */}
+        {/* REPLY INPUT - Responsive */}
         {isReplying && (
-          <form onSubmit={handleReplySubmit} className="mt-4 flex flex-col sm:flex-row gap-2">
+          <form onSubmit={handleReplySubmit} className="mt-3 sm:mt-4 flex flex-col xs:flex-row gap-1.5 sm:gap-2">
             <input
               type="text"
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
               placeholder="Write your response..."
-              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none"
+              className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none min-h-[36px]"
             />
-            <div className="flex gap-2">
+            <div className="flex gap-1.5 sm:gap-2">
               <button
                 type="submit"
                 disabled={!replyText.trim()}
-                className="px-4 py-2 rounded-xl bg-[#0D9488] text-white text-sm font-medium hover:bg-[#0D9488]/80 transition disabled:opacity-50"
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-[#0D9488] text-white text-xs sm:text-sm font-medium hover:bg-[#0D9488]/80 transition disabled:opacity-50 min-h-[36px]"
               >
                 Send
               </button>
@@ -620,7 +622,7 @@ const ReviewCard = memo(({
                   setIsReplying(false);
                   setReplyText('');
                 }}
-                className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 text-xs sm:text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition min-h-[36px]"
               >
                 Cancel
               </button>
@@ -628,116 +630,116 @@ const ReviewCard = memo(({
           </form>
         )}
 
-        {/* ACTIONS */}
-        <div className="flex flex-wrap items-center gap-4 mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
+        {/* ACTIONS - Responsive */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-gray-100 dark:border-gray-800">
           <button
             onClick={handleHelpfulToggle}
-            className={`flex items-center gap-1.5 text-sm transition ${
+            className={`flex items-center gap-1 text-xs sm:text-sm transition ${
               isHelpful ? 'text-[#0D9488]' : 'text-gray-400 hover:text-[#0D9488]'
-            }`}
+            } min-h-[32px] px-1.5 sm:px-2`}
           >
-            <ThumbsUp className={`w-4 h-4 ${isHelpful ? 'fill-[#0D9488]' : ''}`} />
+            <ThumbsUp className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isHelpful ? 'fill-[#0D9488]' : ''}`} />
             <span>Helpful ({helpfulCount})</span>
           </button>
 
           {showActions && canEdit && onEdit && (
             <button
               onClick={() => onEdit(review)}
-              className="text-sm text-gray-400 hover:text-[#0D9488] transition flex items-center gap-1"
+              className="text-xs sm:text-sm text-gray-400 hover:text-[#0D9488] transition flex items-center gap-1 min-h-[32px] px-1.5 sm:px-2"
             >
-              <Edit2 className="w-3 h-3" />
-              Edit
+              <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xs:inline">Edit</span>
             </button>
           )}
 
           {showActions && canDelete && onDelete && (
             <button
               onClick={() => onDelete(review._id)}
-              className="text-sm text-gray-400 hover:text-red-500 transition flex items-center gap-1"
+              className="text-xs sm:text-sm text-gray-400 hover:text-red-500 transition flex items-center gap-1 min-h-[32px] px-1.5 sm:px-2"
             >
-              <Trash2 className="w-3 h-3" />
-              Delete
+              <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xs:inline">Delete</span>
             </button>
           )}
 
           {canReply && onReply && (
             <button
               onClick={() => setIsReplying(!isReplying)}
-              className="text-sm text-[#0D9488] hover:underline transition flex items-center gap-1"
+              className="text-xs sm:text-sm text-[#0D9488] hover:underline transition flex items-center gap-1 min-h-[32px] px-1.5 sm:px-2"
             >
-              <Reply className="w-3 h-3" />
-              {isReplying ? 'Cancel' : 'Reply'}
+              <Reply className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xs:inline">{isReplying ? 'Cancel' : 'Reply'}</span>
             </button>
           )}
 
           {canReport && onReport && (
             <button
               onClick={() => setShowReportModal(true)}
-              className="text-sm text-gray-400 hover:text-orange-500 transition flex items-center gap-1"
+              className="text-xs sm:text-sm text-gray-400 hover:text-orange-500 transition flex items-center gap-1 min-h-[32px] px-1.5 sm:px-2 ml-auto"
             >
-              <Flag className="w-3 h-3" />
-              Report
+              <Flag className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xs:inline">Report</span>
             </button>
           )}
 
           {compact && review.comment?.length > 120 && (
             <Link
               to={`/reviews/${review._id}`}
-              className="text-sm text-[#0D9488] hover:underline ml-auto"
+              className="text-xs sm:text-sm text-[#0D9488] hover:underline ml-auto"
             >
-              Read Full Review →
+              Read Full →
             </Link>
           )}
         </div>
 
         {/* Moderation History */}
         {isAdmin && (review.moderatedAt || review.hiddenAt || review.deletedAt) && (
-          <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-800">
-            <p className="text-xs text-gray-400 flex items-center gap-1">
-              <Shield className="w-3 h-3" />
-              Moderation History:
+          <div className="mt-2.5 sm:mt-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+            <p className="text-[10px] sm:text-xs text-gray-400 flex flex-wrap items-center gap-1">
+              <Shield className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              Moderation:
               {review.moderatedAt && (
                 <span>Moderated {formatDate(review.moderatedAt)}</span>
               )}
               {review.hiddenAt && (
-                <span className="ml-2">Hidden {formatDate(review.hiddenAt)}</span>
+                <span className="ml-1">Hidden {formatDate(review.hiddenAt)}</span>
               )}
               {review.deletedAt && (
-                <span className="ml-2">Deleted {formatDate(review.deletedAt)}</span>
+                <span className="ml-1">Deleted {formatDate(review.deletedAt)}</span>
               )}
             </p>
           </div>
         )}
       </div>
 
-      {/* IMAGE LIGHTBOX */}
+      {/* IMAGE LIGHTBOX - Responsive */}
       {imageLightbox.open && hasImages && (
         <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center">
           <button
             onClick={closeLightbox}
-            className="absolute top-4 right-4 text-white p-2 hover:bg-white/20 rounded-full transition z-10"
+            className="absolute top-2 sm:top-4 right-2 sm:right-4 text-white p-1.5 sm:p-2 hover:bg-white/20 rounded-full transition z-10"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
           
           {images.length > 1 && (
             <>
               <button
                 onClick={() => navigateLightbox(-1)}
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-white p-3 hover:bg-white/20 rounded-full transition"
+                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 text-white p-2 sm:p-3 hover:bg-white/20 rounded-full transition"
               >
-                <ChevronLeft className="w-8 h-8" />
+                <ChevronLeft className="w-6 h-6 sm:w-8 sm:h-8" />
               </button>
               <button
                 onClick={() => navigateLightbox(1)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-white p-3 hover:bg-white/20 rounded-full transition"
+                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 text-white p-2 sm:p-3 hover:bg-white/20 rounded-full transition"
               >
-                <ChevronRight className="w-8 h-8" />
+                <ChevronRight className="w-6 h-6 sm:w-8 sm:h-8" />
               </button>
             </>
           )}
 
-          <div className="max-w-4xl max-h-[80vh] mx-4">
+          <div className="max-w-[95vw] sm:max-w-4xl max-h-[80vh] mx-2 sm:mx-4">
             <img
               src={images[imageLightbox.index]?.url}
               alt={images[imageLightbox.index]?.caption || `Review photo ${imageLightbox.index + 1}`}
@@ -747,56 +749,56 @@ const ReviewCard = memo(({
                 e.target.src = 'https://via.placeholder.com/800x600?text=No+Image';
               }}
             />
-            <p className="text-center text-white/60 text-sm mt-4">
+            <p className="text-center text-white/60 text-xs sm:text-sm mt-2 sm:mt-4">
               {imageLightbox.index + 1} / {images.length}
             </p>
           </div>
         </div>
       )}
 
-      {/* REPORT MODAL */}
+      {/* REPORT MODAL - Responsive */}
       {showReportModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-3xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-[#374151] dark:text-white flex items-center gap-2">
-                <Flag className="w-5 h-5 text-orange-500" />
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white flex items-center gap-2">
+                <Flag className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" />
                 Report Review
               </h2>
               <button
                 onClick={() => setShowReportModal(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition"
+                className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition"
               >
-                <X className="w-5 h-5 text-gray-500" />
+                <X className="w-4 h-4 sm:w-5 sm:h-5 text-gray-500" />
               </button>
             </div>
 
-            <form onSubmit={handleReportSubmit} className="space-y-4">
+            <form onSubmit={handleReportSubmit} className="space-y-3 sm:space-y-4">
               <div>
-                <label className="block text-sm font-medium text-[#374151] dark:text-white mb-2">
+                <label className="block text-sm font-medium text-[#374151] dark:text-white mb-1.5 sm:mb-2">
                   Why are you reporting this review?
                 </label>
                 <textarea
                   value={reportReason}
                   onChange={(e) => setReportReason(e.target.value)}
                   placeholder="Please describe the issue..."
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none resize-none h-24"
+                  className="w-full px-3 sm:px-4 py-2 sm:py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none resize-none h-20 sm:h-24 text-sm"
                   required
                 />
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col xs:flex-row gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => setShowReportModal(false)}
-                  className="flex-1 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+                  className="flex-1 py-2.5 sm:py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingReport || !reportReason.trim()}
-                  className="flex-1 py-3 rounded-xl bg-orange-500 text-white font-medium hover:bg-orange-600 transition disabled:opacity-50"
+                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition disabled:opacity-50"
                 >
                   {isSubmittingReport ? 'Submitting...' : 'Report Review'}
                 </button>

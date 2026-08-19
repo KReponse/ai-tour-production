@@ -3,6 +3,7 @@
 // ✅ FIXED: Better 409 conflict handling with redirect to existing booking
 // ✅ FIXED: Replaced deprecated getTourReviews with getListingReviews
 // ✅ FIXED: mailto: links work with user gesture
+// ✅ ADDED: Message Provider button with conversation creation
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
@@ -62,6 +63,9 @@ import { createBooking, getMyBookings } from '../services/bookingService';
 import { BIZ_CONFIG, getBusinessConfig } from '../config/listingConfigs';
 import ReviewCard from '../components/ReviewCard';
 import ProviderCard from '../components/provider/ProviderCard';
+
+// ✅ Import conversation service for messaging
+import { createTravelerProviderConversation } from '../services/conversationService';
 
 import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo } from '../utils/mediaHelpers';
 
@@ -753,6 +757,7 @@ const ListingDetails = () => {
   const [numberOfPeople, setNumberOfPeople] = useState(1);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState('');
+  const [messageLoading, setMessageLoading] = useState(false);
 
   const TABS = [
     { id: 'about', label: 'About', Icon: Info },
@@ -775,6 +780,57 @@ const ListingDetails = () => {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ================================================================
+  // ✅ HANDLE MESSAGE PROVIDER
+  // ================================================================
+  const handleMessageProvider = async () => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (user.role === 'provider') {
+      // Providers can't message themselves
+      if (user._id === listing.provider._id) {
+        toast.error('You cannot message yourself');
+        return;
+      }
+      // Provider messaging another provider should use provider_support
+      // For now, show a message
+      toast.info('Providers can contact support for this');
+      return;
+    }
+
+    setMessageLoading(true);
+    try {
+      const response = await createTravelerProviderConversation(
+        listing.provider._id,
+        listing._id,
+        null, // no booking yet
+        null // no initial message
+      );
+
+      if (response.success && response.data) {
+        navigate(`/messages/${response.data._id}`);
+      } else {
+        toast.error(response.message || 'Failed to start conversation');
+      }
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      
+      // Check if conversation already exists
+      if (error.response?.data?.data) {
+        // Existing conversation found
+        navigate(`/messages/${error.response.data.data._id}`);
+        return;
+      }
+      
+      toast.error(error.response?.data?.message || 'Failed to start conversation');
+    } finally {
+      setMessageLoading(false);
     }
   };
 
@@ -1004,14 +1060,52 @@ const ListingDetails = () => {
 
               {/* ✅ Provider Profile - Using ProviderCard with WhatsApp */}
               {listing.provider && (
-                <ProviderCard 
-                  provider={listing.provider} 
-                  listingTitle={listing.title}
-                  listingId={listing._id}
-                  variant="detailed"
-                  showContact={true}
-                  showViewProfile={true}
-                />
+                <div>
+                  <ProviderCard 
+                    provider={listing.provider} 
+                    listingTitle={listing.title}
+                    listingId={listing._id}
+                    variant="detailed"
+                    showContact={true}
+                    showViewProfile={true}
+                  />
+
+                  {/* ✅ ADDED: Message Provider Button - Only for Travelers */}
+                  {user && user.role === 'traveler' && user._id !== listing.provider._id && (
+                    <div className="mt-4">
+                      <button
+                        onClick={handleMessageProvider}
+                        disabled={messageLoading}
+                        className="w-full py-3 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#0f766e] text-white font-bold hover:scale-[1.02] transition-all duration-300 shadow-lg shadow-[#0D9488]/25 disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2"
+                      >
+                        {messageLoading ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <>
+                            <MessageCircle className="w-5 h-5" />
+                            Message Provider
+                          </>
+                        )}
+                      </button>
+                      <p className="text-center text-xs text-gray-400 mt-2">
+                        Ask questions about this experience before booking
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Show login prompt if not logged in */}
+                  {!user && (
+                    <div className="mt-4">
+                      <button
+                        onClick={() => navigate('/login')}
+                        className="w-full py-3 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition flex items-center justify-center gap-2"
+                      >
+                        <MessageCircle className="w-5 h-5" />
+                        Login to Message Provider
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Tabs */}

@@ -10,7 +10,7 @@ import mongoose from "mongoose";
  * consistent pricing throughout the payment lifecycle.
  * 
  * Lock Flow:
- * 1. Traveler starts checkout → Rate locked
+ * 1. Travelera starts checkout → Rate locked
  * 2. Payment uses locked rate → No recalculation
  * 3. Refund uses same rate → Consistent amounts
  * 4. Provider settlement uses same rate → Accurate settlement

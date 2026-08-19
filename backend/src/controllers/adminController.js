@@ -829,3 +829,302 @@ export const getPaymentStats = async (req, res) => {
     });
   }
 };
+
+// =========================
+// ✅ SETTINGS MANAGEMENT (Admin)
+// =========================
+
+// In-memory settings cache (or use a Settings model)
+let settingsCache = null;
+
+/**
+ * Get admin settings
+ * GET /api/admin/settings
+ */
+export const getAdminSettings = async (req, res) => {
+  try {
+    // If you have a Settings model, use it:
+    // const settings = await Settings.findOne();
+    
+    if (settingsCache) {
+      return res.json({
+        success: true,
+        data: settingsCache
+      });
+    }
+
+    // Default settings
+    const defaultSettings = {
+      general: {
+        siteName: 'AI Tour Rwanda',
+        siteTagline: 'Discover Rwanda with AI',
+        siteDescription: 'Smart travel planning powered by artificial intelligence',
+        timezone: 'Africa/Kigali',
+        dateFormat: 'MM/DD/YYYY',
+        timeFormat: '12h',
+        language: 'en',
+        maintenanceMode: false,
+      },
+      payment: {
+        currency: 'USD',
+        currencySymbol: '$',
+        platformFee: 10,
+        providerFee: 2.9,
+        paymentProviders: ['stripe'],
+        stripeSecretKey: '',
+        stripePublishableKey: '',
+        stripeWebhookSecret: '',
+        enableTestMode: true,
+      },
+      email: {
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUsername: '',
+        smtpPassword: '',
+        smtpFromEmail: 'noreply@aitour.rw',
+        smtpFromName: 'AI Tour Rwanda',
+        enableEmail: true,
+      },
+      notifications: {
+        emailNotifications: true,
+        pushNotifications: false,
+        smsNotifications: false,
+        bookingCreated: true,
+        bookingConfirmed: true,
+        paymentReceived: true,
+        paymentFailed: true,
+        reviewSubmitted: true,
+      },
+      security: {
+        maxLoginAttempts: 5,
+        sessionTimeout: 60,
+        passwordMinLength: 8,
+        requireEmailVerification: true,
+        requirePhoneVerification: false,
+        twoFactorAuth: false,
+        allowedDomains: [],
+        blockedIPs: [],
+      },
+      integrations: {
+        googleAnalytics: '',
+        facebookPixel: '',
+        googleMapsApiKey: '',
+        cloudinaryCloudName: '',
+        cloudinaryApiKey: '',
+        cloudinaryApiSecret: '',
+        enableGoogleLogin: false,
+        enableFacebookLogin: false,
+        enableTwitterLogin: false,
+      },
+      appearance: {
+        primaryColor: '#0D9488',
+        secondaryColor: '#F59E0B',
+        darkMode: false,
+        logoUrl: '',
+        faviconUrl: '',
+        customCSS: '',
+        customJS: '',
+      },
+      advanced: {
+        debugMode: false,
+        logLevel: 'info',
+        cacheEnabled: true,
+        cacheDuration: 3600,
+        maxUploadSize: 10,
+        allowedFileTypes: ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx'],
+      },
+      currency: {
+        defaultCurrency: 'RWF',
+        baseCurrency: 'RWF',
+        platformFees: {
+          RWF: 5,
+          USD: 10,
+          EUR: 10,
+          GBP: 10,
+        },
+        exchangeRates: {
+          RWF: 1,
+          USD: 1450,
+          EUR: 1550,
+          GBP: 1800,
+        },
+        autoUpdateRates: false,
+        rateUpdateInterval: 3600,
+      },
+    };
+
+    settingsCache = defaultSettings;
+
+    res.json({
+      success: true,
+      data: defaultSettings
+    });
+  } catch (error) {
+    console.error('❌ Error fetching admin settings:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch settings'
+    });
+  }
+};
+
+/**
+ * Update admin settings
+ * PUT /api/admin/settings
+ */
+export const updateAdminSettings = async (req, res) => {
+  try {
+    const settings = req.body;
+    
+    if (!settings || Object.keys(settings).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No settings data provided'
+      });
+    }
+
+    // If you have a Settings model, save to database:
+    // await Settings.findOneAndUpdate({}, settings, { upsert: true, new: true });
+    
+    // For now, save to memory cache
+    settingsCache = settings;
+
+    // Also save to environment or file if needed
+    // You could write to .env or a JSON file here
+
+    console.log('✅ Admin settings updated successfully');
+
+    res.json({
+      success: true,
+      message: 'Settings updated successfully',
+      data: settings
+    });
+  } catch (error) {
+    console.error('❌ Error updating admin settings:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update settings'
+    });
+  }
+};
+
+/**
+ * Reset admin settings to defaults
+ * POST /api/admin/settings/reset
+ */
+export const resetAdminSettings = async (req, res) => {
+  try {
+    const defaultSettings = {
+      general: {
+        siteName: 'AI Tour Rwanda',
+        siteTagline: 'Discover Rwanda with AI',
+        siteDescription: 'Smart travel planning powered by artificial intelligence',
+        timezone: 'Africa/Kigali',
+        dateFormat: 'MM/DD/YYYY',
+        timeFormat: '12h',
+        language: 'en',
+        maintenanceMode: false,
+      },
+      payment: {
+        currency: 'USD',
+        currencySymbol: '$',
+        platformFee: 10,
+        providerFee: 2.9,
+        paymentProviders: ['stripe'],
+        stripeSecretKey: '',
+        stripePublishableKey: '',
+        stripeWebhookSecret: '',
+        enableTestMode: true,
+      },
+      email: {
+        smtpHost: '',
+        smtpPort: 587,
+        smtpUsername: '',
+        smtpPassword: '',
+        smtpFromEmail: 'noreply@aitour.rw',
+        smtpFromName: 'AI Tour Rwanda',
+        enableEmail: true,
+      },
+      notifications: {
+        emailNotifications: true,
+        pushNotifications: false,
+        smsNotifications: false,
+        bookingCreated: true,
+        bookingConfirmed: true,
+        paymentReceived: true,
+        paymentFailed: true,
+        reviewSubmitted: true,
+      },
+      security: {
+        maxLoginAttempts: 5,
+        sessionTimeout: 60,
+        passwordMinLength: 8,
+        requireEmailVerification: true,
+        requirePhoneVerification: false,
+        twoFactorAuth: false,
+        allowedDomains: [],
+        blockedIPs: [],
+      },
+      integrations: {
+        googleAnalytics: '',
+        facebookPixel: '',
+        googleMapsApiKey: '',
+        cloudinaryCloudName: '',
+        cloudinaryApiKey: '',
+        cloudinaryApiSecret: '',
+        enableGoogleLogin: false,
+        enableFacebookLogin: false,
+        enableTwitterLogin: false,
+      },
+      appearance: {
+        primaryColor: '#0D9488',
+        secondaryColor: '#F59E0B',
+        darkMode: false,
+        logoUrl: '',
+        faviconUrl: '',
+        customCSS: '',
+        customJS: '',
+      },
+      advanced: {
+        debugMode: false,
+        logLevel: 'info',
+        cacheEnabled: true,
+        cacheDuration: 3600,
+        maxUploadSize: 10,
+        allowedFileTypes: ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx'],
+      },
+      currency: {
+        defaultCurrency: 'RWF',
+        baseCurrency: 'RWF',
+        platformFees: {
+          RWF: 5,
+          USD: 10,
+          EUR: 10,
+          GBP: 10,
+        },
+        exchangeRates: {
+          RWF: 1,
+          USD: 1450,
+          EUR: 1550,
+          GBP: 1800,
+        },
+        autoUpdateRates: false,
+        rateUpdateInterval: 3600,
+      },
+    };
+
+    settingsCache = defaultSettings;
+
+    res.json({
+      success: true,
+      message: 'Settings reset to defaults',
+      data: defaultSettings
+    });
+  } catch (error) {
+    console.error('❌ Error resetting admin settings:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to reset settings'
+    });
+  }
+};

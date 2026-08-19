@@ -1,27 +1,47 @@
 // frontend/src/hooks/usePagination.js
 // ✅ FIXED - Server-side pagination hook (Strategy B)
 // ✅ Fixed infinite loop by memoizing fetchData properly
+// ✅ Clean exports - no duplicates
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PAGINATION } from '../utils/constants';
 import { getPaginationMeta, getDataFromResponse } from '../utils/pagination';
 import useDebounce from './useDebounce';
 
-export const usePagination = ({
-  fetchFn,          // Async function that fetches data
-  initialParams = {}, // Initial query params
-  dataKey = 'data',   // Key for data in response
-  debounceDelay = PAGINATION.SEARCH_DEBOUNCE_MS,
-  autoFetch = true,   // Fetch on mount
-}) => {
+/**
+ * usePagination - Server-side pagination hook
+ * 
+ * @param {Object} options
+ * @param {Function} options.fetchFn - Async function that fetches data
+ * @param {Object} options.initialParams - Initial query params
+ * @param {string} options.dataKey - Key for data in response (default: 'data')
+ * @param {number} options.debounceDelay - Debounce delay for search (default: 300ms)
+ * @param {boolean} options.autoFetch - Fetch on mount (default: true)
+ * 
+ * @returns {Object} {
+ *   data, loading, error, meta,
+ *   goToPage, setLimit, setSort,
+ *   filters, setFilters, applyFilter, clearFilters,
+ *   searchTerm, setSearchTerm,
+ *   refresh, reset, fetchData,
+ *   hasData, isEmpty
+ * }
+ */
+function usePagination({
+  fetchFn,
+  initialParams = {},
+  dataKey = 'data',
+  debounceDelay = PAGINATION.SEARCH_DEBOUNCE_MS || 300,
+  autoFetch = true,
+}) {
   // State
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [meta, setMeta] = useState({
     total: 0,
-    page: PAGINATION.DEFAULT_PAGE,
-    limit: PAGINATION.DEFAULT_LIMIT,
+    page: PAGINATION.DEFAULT_PAGE || 1,
+    limit: PAGINATION.DEFAULT_LIMIT || 10,
     totalPages: 0,
     hasNext: false,
     hasPrev: false,
@@ -33,6 +53,7 @@ export const usePagination = ({
   // ✅ Track previous query params to prevent unnecessary fetches
   const prevQueryParamsRef = useRef(null);
   const isMountedRef = useRef(true);
+  const initialFetchDoneRef = useRef(false);
 
   // Debounce search
   const { debouncedValue: debouncedSearch } = useDebounce(searchTerm, debounceDelay);
@@ -150,8 +171,8 @@ export const usePagination = ({
   const reset = useCallback(() => {
     setMeta({
       total: 0,
-      page: PAGINATION.DEFAULT_PAGE,
-      limit: PAGINATION.DEFAULT_LIMIT,
+      page: PAGINATION.DEFAULT_PAGE || 1,
+      limit: PAGINATION.DEFAULT_LIMIT || 10,
       totalPages: 0,
       hasNext: false,
       hasPrev: false,
@@ -168,7 +189,7 @@ export const usePagination = ({
     setShouldRefetch(true);
   }, []);
 
-  // ✅ FIXED: Auto-fetch with proper dependencies
+  // ✅ Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -176,23 +197,18 @@ export const usePagination = ({
     };
   }, []);
 
-  // ✅ FIXED: Only fetch when shouldRefetch changes or on mount
+  // ✅ Fetch when shouldRefetch changes
   useEffect(() => {
     if (autoFetch && shouldRefetch) {
       fetchDataRef.current();
     }
   }, [autoFetch, shouldRefetch]);
 
-  // ✅ FIXED: Initial fetch
+  // ✅ Initial fetch - only once
   useEffect(() => {
-    if (autoFetch) {
-      // Only fetch on mount if not already fetched
-      const initialFetch = async () => {
-        if (!data.length && !loading && !error) {
-          await fetchDataRef.current();
-        }
-      };
-      initialFetch();
+    if (autoFetch && !initialFetchDoneRef.current && !data.length && !loading) {
+      initialFetchDoneRef.current = true;
+      fetchDataRef.current();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array - only runs once on mount
@@ -228,6 +244,7 @@ export const usePagination = ({
     hasData: data.length > 0,
     isEmpty: data.length === 0 && !loading,
   };
-};
+}
 
+// ✅ Single default export - NO duplicates
 export default usePagination;

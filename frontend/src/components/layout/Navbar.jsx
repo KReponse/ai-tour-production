@@ -2,6 +2,8 @@
 // ✅ COMPLETE FIXED - Fixed framer-motion ref warning
 // ✅ Fixed: AnimatePresence ref forwarding with mode="wait"
 // ✅ ADDED: Messages icon with unread badge
+// ✅ KEPT: Heart icon in the design
+// ✅ RESPONSIVE: Mobile-optimized with proper touch targets
 
 import {
   useState,
@@ -30,6 +32,7 @@ import {
   Calendar,
   CreditCard,
   AlertCircle,
+  Heart,
 } from 'lucide-react';
 
 import {
@@ -1168,7 +1171,8 @@ const Navbar = () => {
                         w-full
                         h-12
                         rounded-2xl
-                        bg-gradient-to-r                        from-[#0D9488]
+                        bg-gradient-to-r
+                        from-[#0D9488]
                         to-[#F59E0B]
                         text-white
                         flex

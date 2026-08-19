@@ -1,23 +1,62 @@
 // frontend/src/services/providerService.js
 // ✅ COMPLETE FIXED - Correct endpoints, response handling, and 404 handling
+// ✅ ADDED: Response data extraction helper
+// ✅ ADDED: Retry logic for critical mutations
 // ✅ FIXED: Uses API client instead of axios directly
 // ✅ FIXED: Correct endpoint paths for public profile and listings
 
 import API from './api';
 
 // ===============================
-// ✅ CREATE PROVIDER REQUEST
+// ✅ HELPER: Extract data from response
+// ===============================
+const extractData = (response) => {
+  // Handle different response structures
+  if (response?.data?.data) return response.data.data;
+  if (response?.data) return response.data;
+  return response;
+};
+
+// ===============================
+// ✅ HELPER: Retry with exponential backoff
+// ===============================
+const withRetry = async (fn, maxRetries = 3, delay = 2000) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.log(`⚠️ Attempt ${i + 1} failed:`, error.message);
+      if (i < maxRetries - 1) {
+        const waitTime = delay * (i + 1);
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  throw lastError;
+};
+
+// ===============================
+// ✅ CREATE PROVIDER REQUEST - WITH RETRY
 // ===============================
 export const createProviderRequest = async (formData) => {
-  const token = localStorage.getItem("token");
+  return withRetry(async () => {
+    const token = localStorage.getItem("token");
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
 
-  const response = await API.post('/requests/provider', formData, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+    const response = await API.post('/requests/provider', formData, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
-  return response.data;
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // ===============================
@@ -36,17 +75,47 @@ export const getMyProviderRequest = async () => {
     const response = await API.get('/provider-request/my');
     
     console.log('✅ Provider request response:', response.data);
-    return response.data;
+    
+    const data = extractData(response);
+    
+    // ✅ Handle both response formats (legacy and new)
+    if (data.success) {
+      return {
+        success: true,
+        request: data.data || data.request || null
+      };
+    }
+    
+    return data;
   } catch (error) {
     // ✅ 404 is expected when user hasn't applied - this is normal
     if (error.response?.status === 404) {
       console.log('ℹ️ No provider request found (this is normal for new users)');
-      return { success: false, request: null };
+      return { success: true, request: null };
     }
     
     console.error('❌ Get my provider request error:', error);
-    throw error;
+    return { success: false, request: null, error: error.message };
   }
+};
+
+// ===============================
+// ✅ UPDATE PROVIDER REQUEST - WITH RETRY
+// ===============================
+export const updateProviderRequest = async (id, data) => {
+  return withRetry(async () => {
+    const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await API.put(`/provider-request/${id}`, data, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // ===============================
@@ -66,11 +135,13 @@ export const getMyProviderProfile = async () => {
     
     console.log('✅ Provider profile response:', response.data);
     
-    if (response.data.success && response.data.profile) {
-      return response.data.profile;
+    const data = extractData(response);
+    
+    if (data.success && data.profile) {
+      return data.profile;
     }
     
-    return response.data;
+    return data;
   } catch (error) {
     if (error.response?.status === 404) {
       console.log('ℹ️ No provider profile found');
@@ -83,15 +154,39 @@ export const getMyProviderProfile = async () => {
 };
 
 // ===============================
+// ✅ UPDATE PROVIDER PROFILE - WITH RETRY
+// ===============================
+export const updateProviderProfile = async (data) => {
+  return withRetry(async () => {
+    const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await API.put('/provider-profiles/me', data, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return extractData(response);
+  }, 3, 3000);
+};
+
+// ===============================
 // ✅ GET PROVIDER STATS
 // ===============================
 export const getProviderStats = async () => {
   try {
     const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
     const response = await API.get('/requests/provider/stats', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider stats error:', error);
     throw error;
@@ -104,10 +199,15 @@ export const getProviderStats = async () => {
 export const getRecentRequests = async () => {
   try {
     const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
     const response = await API.get('/requests/provider/recent', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get recent requests error:', error);
     throw error;
@@ -128,15 +228,17 @@ export const getPublicProviderProfile = async (providerId) => {
     
     const response = await API.get(`/provider-profiles/public/${providerId}`);
     
+    const data = extractData(response);
+    
     // ✅ Handle different response formats
-    if (response.data.success && response.data.profile) {
-      return { success: true, provider: response.data.profile };
+    if (data.success && data.profile) {
+      return { success: true, provider: data.profile };
     }
-    if (response.data.success && response.data.provider) {
-      return { success: true, provider: response.data.provider };
+    if (data.success && data.provider) {
+      return { success: true, provider: data.provider };
     }
-    if (response.data.provider) {
-      return { success: true, provider: response.data.provider };
+    if (data.provider) {
+      return { success: true, provider: data.provider };
     }
     
     return { success: false, provider: null, error: 'Provider not found' };
@@ -167,13 +269,15 @@ export const getPublicProviderListings = async (providerId, page = 1, limit = 10
       params: { page, limit },
     });
     
+    const data = extractData(response);
+    
     // ✅ Handle different response formats
-    const listings = response.data.listings || response.data.data || [];
+    const listings = data.listings || data.data || [];
     
     return {
       success: true,
       listings,
-      pagination: response.data.pagination || {
+      pagination: data.pagination || {
         page: 1,
         limit: limit,
         total: listings.length,
@@ -214,12 +318,14 @@ export const getPublicProviderReviews = async (providerId, page = 1, limit = 10)
       params: { page, limit },
     });
     
-    const reviews = response.data.reviews || response.data.data || [];
+    const data = extractData(response);
+    
+    const reviews = data.reviews || data.data || [];
     
     return {
       success: true,
       reviews,
-      pagination: response.data.pagination || {
+      pagination: data.pagination || {
         page: 1,
         limit: limit,
         total: reviews.length,
@@ -235,4 +341,88 @@ export const getPublicProviderReviews = async (providerId, page = 1, limit = 10)
     
     throw error;
   }
+};
+
+// ===============================
+// ✅ GET PROVIDER EARNINGS
+// ===============================
+export const getProviderEarnings = async () => {
+  try {
+    const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await API.get('/earnings/provider', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return extractData(response);
+  } catch (error) {
+    console.error('❌ Get provider earnings error:', error);
+    throw error;
+  }
+};
+
+// ===============================
+// ✅ GET PROVIDER BOOKINGS
+// ===============================
+export const getProviderBookings = async (params = {}) => {
+  try {
+    const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await API.get('/bookings/provider', {
+      params,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return extractData(response);
+  } catch (error) {
+    console.error('❌ Get provider bookings error:', error);
+    throw error;
+  }
+};
+
+// ===============================
+// ✅ GET PROVIDER ANALYTICS
+// ===============================
+export const getProviderAnalytics = async () => {
+  try {
+    const token = localStorage.getItem('token');
+    
+    if (!token) {
+      throw new Error('Authentication required');
+    }
+
+    const response = await API.get('/analytics/provider', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return extractData(response);
+  } catch (error) {
+    console.error('❌ Get provider analytics error:', error);
+    throw error;
+  }
+};
+
+// ===============================
+// ✅ DEFAULT EXPORT
+// ===============================
+export default {
+  createProviderRequest,
+  getMyProviderRequest,
+  updateProviderRequest,
+  getMyProviderProfile,
+  updateProviderProfile,
+  getProviderStats,
+  getRecentRequests,
+  getPublicProviderProfile,
+  getPublicProviderListings,
+  getPublicProviderTours,
+  getPublicProviderReviews,
+  getProviderEarnings,
+  getProviderBookings,
+  getProviderAnalytics,
 };

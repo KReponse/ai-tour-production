@@ -1,5 +1,8 @@
 // src/components/ReviewForm.jsx
 // ✅ COMPLETE FIXED - Added hidePhotoUpload prop to control photo upload visibility
+// ✅ RESPONSIVE - Mobile-optimized layout with proper touch targets
+// ✅ RESPONSIVE - Responsive star sizes and form inputs
+// ✅ RESPONSIVE - Stacked buttons on mobile, row on desktop
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -186,7 +189,7 @@ const ReviewForm = ({
   };
 
   // ===============================
-  // RENDER STARS
+  // RENDER STARS - Responsive
   // ===============================
   const renderStars = () => {
     return [1, 2, 3, 4, 5].map((star) => (
@@ -194,31 +197,34 @@ const ReviewForm = ({
         key={star}
         type="button"
         onClick={() => handleRatingClick(star)}
-        className="focus:outline-none hover:scale-110 transition-transform duration-200"
+        className="focus:outline-none hover:scale-110 transition-transform duration-200 touch-manipulation"
         aria-label={`Rate ${star} stars`}
       >
         <Star
-          className={`w-10 h-10 transition-colors ${
-            star <= formData.rating
+          className={`
+            w-8 h-8 sm:w-10 sm:h-10 
+            transition-colors duration-200
+            ${star <= formData.rating
               ? 'text-[#F59E0B] fill-[#F59E0B]'
               : 'text-gray-300 dark:text-gray-600 hover:text-gray-400'
-          }`}
+            }
+          `}
         />
       </button>
     ));
   };
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 p-6 shadow-xl">
+    <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-100 dark:border-gray-800 p-4 sm:p-6 shadow-xl">
       
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Header - Responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-[#374151] dark:text-white">
+          <h2 className="text-xl sm:text-2xl font-bold text-[#374151] dark:text-white">
             {isEditing ? 'Edit Review' : 'Write a Review'}
           </h2>
           {tourTitle && (
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5 sm:mt-1 break-words">
               {tourTitle}
             </p>
           )}
@@ -226,38 +232,38 @@ const ReviewForm = ({
         {onCancel && (
           <button
             onClick={onCancel}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition"
+            className="self-start sm:self-center p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition touch-manipulation"
             type="button"
           >
-            <X className="w-6 h-6 text-gray-500" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500" />
           </button>
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
         
         {/* Rating */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+          <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 sm:mb-3">
             Your Rating *
           </label>
-          <div className="flex gap-1">
+          <div className="flex gap-0.5 sm:gap-1 flex-wrap">
             {renderStars()}
           </div>
           {errors.rating && (
-            <p className="mt-2 text-sm text-red-500 flex items-center gap-1">
-              <AlertCircle className="w-4 h-4" />
+            <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm text-red-500 flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               {errors.rating}
             </p>
           )}
-          <p className="mt-2 text-xs text-gray-400">
-            Click on the stars to rate
+          <p className="mt-1 sm:mt-2 text-[10px] sm:text-xs text-gray-400">
+            Tap or click on the stars to rate
           </p>
         </div>
 
-        {/* Title Input */}
+        {/* Title Input - Responsive */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
             Review Title *
           </label>
           <input
@@ -270,31 +276,38 @@ const ReviewForm = ({
               }
             }}
             placeholder="Summarize your experience (e.g., 'Amazing Adventure!')"
-            className={`w-full px-4 py-3 rounded-2xl border ${
-              errors.title ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'
-            } bg-white dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent transition outline-none dark:text-white`}
+            className={`
+              w-full px-3 sm:px-4 py-2.5 sm:py-3 
+              rounded-xl sm:rounded-2xl 
+              border ${errors.title ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'}
+              bg-white dark:bg-gray-800 
+              focus:ring-2 focus:ring-[#0D9488] focus:border-transparent 
+              transition outline-none 
+              dark:text-white text-sm sm:text-base
+              min-h-[44px] sm:min-h-[48px]
+            `}
             maxLength={100}
           />
-          <div className="flex justify-between mt-1.5">
+          <div className="flex flex-col sm:flex-row sm:justify-between mt-1 sm:mt-1.5 gap-1">
             {errors.title && (
-              <p className="text-sm text-red-500 flex items-center gap-1">
-                <AlertCircle className="w-4 h-4" />
+              <p className="text-xs sm:text-sm text-red-500 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 {errors.title}
               </p>
             )}
-            <p className={`text-xs ml-auto ${formData.title.length > 90 ? 'text-[#F59E0B]' : 'text-gray-400'}`}>
+            <p className={`text-[10px] sm:text-xs ml-auto ${formData.title.length > 90 ? 'text-[#F59E0B]' : 'text-gray-400'}`}>
               {formData.title.length}/100
             </p>
           </div>
         </div>
 
-        {/* Comment */}
+        {/* Comment - Responsive */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
             Your Review *
           </label>
           <textarea
-            rows="5"
+            rows={4}
             value={formData.comment}
             onChange={(e) => {
               setFormData({ ...formData, comment: e.target.value });
@@ -303,58 +316,74 @@ const ReviewForm = ({
               }
             }}
             placeholder="Share your experience with this tour..."
-            className={`w-full px-4 py-3 rounded-2xl border ${
-              errors.comment ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'
-            } bg-white dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent transition outline-none resize-none dark:text-white`}
+            className={`
+              w-full px-3 sm:px-4 py-2.5 sm:py-3 
+              rounded-xl sm:rounded-2xl 
+              border ${errors.comment ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'}
+              bg-white dark:bg-gray-800 
+              focus:ring-2 focus:ring-[#0D9488] focus:border-transparent 
+              transition outline-none resize-none 
+              dark:text-white text-sm sm:text-base
+              min-h-[120px] sm:min-h-[150px]
+            `}
           />
-          <div className="flex justify-between mt-1.5">
+          <div className="flex flex-col sm:flex-row sm:justify-between mt-1 sm:mt-1.5 gap-1">
             {errors.comment && (
-              <p className="text-sm text-red-500 flex items-center gap-1">
-                <AlertCircle className="w-4 h-4" />
+              <p className="text-xs sm:text-sm text-red-500 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 {errors.comment}
               </p>
             )}
-            <p className={`text-xs ml-auto ${formData.comment.length > 1800 ? 'text-[#F59E0B]' : 'text-gray-400'}`}>
+            <p className={`text-[10px] sm:text-xs ml-auto ${formData.comment.length > 1800 ? 'text-[#F59E0B]' : 'text-gray-400'}`}>
               {formData.comment.length}/2000
             </p>
           </div>
         </div>
 
-        {/* ✅ Images - Conditionally rendered based on hidePhotoUpload prop */}
+        {/* ✅ Images - Conditionally rendered & Responsive */}
         {!hidePhotoUpload && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2">
               Add Photos (Optional)
             </label>
             
-            {/* Image Previews */}
+            {/* Image Previews - Responsive */}
             {imagePreviews.length > 0 && (
-              <div className="flex flex-wrap gap-3 mb-3">
+              <div className="flex flex-wrap gap-2 sm:gap-3 mb-2 sm:mb-3">
                 {imagePreviews.map((preview, index) => (
                   <div key={index} className="relative group">
                     <img
                       src={preview}
                       alt={`Review ${index + 1}`}
-                      className="w-20 h-20 object-cover rounded-xl border border-gray-200 dark:border-gray-700"
+                      className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-lg sm:rounded-xl border border-gray-200 dark:border-gray-700"
                     />
                     <button
                       type="button"
                       onClick={() => removeImage(index)}
-                      className="absolute -top-2 -right-2 p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition opacity-0 group-hover:opacity-100"
+                      className="absolute -top-1.5 -right-1.5 sm:-top-2 sm:-right-2 p-0.5 sm:p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition opacity-0 group-hover:opacity-100 touch-manipulation"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Trash2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                     </button>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Upload Button */}
+            {/* Upload Button - Responsive */}
             {imagePreviews.length < 5 && (
-              <label className="flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 cursor-pointer hover:border-[#0D9488] transition-all duration-300 bg-gray-50 dark:bg-gray-800/50">
-                <Upload className="w-5 h-5 text-[#0D9488]" />
-                <span className="text-sm text-gray-600 dark:text-gray-300">
-                  {isUploading ? 'Uploading...' : imagePreviews.length > 0 ? 'Add more photos' : 'Click to upload photos'}
+              <label className={`
+                flex items-center gap-2 sm:gap-3 
+                px-3 sm:px-4 py-2.5 sm:py-3 
+                rounded-xl sm:rounded-2xl 
+                border-2 border-dashed border-gray-300 dark:border-gray-600 
+                cursor-pointer hover:border-[#0D9488] 
+                transition-all duration-300 
+                bg-gray-50 dark:bg-gray-800/50
+                min-h-[44px] sm:min-h-[48px]
+              `}>
+                <Upload className="w-4 h-4 sm:w-5 sm:h-5 text-[#0D9488] flex-shrink-0" />
+                <span className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 break-words">
+                  {isUploading ? 'Uploading...' : imagePreviews.length > 0 ? 'Add more photos' : 'Tap to upload photos'}
                 </span>
                 <input
                   type="file"
@@ -366,19 +395,29 @@ const ReviewForm = ({
                 />
               </label>
             )}
-            <p className="text-xs text-gray-400 mt-1.5">
+            <p className="text-[10px] sm:text-xs text-gray-400 mt-1 sm:mt-1.5">
               Max 5 images • JPG, PNG, WebP • Max 5MB each
             </p>
           </div>
         )}
 
-        {/* Submit */}
-        <div className="flex gap-3 pt-2">
+        {/* Submit - Responsive */}
+        <div className="flex flex-col xs:flex-row gap-2 sm:gap-3 pt-1 sm:pt-2">
           {onCancel && (
             <button
               type="button"
               onClick={onCancel}
-              className="flex-1 h-12 rounded-2xl border-2 border-gray-200 dark:border-gray-700 font-semibold text-[#374151] dark:text-white hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              className={`
+                flex-1 min-h-[44px] sm:min-h-[48px]
+                px-4 sm:px-6 py-2.5 sm:py-3
+                rounded-xl sm:rounded-2xl
+                border-2 border-gray-200 dark:border-gray-700
+                font-semibold text-sm sm:text-base
+                text-[#374151] dark:text-white
+                hover:bg-gray-50 dark:hover:bg-gray-800
+                transition
+                touch-manipulation
+              `}
             >
               Cancel
             </button>
@@ -386,24 +425,35 @@ const ReviewForm = ({
           <Button
             type="submit"
             disabled={isLoading || isUploading}
-            className="flex-1 h-12 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2"
+            fullWidth
+            className={`
+              flex-1 min-h-[44px] sm:min-h-[48px]
+              rounded-xl sm:rounded-2xl
+              bg-gradient-to-r from-[#0D9488] to-[#F59E0B] 
+              text-white font-bold text-sm sm:text-base
+              shadow-lg shadow-[#0D9488]/30 
+              hover:scale-[1.02] transition-all duration-300 
+              disabled:opacity-50 disabled:hover:scale-100
+              flex items-center justify-center gap-2
+              touch-manipulation
+            `}
           >
             {isLoading ? (
               <>
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
                 {isEditing ? 'Updating...' : 'Submitting...'}
               </>
             ) : (
               <>
                 {isEditing ? (
                   <>
-                    <CheckCircle className="w-5 h-5" />
-                    Update Review
+                    <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span>Update Review</span>
                   </>
                 ) : (
                   <>
-                    <Send className="w-5 h-5" />
-                    Submit Review
+                    <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span>Submit Review</span>
                   </>
                 )}
               </>

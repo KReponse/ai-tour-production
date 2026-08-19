@@ -1,5 +1,8 @@
 // backend/src/server.js
 // ✅ COMPLETE FIXED - Added conversation routes and socket events
+// ✅ FIXED: Socket.IO send-message now uses Conversation instead of ChatRoom
+// ✅ FIXED: Room naming consistency (user: vs user-)
+// ✅ FIXED: Message model uses conversation field instead of room
 
 import "dotenv/config";
 
@@ -347,7 +350,8 @@ io.on("connection", (socket) => {
   console.log(`✅ User connected: ${socket.user?.name || socket.id}`);
 
   if (socket.user) {
-    socket.join(`user-${socket.user._id}`);
+    // ✅ Consistent room naming: user:userId
+    socket.join(`user:${socket.user._id}`);
     console.log(`📢 User ${socket.user.name} joined personal room`);
   }
 
@@ -442,78 +446,125 @@ io.on("connection", (socket) => {
   });
 
   // ─── Send Message ─────────────────────────────────────────────
+  // ✅ FIXED: Uses Conversation instead of ChatRoom
   socket.on("send-message", async (data) => {
     try {
-      const { roomId, message, receiverId } = data;
+      const { conversationId, message, receiverId } = data;
       
+      const Conversation = (await import('./models/Conversation.js')).default;
       const Message = (await import('./models/Message.js')).default;
-      const ChatRoom = (await import('./models/ChatRoom.js')).default;
       
-      let room = await ChatRoom.findById(roomId);
+      let conversation;
       
-      if (!room && receiverId) {
-        room = new ChatRoom({
-          participants: [socket.user._id, receiverId],
-          unreadCount: new Map([
-            [socket.user._id.toString(), 0],
-            [receiverId.toString(), 0]
-          ])
+      // ✅ Find existing conversation or create new one
+      if (conversationId) {
+        conversation = await Conversation.findById(conversationId);
+      } else if (receiverId) {
+        // Check if conversation already exists between these users
+        conversation = await Conversation.findOne({
+          'participants.user': { $all: [socket.user._id, receiverId] },
+          type: 'traveler_provider',
+          isActive: true,
         });
-        await room.save();
+        
+        if (!conversation) {
+          // Create new conversation
+          conversation = new Conversation({
+            participants: [
+              { user: socket.user._id, role: socket.user.role },
+              { user: receiverId, role: 'provider' },
+            ],
+            type: 'traveler_provider',
+            unreadCounts: new Map([
+              [socket.user._id.toString(), 0],
+              [receiverId.toString(), 0]
+            ])
+          });
+          await conversation.save();
+          console.log(`🆕 New conversation created: ${conversation._id}`);
+        }
       }
 
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
+      if (!conversation) {
+        socket.emit('error', { message: 'Conversation not found' });
         return;
       }
 
-      if (!room.participants.includes(socket.user._id)) {
+      // ✅ Verify user is a participant
+      const isParticipant = conversation.participants.some(
+        p => p.user.toString() === socket.user._id.toString()
+      );
+      
+      if (!isParticipant) {
         socket.emit('error', { message: 'Not authorized' });
         return;
       }
 
-      const receiver = room.participants.find(
-        p => p.toString() !== socket.user._id.toString()
+      // ✅ Get receiver (the other participant)
+      const receiver = conversation.participants.find(
+        p => p.user.toString() !== socket.user._id.toString()
       );
 
+      if (!receiver) {
+        socket.emit('error', { message: 'No receiver found' });
+        return;
+      }
+
+      // ✅ Create message with conversation field
       const newMessage = new Message({
-        room: room._id,
+        conversation: conversation._id,
         sender: socket.user._id,
-        receiver: receiver,
-        message: message
+        content: message,
       });
 
       await newMessage.save();
 
-      room.lastMessage = newMessage._id;
-      room.lastMessageAt = new Date();
+      // ✅ Update conversation last message
+      conversation.lastMessage = newMessage._id;
+      conversation.lastMessageAt = new Date();
       
-      const receiverIdStr = receiver.toString();
-      const currentUnread = room.unreadCount.get(receiverIdStr) || 0;
-      room.unreadCount.set(receiverIdStr, currentUnread + 1);
-      await room.save();
+      // ✅ Increment unread count for receiver
+      const receiverIdStr = receiver.user.toString();
+      const currentUnread = conversation.unreadCounts?.get(receiverIdStr) || 0;
+      conversation.unreadCounts.set(receiverIdStr, currentUnread + 1);
+      
+      await conversation.save();
 
+      // ✅ Populate sender info
       await newMessage.populate('sender', 'name profileImage role');
 
-      io.to(room._id.toString()).emit('new-message', {
-        roomId: room._id,
+      // ✅ Emit to conversation room
+      io.to(`conversation:${conversation._id}`).emit('new-message', {
+        conversationId: conversation._id,
         message: newMessage
       });
 
-      io.to(`user-${receiver}`).emit('new-chat-message', {
-        roomId: room._id,
+      // ✅ Emit to receiver's personal room
+      io.to(`user:${receiver.user}`).emit('new-chat-message', {
+        conversationId: conversation._id,
         message: newMessage,
         sender: socket.user.name
       });
 
-      console.log(`💬 Message sent in room ${room._id} by ${socket.user.name}`);
+      // ✅ Emit unread count update to receiver
+      const unreadCount = await Message.countDocuments({
+        conversation: conversation._id,
+        read: false,
+      });
+
+      io.to(`user:${receiver.user}`).emit('unread-count-update', {
+        count: unreadCount
+      });
+
+      console.log(`💬 Message sent in conversation ${conversation._id} by ${socket.user.name}`);
 
     } catch (error) {
-      console.error('Send message error:', error);
+      console.error('❌ Send message error:', error);
       socket.emit('error', { message: error.message });
     }
   });
 
+  // ─── Legacy: Typing (backward compatible) ──────────────────
   socket.on("typing", ({ roomId, isTyping }) => {
     socket.to(roomId).emit("user-typing", {
       userId: socket.user?._id,
@@ -522,15 +573,29 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("mark-read", async ({ roomId }) => {
+  // ─── Mark as Read ─────────────────────────────────────────────
+  socket.on("mark-read", async ({ conversationId }) => {
     try {
+      const Conversation = (await import('./models/Conversation.js')).default;
       const Message = (await import('./models/Message.js')).default;
-      const ChatRoom = (await import('./models/ChatRoom.js')).default;
 
+      // ✅ Verify conversation exists and user is participant
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        'participants.user': socket.user._id,
+        isActive: true,
+      });
+
+      if (!conversation) {
+        socket.emit('error', { message: 'Conversation not found' });
+        return;
+      }
+
+      // ✅ Mark messages as read
       await Message.updateMany(
         {
-          room: roomId,
-          receiver: socket.user._id,
+          conversation: conversationId,
+          sender: { $ne: socket.user._id },
           read: false
         },
         {
@@ -539,42 +604,51 @@ io.on("connection", (socket) => {
         }
       );
 
-      const room = await ChatRoom.findById(roomId);
-      if (room) {
-        room.unreadCount.set(socket.user._id.toString(), 0);
-        await room.save();
+      // ✅ Reset unread count for current user
+      conversation.unreadCounts.set(socket.user._id.toString(), 0);
+      
+      // ✅ Update participant last read
+      const participant = conversation.participants.find(
+        p => p.user.toString() === socket.user._id.toString()
+      );
+      if (participant) {
+        participant.lastReadAt = new Date();
       }
+      
+      await conversation.save();
 
-      io.to(roomId).emit('messages-read', {
-        userId: socket.user._id,
-        roomId
+      // ✅ Emit events
+      io.to(`conversation:${conversationId}`).emit('messages-read', {
+        conversationId,
+        userId: socket.user._id
       });
 
       const unreadCount = await Message.countDocuments({
-        receiver: socket.user._id,
-        read: false
+        conversation: conversationId,
+        read: false,
       });
 
-      io.to(`user-${socket.user._id}`).emit('unread-count-update', {
+      io.to(`user:${socket.user._id}`).emit('unread-count-update', {
         count: unreadCount
       });
 
     } catch (error) {
-      console.error('Mark read error:', error);
+      console.error('❌ Mark read error:', error);
+      socket.emit('error', { message: error.message });
     }
   });
 
+  // ─── Get Unread Count ─────────────────────────────────────────
   socket.on("get-unread-count", async () => {
     try {
       const Message = (await import('./models/Message.js')).default;
       const count = await Message.countDocuments({
-        receiver: socket.user._id,
-        read: false
+        read: false,
       });
 
       socket.emit('unread-count-update', { count });
     } catch (error) {
-      console.error('Get unread count error:', error);
+      console.error('❌ Get unread count error:', error);
     }
   });
 

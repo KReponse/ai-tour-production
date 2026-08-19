@@ -383,10 +383,12 @@ export const getMyProviderRequest = async (req, res) => {
     // ✅ Find provider request for this user
     const request = await ProviderRequest.findOne({ user: userId });
 
+    // ✅ FIXED: Return 200 with data: null instead of 404
     if (!request) {
       console.log('📌 No provider request found for user:', userId);
-      return res.status(404).json({
-        success: false,
+      return res.status(200).json({
+        success: true,
+        data: null,
         message: 'No provider request found'
       });
     }
@@ -397,7 +399,7 @@ export const getMyProviderRequest = async (req, res) => {
 
     res.json({
       success: true,
-      request
+      data: request
     });
   } catch (error) {
     console.error('❌ Error in getMyProviderRequest:', error);

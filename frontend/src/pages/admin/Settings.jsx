@@ -1,9 +1,11 @@
 // frontend/src/pages/admin/Settings.jsx
-// ✅ COMPLETE FIXED - Multi-Currency Settings with Currency Management
-// ✅ Added Currency Management section
-// ✅ Added exchange rate settings
-// ✅ Added platform fee by currency
-// ✅ Added settlement currency settings
+// ✅ COMPLETE FIXED - Mobile Responsive Optimizations
+// ✅ Fixed: Header buttons on mobile (wrap, text-size, hidden labels)
+// ✅ Fixed: Sidebar on mobile (smaller padding, truncate labels)
+// ✅ Fixed: Currency section on mobile (stack fields)
+// ✅ Fixed: Form grids on mobile (1 column, then 2+)
+// ✅ Fixed: Spacing and padding for mobile
+// ✅ Fixed: Touch targets for mobile
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -422,13 +424,13 @@ const AdminSettings = () => {
     const section = settings.general || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">General Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Basic site configuration and branding</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">General Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Basic site configuration and branding</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Site Name
@@ -465,7 +467,7 @@ const AdminSettings = () => {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Timezone
@@ -534,13 +536,13 @@ const AdminSettings = () => {
     const section = settings.payment || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Payment Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure payment processing and fees</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Payment Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure payment processing and fees</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Currency
@@ -583,7 +585,7 @@ const AdminSettings = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Stripe Secret Key
@@ -646,7 +648,7 @@ const AdminSettings = () => {
   };
 
   // ===============================
-  // SECTION: CURRENCY
+  // SECTION: CURRENCY - Mobile Responsive
   // ===============================
 
   const renderCurrency = () => {
@@ -657,14 +659,14 @@ const AdminSettings = () => {
     const exchangeRates = section.exchangeRates || {};
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Currency Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure multi-currency support and exchange rates</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Currency Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure multi-currency support and exchange rates</p>
         </div>
 
         {/* Default & Base Currency */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Default Currency
@@ -699,17 +701,17 @@ const AdminSettings = () => {
           </div>
         </div>
 
-        {/* Platform Fees by Currency */}
+        {/* Platform Fees by Currency - Mobile Responsive */}
         <div>
           <h4 className="text-sm font-semibold text-[#374151] dark:text-white mb-3">Platform Fees by Currency</h4>
           <div className="space-y-2">
             {currencies.map(c => (
-              <div key={c.code} className="flex items-center gap-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                <div className="flex-1">
+              <div key={c.code} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                <div className="flex-1 w-full sm:w-auto">
                   <span className="font-medium text-[#374151] dark:text-white">{c.code}</span>
                   <span className="text-sm text-gray-500 ml-2">{c.name}</span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
                   <input
                     type="number"
                     min="0"
@@ -717,7 +719,7 @@ const AdminSettings = () => {
                     step="0.1"
                     value={platformFees[c.code] || 0}
                     onChange={(e) => updatePlatformFee(c.code, e.target.value)}
-                    className="w-24 h-10 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[#374151] dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
+                    className="flex-1 sm:w-24 h-10 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[#374151] dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
                   />
                   <span className="text-sm text-gray-500">%</span>
                 </div>
@@ -726,24 +728,24 @@ const AdminSettings = () => {
           </div>
         </div>
 
-        {/* Exchange Rates */}
+        {/* Exchange Rates - Mobile Responsive */}
         <div>
           <h4 className="text-sm font-semibold text-[#374151] dark:text-white mb-3">Exchange Rates (1 {baseCurrency})</h4>
           <div className="space-y-2">
             {currencies.filter(c => c.code !== baseCurrency).map(c => (
-              <div key={c.code} className="flex items-center gap-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                <div className="flex-1">
+              <div key={c.code} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                <div className="flex-1 w-full sm:w-auto">
                   <span className="font-medium text-[#374151] dark:text-white">{c.code}</span>
                   <span className="text-sm text-gray-500 ml-2">{c.name}</span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
                   <input
                     type="number"
                     min="0.0001"
                     step="0.0001"
                     value={exchangeRates[c.code] || 1}
                     onChange={(e) => updateExchangeRate(c.code, e.target.value)}
-                    className="w-32 h-10 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[#374151] dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
+                    className="flex-1 sm:w-32 h-10 px-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[#374151] dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
                   />
                   <span className="text-sm text-gray-500">{c.symbol}</span>
                 </div>
@@ -774,7 +776,7 @@ const AdminSettings = () => {
                 min="60"
                 value={section.rateUpdateInterval || 3600}
                 onChange={(e) => updateCurrencySetting('rateUpdateInterval', parseInt(e.target.value) || 3600)}
-                className="w-full md:w-48 h-11 px-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[#374151] dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
+                className="w-full sm:w-48 h-11 px-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[#374151] dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
               />
             </div>
           )}
@@ -790,8 +792,8 @@ const AdminSettings = () => {
               </div>
             ) : (
               currencies.map(c => (
-                <div key={c.code} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center gap-3">
+                <div key={c.code} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-lg font-bold">{c.symbol}</span>
                     <span className="font-medium text-[#374151] dark:text-white">{c.code}</span>
                     <span className="text-sm text-gray-500">{c.name}</span>
@@ -825,13 +827,13 @@ const AdminSettings = () => {
     const section = settings.email || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Email Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure SMTP and email delivery</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Email Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure SMTP and email delivery</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               SMTP Host
@@ -857,7 +859,7 @@ const AdminSettings = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               SMTP Username
@@ -882,7 +884,7 @@ const AdminSettings = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               From Email
@@ -944,10 +946,10 @@ const AdminSettings = () => {
     ];
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Notification Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure how and when to send notifications</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Notification Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure how and when to send notifications</p>
         </div>
 
         <div>
@@ -995,13 +997,13 @@ const AdminSettings = () => {
     const section = settings.security || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Security Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure security and authentication</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Security Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure security and authentication</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Max Login Attempts
@@ -1081,13 +1083,13 @@ const AdminSettings = () => {
     const section = settings.integrations || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Integrations</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure third-party integrations</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Integrations</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure third-party integrations</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Google Analytics ID
@@ -1126,7 +1128,7 @@ const AdminSettings = () => {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Cloudinary Cloud Name
@@ -1195,13 +1197,13 @@ const AdminSettings = () => {
     const section = settings.appearance || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Appearance Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure the look and feel of your site</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Appearance Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure the look and feel of your site</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Primary Color
@@ -1252,7 +1254,7 @@ const AdminSettings = () => {
           <span className="text-sm text-[#374151] dark:text-white">Enable Dark Mode by Default</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Logo URL
@@ -1316,13 +1318,13 @@ const AdminSettings = () => {
     const section = settings.advanced || {};
     
     return (
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6">
         <div>
-          <h3 className="text-lg font-bold text-[#374151] dark:text-white">Advanced Settings</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Configure advanced system settings</p>
+          <h3 className="text-base sm:text-lg font-bold text-[#374151] dark:text-white">Advanced Settings</h3>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Configure advanced system settings</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="block text-sm font-semibold text-[#374151] dark:text-white mb-1.5">
               Cache Duration (seconds)
@@ -1412,12 +1414,12 @@ const AdminSettings = () => {
 
   if (!settings) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
         <div className="relative w-16 h-16">
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">Loading settings...</p>
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Loading settings...</p>
       </div>
     );
   }
@@ -1427,52 +1429,56 @@ const AdminSettings = () => {
   // ===============================
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+
+      {/* ─── HEADER - Mobile Responsive ─── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-6 sm:mb-8">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-lg">
-            <Settings className="w-6 h-6 text-white" />
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-lg flex-shrink-0">
+            <Settings className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-[#374151] dark:text-white">Settings</h1>
-            <p className="text-gray-500 dark:text-gray-400">Manage your platform configuration</p>
+            <h1 className="text-xl sm:text-3xl font-bold text-[#374151] dark:text-white">Settings</h1>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 hidden xs:block">Manage your platform configuration</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             onClick={resetSettings}
-            className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition flex items-center gap-1.5 text-xs sm:text-sm"
           >
             <RefreshCw className="w-4 h-4" />
-            Reset
+            <span className="hidden xs:inline">Reset</span>
           </button>
           <button
             onClick={saveSettings}
             disabled={saving}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition disabled:opacity-50 flex items-center gap-2"
+            className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition disabled:opacity-50 flex items-center gap-2 text-xs sm:text-sm"
           >
             {saving ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Saving...
+                <span className="hidden xs:inline">Saving...</span>
+                <span className="inline xs:hidden">...</span>
               </>
             ) : (
               <>
                 <Save className="w-4 h-4" />
-                Save Settings
+                <span className="hidden xs:inline">Save Settings</span>
+                <span className="inline xs:hidden">Save</span>
               </>
             )}
           </button>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex flex-col md:flex-row gap-6">
-        {/* Sidebar */}
+      {/* ─── Main Content ─── */}
+      <div className="flex flex-col md:flex-row gap-4 sm:gap-6">
+        {/* Sidebar - Mobile Responsive */}
         <div className="md:w-64 flex-shrink-0">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 overflow-hidden sticky top-24">
-            <div className="p-3">
+            <div className="p-2 sm:p-3">
               {sections.map((section) => {
                 const Icon = section.icon;
                 const isActive = activeSection === section.id;
@@ -1480,16 +1486,16 @@ const AdminSettings = () => {
                   <button
                     key={section.id}
                     onClick={() => setActiveSection(section.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                    className={`w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
                       isActive
                         ? 'bg-[#0D9488]/10 text-[#0D9488] dark:bg-[#0D9488]/20 dark:text-[#0D9488]'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-[#374151] dark:hover:text-white'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    {section.label}
+                    <Icon className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate">{section.label}</span>
                     {isActive && (
-                      <div className="ml-auto w-1.5 h-6 rounded-full bg-[#0D9488]" />
+                      <div className="ml-auto w-1 h-5 sm:w-1.5 sm:h-6 rounded-full bg-[#0D9488]" />
                     )}
                   </button>
                 );
@@ -1499,7 +1505,7 @@ const AdminSettings = () => {
         </div>
 
         {/* Content */}
-        <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
+        <div className="flex-1 bg-white dark:bg-gray-900 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 p-4 sm:p-6">
           {renderSection()}
         </div>
       </div>

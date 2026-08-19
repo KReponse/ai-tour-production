@@ -1,4 +1,7 @@
 // backend/src/routes/chatRoutes.js
+// ✅ FIXED - Using Authentication v2 middleware
+// ✅ ADDED: Multiple routes for frontend compatibility
+
 import express from 'express';
 import {
   getRooms,
@@ -25,7 +28,8 @@ router.get('/rooms/:roomId/messages', getMessages);
 router.post('/messages', sendMessage);
 router.put('/rooms/:roomId/read', markAsRead);
 
-// ✅ ADDED: Frontend compatibility route
-router.get('/conversations/unread', getUnreadCount);
+// ✅ ADDED: Frontend compatibility routes
+router.get('/conversations/unread', getUnreadCount);  // For /api/conversations/unread
+router.get('/unread', getUnreadCount);               // For /api/chat/unread
 
 export default router;

@@ -1,5 +1,6 @@
 // backend/src/models/ExchangeRate.js
-// ✅ COMPLETE FIXED - Added 'fallback' to source enum
+// ✅ COMPLETE FIXED - Removed all index: true from field definitions
+// ✅ All indexes defined ONLY in schema.index() section
 
 import mongoose from "mongoose";
 
@@ -13,7 +14,7 @@ const exchangeRateSchema = new mongoose.Schema(
       required: [true, "From currency is required"],
       uppercase: true,
       trim: true,
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     toCurrency: {
@@ -21,7 +22,7 @@ const exchangeRateSchema = new mongoose.Schema(
       required: [true, "To currency is required"],
       uppercase: true,
       trim: true,
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     // =========================
@@ -45,22 +46,22 @@ const exchangeRateSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
       required: true,
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     expiresAt: {
       type: Date,
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     // =========================
-    // SOURCE - ✅ FIXED: Added 'fallback'
+    // SOURCE
     // =========================
     source: {
       type: String,
       enum: ["manual", "api", "admin", "system", "webhook", "fallback"],
       default: "manual",
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     sourceProvider: {
@@ -92,7 +93,7 @@ const exchangeRateSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     updatedBy: {
@@ -106,7 +107,7 @@ const exchangeRateSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
-      index: true,
+      // ✅ REMOVED: index: true
     },
 
     isVerified: {
@@ -140,8 +141,11 @@ const exchangeRateSchema = new mongoose.Schema(
 );
 
 // =========================
-// ✅ INDEXES
+// ✅ ALL INDEXES DEFINED IN ONE PLACE
 // =========================
+// NO index:true in field definitions above
+// All indexes defined ONLY here
+
 exchangeRateSchema.index({ fromCurrency: 1, toCurrency: 1 });
 exchangeRateSchema.index({ fromCurrency: 1, toCurrency: 1, effectiveDate: -1 });
 exchangeRateSchema.index({ effectiveDate: -1, expiresAt: 1 });
@@ -159,32 +163,27 @@ exchangeRateSchema.index(
 // ✅ VIRTUALS
 // =========================
 
-// ✅ Get currency pair display
 exchangeRateSchema.virtual("pair").get(function () {
   return `${this.fromCurrency}/${this.toCurrency}`;
 });
 
-// ✅ Check if rate is expired
 exchangeRateSchema.virtual("isExpired").get(function () {
   if (!this.expiresAt) return false;
   return new Date() > this.expiresAt;
 });
 
-// ✅ Check if rate is current (within last 24 hours)
 exchangeRateSchema.virtual("isCurrent").get(function () {
   const now = new Date();
   const diff = now - this.effectiveDate;
-  return diff < 24 * 60 * 60 * 1000; // 24 hours
+  return diff < 24 * 60 * 60 * 1000;
 });
 
-// ✅ Get rate age in hours
 exchangeRateSchema.virtual("ageInHours").get(function () {
   const now = new Date();
   const diff = now - this.effectiveDate;
   return diff / (1000 * 60 * 60);
 });
 
-// ✅ Get formatted rate
 exchangeRateSchema.virtual("formattedRate").get(function () {
   return `1 ${this.fromCurrency} = ${this.rate} ${this.toCurrency}`;
 });
@@ -193,16 +192,10 @@ exchangeRateSchema.virtual("formattedRate").get(function () {
 // ✅ INSTANCE METHODS
 // =========================
 
-/**
- * Convert amount using this exchange rate
- */
 exchangeRateSchema.methods.convert = function (amount) {
   return amount * this.rate;
 };
 
-/**
- * Convert amount inversely
- */
 exchangeRateSchema.methods.convertInverse = function (amount) {
   if (!this.inverseRate) {
     this.inverseRate = 1 / this.rate;
@@ -210,9 +203,6 @@ exchangeRateSchema.methods.convertInverse = function (amount) {
   return amount * this.inverseRate;
 };
 
-/**
- * Mark rate as used
- */
 exchangeRateSchema.methods.markUsed = async function () {
   this.usageCount += 1;
   this.lastUsedAt = new Date();
@@ -220,28 +210,19 @@ exchangeRateSchema.methods.markUsed = async function () {
   return this;
 };
 
-/**
- * Check if rate is valid for use
- */
 exchangeRateSchema.methods.isValidForUse = function () {
   if (!this.isActive) return false;
   if (this.isExpired) return false;
-  if (this.ageInHours > 24) return false; // Stale if older than 24 hours
+  if (this.ageInHours > 24) return false;
   return true;
 };
 
-/**
- * Deactivate rate
- */
 exchangeRateSchema.methods.deactivate = async function () {
   this.isActive = false;
   await this.save();
   return this;
 };
 
-/**
- * Verify rate
- */
 exchangeRateSchema.methods.verify = async function () {
   this.isVerified = true;
   await this.save();
@@ -252,9 +233,6 @@ exchangeRateSchema.methods.verify = async function () {
 // ✅ STATIC METHODS
 // =========================
 
-/**
- * Get latest exchange rate for currency pair
- */
 exchangeRateSchema.statics.getLatest = async function (fromCurrency, toCurrency) {
   const rate = await this.findOne({
     fromCurrency: fromCurrency.toUpperCase(),
@@ -269,9 +247,6 @@ exchangeRateSchema.statics.getLatest = async function (fromCurrency, toCurrency)
   return rate;
 };
 
-/**
- * Get exchange rate history for a currency pair
- */
 exchangeRateSchema.statics.getHistory = async function (
   fromCurrency,
   toCurrency,
@@ -301,10 +276,6 @@ exchangeRateSchema.statics.getHistory = async function (
     .lean();
 };
 
-/**
- * Get current exchange rate for currency pair
- * If no rate exists, return null (caller should use default or create)
- */
 exchangeRateSchema.statics.getCurrent = async function (fromCurrency, toCurrency) {
   const rate = await this.findOne({
     fromCurrency: fromCurrency.toUpperCase(),
@@ -319,9 +290,6 @@ exchangeRateSchema.statics.getCurrent = async function (fromCurrency, toCurrency
   return rate;
 };
 
-/**
- * Get all active rates for a currency
- */
 exchangeRateSchema.statics.getActiveRatesForCurrency = async function (currency) {
   return this.find({
     $or: [{ fromCurrency: currency.toUpperCase() }, { toCurrency: currency.toUpperCase() }],
@@ -333,9 +301,6 @@ exchangeRateSchema.statics.getActiveRatesForCurrency = async function (currency)
     .lean();
 };
 
-/**
- * Create or update exchange rate
- */
 exchangeRateSchema.statics.setRate = async function (
   fromCurrency,
   toCurrency,
@@ -352,11 +317,8 @@ exchangeRateSchema.statics.setRate = async function (
 
   const from = fromCurrency.toUpperCase();
   const to = toCurrency.toUpperCase();
-
-  // Calculate inverse rate
   const inverseRate = 1 / rate;
 
-  // Check if rate already exists and is current
   const existing = await this.findOne({
     fromCurrency: from,
     toCurrency: to,
@@ -366,7 +328,6 @@ exchangeRateSchema.statics.setRate = async function (
   });
 
   if (existing) {
-    // Update existing rate
     existing.rate = rate;
     existing.inverseRate = inverseRate;
     existing.source = source;
@@ -379,7 +340,6 @@ exchangeRateSchema.statics.setRate = async function (
     return existing;
   }
 
-  // Create new rate
   const newRate = new this({
     fromCurrency: from,
     toCurrency: to,
@@ -398,9 +358,6 @@ exchangeRateSchema.statics.setRate = async function (
   return newRate;
 };
 
-/**
- * Delete old rates (cleanup)
- */
 exchangeRateSchema.statics.cleanup = async function (daysToKeep = 90) {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - daysToKeep);
@@ -413,9 +370,6 @@ exchangeRateSchema.statics.cleanup = async function (daysToKeep = 90) {
   return result.deletedCount;
 };
 
-/**
- * Get exchange rate statistics
- */
 exchangeRateSchema.statics.getStats = async function () {
   const total = await this.countDocuments();
   const active = await this.countDocuments({ isActive: true });
@@ -460,17 +414,14 @@ exchangeRateSchema.statics.getStats = async function () {
 // =========================
 
 exchangeRateSchema.pre("save", function (next) {
-  // Auto-calculate inverse rate if not provided
   if (!this.inverseRate && this.rate) {
     this.inverseRate = 1 / this.rate;
   }
 
-  // Ensure inverse rate is valid
   if (this.inverseRate <= 0) {
     this.inverseRate = 1 / this.rate;
   }
 
-  // Set expiry if not set (default 7 days)
   if (!this.expiresAt && this.source !== "system") {
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + 7);

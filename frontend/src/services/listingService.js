@@ -1,8 +1,19 @@
 // frontend/src/services/listingService.js
 // ✅ COMPLETE FIXED - Added Cover Media support with API client
 // ✅ ADDED: Retry logic with exponential backoff
+// ✅ ADDED: Response data extraction helper
 
 import API from './api';
+
+// ===============================
+// ✅ HELPER: Extract data from response
+// ===============================
+const extractData = (response) => {
+  // Handle different response structures
+  if (response?.data?.data) return response.data.data;
+  if (response?.data) return response.data;
+  return response;
+};
 
 // ===============================
 // ✅ HELPER: Retry with exponential backoff
@@ -31,7 +42,7 @@ const withRetry = async (fn, maxRetries = 3, delay = 2000) => {
 export const getListings = async (params = {}) => {
   try {
     const response = await API.get('/listings', { params });
-    return response.data;
+    return extractData(response);
   } catch (error) {
     // If 401, try again without auth (public access)
     if (error.response?.status === 401) {
@@ -39,7 +50,7 @@ export const getListings = async (params = {}) => {
         const { default: axios } = await import('axios');
         const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
         const response = await axios.get(`${API_URL}/listings`, { params });
-        return response.data;
+        return extractData(response);
       } catch (retryError) {
         console.error("❌ Get listings error (public fallback):", retryError);
         throw retryError;
@@ -56,7 +67,7 @@ export const getListings = async (params = {}) => {
 export const getListingById = async (id) => {
   try {
     const response = await API.get(`/listings/${id}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Get listing by id error:", error);
     throw error;
@@ -69,7 +80,7 @@ export const getListingById = async (id) => {
 export const getMyListings = async () => {
   try {
     const response = await API.get('/listings/my');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Get my listings error:", error);
     throw error;
@@ -99,7 +110,7 @@ export const createListing = async (data, onProgress) => {
         }
       },
     });
-    return response.data;
+    return extractData(response);
   }, 3, 3000); // ✅ 3 retries, 3s initial delay
 };
 
@@ -126,7 +137,7 @@ export const updateListing = async (id, data, onProgress) => {
         }
       },
     });
-    return response.data;
+    return extractData(response);
   }, 3, 3000);
 };
 
@@ -136,7 +147,7 @@ export const updateListing = async (id, data, onProgress) => {
 export const deleteListing = async (id) => {
   try {
     const response = await API.delete(`/listings/${id}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Delete listing error:", error);
     throw error;
@@ -149,7 +160,7 @@ export const deleteListing = async (id) => {
 export const toggleListingStatus = async (id) => {
   try {
     const response = await API.patch(`/listings/${id}/status`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Toggle listing status error:", error);
     throw error;
@@ -162,7 +173,7 @@ export const toggleListingStatus = async (id) => {
 export const toggleLike = async (id) => {
   try {
     const response = await API.post(`/listings/${id}/like`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Toggle like error:", error);
     throw error;
@@ -175,7 +186,7 @@ export const toggleLike = async (id) => {
 export const getListingLikes = async (id) => {
   try {
     const response = await API.get(`/listings/${id}/likes`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Get listing likes error:", error);
     throw error;
@@ -188,7 +199,7 @@ export const getListingLikes = async (id) => {
 export const checkLikeStatus = async (id) => {
   try {
     const response = await API.get(`/listings/${id}/likes/check`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Check like status error:", error);
     throw error;
@@ -201,7 +212,7 @@ export const checkLikeStatus = async (id) => {
 export const getProviderListings = async () => {
   try {
     const response = await API.get('/listings/my');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error("❌ Get provider listings error:", error);
     throw error;

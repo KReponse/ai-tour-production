@@ -3,6 +3,8 @@
 // ✅ Added dynamic role display
 // ✅ Added 401 error handling
 // ✅ ADDED: Messages icon with unread badge for admin support chat
+// ✅ RESPONSIVE: Mobile-optimized with proper touch targets
+// ✅ FIXED: Touch targets for mobile (44px minimum)
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -53,6 +55,7 @@ export default function AdminNavbar({
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const profileRef = useRef();
   const notificationRef = useRef();
@@ -166,6 +169,7 @@ export default function AdminNavbar({
   const handleLogout = () => {
     logout();
     navigate("/login", { replace: true });
+    toast.success("Logged out successfully");
   };
 
   // ✅ Get user display name
@@ -197,77 +201,92 @@ export default function AdminNavbar({
     return new Date(date).toLocaleDateString();
   };
 
+  // ✅ Handle search
+  const handleSearch = (e) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/admin/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-white/90 dark:bg-gray-950/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 transition-all duration-300 shadow-sm">
-      <div className="h-full px-4 lg:px-6 flex items-center justify-between">
+      <div className="h-full px-3 sm:px-4 lg:px-6 flex items-center justify-between">
 
         {/* LEFT SIDE */}
-        <div className="flex items-center gap-4">
-          {/* MENU */}
+        <div className="flex items-center gap-2 sm:gap-4">
+          {/* MENU - Responsive touch target */}
           <button
             onClick={() => {
               if (window.innerWidth < 1024) {
                 onMobileMenu();
               } else {
                 setCollapsed(!collapsed);
-              }
-            }}
-            className="w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105"
+              }}
+            }
+            className="min-w-[44px] min-h-[44px] rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105 touch-manipulation"
+            aria-label="Toggle sidebar"
           >
             <PanelLeft size={20} className="text-gray-700 dark:text-gray-300" />
           </button>
 
-          {/* LOGO */}
-          <div className="flex items-center gap-3">
+          {/* LOGO - Responsive */}
+          <div className="flex items-center gap-2 sm:gap-3">
             <img
               src={logo}
               alt="logo"
-              className="w-9 h-9 rounded-xl object-contain"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-contain"
             />
             <div className="hidden sm:block">
               <div className="flex items-center gap-1.5">
-                <h1 className="font-black bg-gradient-to-r from-[#0D9488] to-[#F59E0B] bg-clip-text text-transparent">
+                <h1 className="font-black bg-gradient-to-r from-[#0D9488] to-[#F59E0B] bg-clip-text text-transparent text-sm sm:text-base">
                   AI Tour Rwanda
                 </h1>
-                <Shield className="w-3.5 h-3.5 text-[#0D9488]" />
+                <Shield className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#0D9488]" />
               </div>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+              <p className="text-[10px] sm:text-[11px] text-gray-500 dark:text-gray-400 font-medium">
                 Admin Portal
               </p>
             </div>
           </div>
 
-          {/* SEARCH */}
-          <div className="hidden md:flex ml-5 items-center gap-3 bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 h-11 w-72 lg:w-96 transition-all duration-300 focus-within:ring-2 focus-within:ring-[#0D9488] focus-within:bg-white dark:focus-within:bg-gray-900">
-            <Search size={18} className="text-gray-500" />
+          {/* SEARCH - Responsive */}
+          <form 
+            onSubmit={handleSearch}
+            className="hidden md:flex ml-2 sm:ml-5 items-center gap-2 sm:gap-3 bg-gray-100 dark:bg-gray-800 rounded-2xl px-3 sm:px-4 h-10 sm:h-11 w-48 sm:w-64 lg:w-80 xl:w-96 transition-all duration-300 focus-within:ring-2 focus-within:ring-[#0D9488] focus-within:bg-white dark:focus-within:bg-gray-900"
+          >
+            <Search size={16} className="sm:w-[18px] sm:h-[18px] text-gray-500 flex-shrink-0" />
             <input
               placeholder="Search dashboard..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-transparent outline-none w-full text-sm dark:text-white placeholder:text-gray-400"
             />
-          </div>
+          </form>
         </div>
 
         {/* RIGHT SIDE */}
-        <div className="flex items-center gap-2 lg:gap-3">
-          {/* THEME */}
+        <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
+          {/* THEME - Responsive touch target */}
           <button
             onClick={() => setDark(!dark)}
-            className="w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105"
+            className="min-w-[44px] min-h-[44px] rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105 touch-manipulation"
+            aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {dark ? (
-              <Sun size={19} className="text-[#F59E0B]" />
+              <Sun size={18} className="sm:w-[19px] sm:h-[19px] text-[#F59E0B]" />
             ) : (
-              <Moon size={19} className="text-gray-700 dark:text-gray-300" />
+              <Moon size={18} className="sm:w-[19px] sm:h-[19px] text-gray-700 dark:text-gray-300" />
             )}
           </button>
 
-          {/* ✅ MESSAGES - Admin Support Chat */}
+          {/* ✅ MESSAGES - Admin Support Chat - Responsive touch target */}
           <button
             onClick={() => navigate('/admin/chat')}
-            className="relative w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105"
+            className="relative min-w-[44px] min-h-[44px] rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105 touch-manipulation"
             aria-label="Support Messages"
           >
-            <MessageCircle size={20} className="text-gray-700 dark:text-gray-300" />
+            <MessageCircle size={19} className="sm:w-[20px] sm:h-[20px] text-gray-700 dark:text-gray-300" />
             {chatUnreadCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white dark:border-gray-900 animate-pulse">
                 {chatUnreadCount > 9 ? '9+' : chatUnreadCount}
@@ -275,13 +294,14 @@ export default function AdminNavbar({
             )}
           </button>
 
-          {/* NOTIFICATIONS */}
+          {/* NOTIFICATIONS - Responsive touch target */}
           <div className="relative" ref={notificationRef}>
             <button
               onClick={() => setNotificationOpen(!notificationOpen)}
-              className="relative w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105"
+              className="relative min-w-[44px] min-h-[44px] rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all duration-300 hover:scale-105 touch-manipulation"
+              aria-label="Notifications"
             >
-              <Bell size={20} className="text-gray-700 dark:text-gray-300" />
+              <Bell size={19} className="sm:w-[20px] sm:h-[20px] text-gray-700 dark:text-gray-300" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-white dark:border-gray-900 animate-pulse">
                   {unreadCount > 9 ? '9+' : unreadCount}
@@ -289,11 +309,12 @@ export default function AdminNavbar({
               )}
             </button>
 
+            {/* Notification Dropdown - Responsive */}
             {notificationOpen && (
-              <div className="absolute right-0 mt-3 w-80 max-w-[90vw] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden z-50">
-                <div className="flex items-center justify-between p-4 border-b dark:border-gray-800">
-                  <h3 className="font-bold text-[#374151] dark:text-white flex items-center gap-2">
-                    <Bell size={16} className="text-[#0D9488]" />
+              <div className="absolute right-0 mt-3 w-72 sm:w-80 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden z-50">
+                <div className="flex items-center justify-between p-3 sm:p-4 border-b dark:border-gray-800">
+                  <h3 className="font-bold text-[#374151] dark:text-white flex items-center gap-2 text-sm sm:text-base">
+                    <Bell size={15} className="sm:w-[16px] sm:h-[16px] text-[#0D9488]" />
                     Notifications
                     {unreadCount > 0 && (
                       <span className="text-xs bg-[#0D9488] text-white px-2 py-0.5 rounded-full">
@@ -310,11 +331,13 @@ export default function AdminNavbar({
                           setNotifications(prev => 
                             prev.map(n => ({ ...n, read: true }))
                           );
+                          toast.success('All notifications marked as read');
                         } catch (error) {
                           console.error('Error marking all as read:', error);
+                          toast.error('Failed to mark all as read');
                         }
                       }}
-                      className="text-xs text-[#0D9488] hover:text-[#0D9488]/80 font-medium transition"
+                      className="text-xs text-[#0D9488] hover:text-[#0D9488]/80 font-medium transition min-h-[32px] min-w-[32px]"
                     >
                       Mark all read
                     </button>
@@ -328,7 +351,7 @@ export default function AdminNavbar({
                     </div>
                   ) : notifications.length === 0 ? (
                     <div className="flex flex-col items-center justify-center p-8 text-center">
-                      <Bell size={40} className="text-gray-300 dark:text-gray-600 mb-3" />
+                      <Bell size={36} className="sm:w-[40px] sm:h-[40px] text-gray-300 dark:text-gray-600 mb-2 sm:mb-3" />
                       <p className="text-sm text-gray-500 dark:text-gray-400">
                         No notifications yet
                       </p>
@@ -351,27 +374,27 @@ export default function AdminNavbar({
                           setNotificationOpen(false);
                         }}
                         className={`
-                          flex items-start gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800 cursor-pointer transition
+                          flex items-start gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-gray-100 dark:border-gray-800 cursor-pointer transition
                           hover:bg-gray-50 dark:hover:bg-gray-800/50
                           ${!notification.read ? 'bg-teal-50 dark:bg-teal-900/10' : ''}
                         `}
                       >
-                        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0">
-                          <Bell size={18} className="text-[#0D9488]" />
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0">
+                          <Bell size={16} className="sm:w-[18px] sm:h-[18px] text-[#0D9488]" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium dark:text-white ${!notification.read ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}`}>
+                          <p className={`text-xs sm:text-sm font-medium dark:text-white ${!notification.read ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}`}>
                             {notification.title}
                           </p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                             {notification.message}
                           </p>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                          <p className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500 mt-0.5 sm:mt-1">
                             {timeAgo(notification.createdAt)}
                           </p>
                         </div>
                         {!notification.read && (
-                          <div className="w-2 h-2 rounded-full bg-[#0D9488] flex-shrink-0 mt-2" />
+                          <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#0D9488] flex-shrink-0 mt-1.5 sm:mt-2" />
                         )}
                       </div>
                     ))
@@ -379,13 +402,13 @@ export default function AdminNavbar({
                 </div>
 
                 {notifications.length > 0 && (
-                  <div className="p-3 border-t dark:border-gray-800 text-center">
+                  <div className="p-2.5 sm:p-3 border-t dark:border-gray-800 text-center">
                     <button
                       onClick={() => {
                         navigate('/admin/notifications');
                         setNotificationOpen(false);
                       }}
-                      className="text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium transition"
+                      className="text-xs sm:text-sm text-[#0D9488] hover:text-[#0D9488]/80 font-medium transition min-h-[36px] px-3"
                     >
                       View All Notifications
                     </button>
@@ -395,38 +418,38 @@ export default function AdminNavbar({
             )}
           </div>
 
-          {/* PROFILE */}
+          {/* PROFILE - Responsive */}
           <div className="relative" ref={profileRef}>
             <button
               onClick={() => setProfileOpen(!profileOpen)}
-              className="flex items-center gap-3 px-3 py-2 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-300"
+              className="flex items-center gap-1.5 sm:gap-2 lg:gap-3 px-2 sm:px-3 py-1.5 sm:py-2 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-300 min-h-[44px] touch-manipulation"
             >
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] text-white flex items-center justify-center shadow-md shadow-[#0D9488]/25">
-                <UserCircle size={22} />
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] text-white flex items-center justify-center shadow-md shadow-[#0D9488]/25">
+                <UserCircle size={18} className="sm:w-[22px] sm:h-[22px]" />
               </div>
 
               <div className="hidden sm:block text-left">
-                <p className="text-sm font-bold text-[#374151] dark:text-white">
+                <p className="text-xs sm:text-sm font-bold text-[#374151] dark:text-white truncate max-w-[80px] lg:max-w-[120px]">
                   {getDisplayName()}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
                   {getRoleDisplay()}
                 </p>
               </div>
 
-              <ChevronDown size={16} className={`text-gray-500 transition-transform duration-300 ${profileOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown size={14} className={`sm:w-[16px] sm:h-[16px] text-gray-500 transition-transform duration-300 flex-shrink-0 ${profileOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {profileOpen && (
-              <div className="absolute right-0 mt-3 w-64 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 p-2 z-50">
-                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 mb-2">
-                  <p className="font-bold text-[#374151] dark:text-white">
+              <div className="absolute right-0 mt-3 w-56 sm:w-64 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 p-1.5 sm:p-2 z-50">
+                <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-gray-100 dark:border-gray-800 mb-1.5 sm:mb-2">
+                  <p className="font-bold text-[#374151] dark:text-white text-sm sm:text-base truncate">
                     {getDisplayName()}
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                     {user?.email || "admin@aitour.rw"}
                   </p>
-                  <span className="inline-block mt-1 text-xs bg-[#0D9488]/10 text-[#0D9488] px-2 py-0.5 rounded-full">
+                  <span className="inline-block mt-1 text-[10px] sm:text-xs bg-[#0D9488]/10 text-[#0D9488] px-2 py-0.5 rounded-full">
                     {getRoleDisplay()}
                   </span>
                 </div>
@@ -436,17 +459,17 @@ export default function AdminNavbar({
                     setProfileOpen(false);
                     navigate("/admin/settings");
                   }}
-                  className="w-full flex gap-3 px-4 py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition text-[#374151] dark:text-white"
+                  className="w-full flex gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition text-[#374151] dark:text-white text-sm sm:text-base min-h-[44px]"
                 >
-                  <Settings size={18} className="text-[#0D9488]" />
+                  <Settings size={16} className="sm:w-[18px] sm:h-[18px] text-[#0D9488]" />
                   Settings
                 </button>
 
                 <button
                   onClick={handleLogout}
-                  className="w-full flex gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+                  className="w-full flex gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition text-sm sm:text-base min-h-[44px]"
                 >
-                  <LogOut size={18} />
+                  <LogOut size={16} className="sm:w-[18px] sm:h-[18px]" />
                   Logout
                 </button>
               </div>

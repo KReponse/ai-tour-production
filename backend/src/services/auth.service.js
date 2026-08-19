@@ -1,5 +1,6 @@
 // backend/src/services/auth.service.js
 // ✅ COMPLETE FIXED - Added proper user ID handling and verification
+// ✅ FIXED: Reset and verification URLs use query parameters (?token=)
 
 import bcrypt from 'bcryptjs';
 import { UserRepository } from '../repositories/user.repository.js';
@@ -74,7 +75,8 @@ export class AuthService {
     console.log(`✅ [AuthService] User created: ${user.email} (ID: ${user._id})`);
 
     // ─── Send verification email (fire and forget) ──────────────
-    const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${verificationToken}`;
+    // ✅ FIXED: Use query parameter for token
+    const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;
     console.log(`📧 [AuthService] Verification URL: ${verificationUrl}`);
     
     EmailService.sendVerificationEmail(user, verificationUrl)
@@ -303,7 +305,8 @@ export class AuthService {
       verificationTokenExpiry: expiresAt
     });
 
-    const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${verificationToken}`;
+    // ✅ FIXED: Use query parameter for token
+    const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;
     await EmailService.sendVerificationEmail(user, verificationUrl);
 
     return { success: true };
@@ -329,7 +332,8 @@ export class AuthService {
       expiresAt
     });
 
-    const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
+    // ✅ FIXED: Use query parameter for token
+    const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
     await EmailService.sendPasswordResetEmail(user, resetUrl);
 
     return { success: true };

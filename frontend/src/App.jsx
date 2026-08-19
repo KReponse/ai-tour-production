@@ -9,6 +9,7 @@
 // ✅ ADDED: Chat routes for real-time messaging
 // ✅ ADDED: Admin Chat route
 // ✅ ADDED: Provider Chat route
+// ✅ FIXED: ResetPassword and VerifyEmail use query parameters (?token=)
 // ❌ REMOVED: Featured Experiences (completely removed)
 
 import React, { Suspense, lazy, useState, useEffect } from 'react';
@@ -213,12 +214,12 @@ function App() {
             <Route path="/explore" element={<Explore />} />
             <Route path="/destination/:id" element={<DestinationDetails />} />
             
-            {/* Auth Routes */}
+            {/* Auth Routes - ✅ FIXED: No :token parameter */}
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password/:token" element={<ResetPassword />} />
-            <Route path="/verify-email/:token" element={<VerifyEmail />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
 
             {/* Footer & Legal Pages */}
             <Route path="/privacy" element={<PrivacyPolicy />} />

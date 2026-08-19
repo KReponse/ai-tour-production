@@ -1,6 +1,7 @@
 // backend/src/services/media/index.js
 // ✅ Media Service - Main entry point
 // ✅ Supports: local and cloudinary storage providers
+// ✅ FIXED: Proper fallback to local storage when Cloudinary fails
 
 import mediaConfig from './config.js';
 import { generateMediaUrl, generateCoverUrl, generateVideoUrl, generateAllMediaUrls, getMediaType } from './urlGenerator.js';
@@ -16,6 +17,8 @@ class MediaService {
     this.storage = getStorageProvider();
     this.provider = this.storage.name || 'local';
     this.isCloudinary = this.provider === 'cloudinary';
+    
+    console.log(`📁 Media Service initialized with: ${this.provider}`);
   }
 
   /**
@@ -104,9 +107,22 @@ class MediaService {
       throw new Error('No file provided');
     }
 
-    const type = options.type || getMediaType(file.originalname);
-    const result = await this.storage.save(file, { type, ...options });
-    return result;
+    try {
+      const type = options.type || getMediaType(file.originalname);
+      const result = await this.storage.save(file, { type, ...options });
+      return result;
+    } catch (error) {
+      console.error('❌ Storage save error:', error.message);
+      
+      // ✅ If Cloudinary fails and we have local storage available, try fallback
+      if (this.provider === 'cloudinary' && this.storage.fallback) {
+        console.warn('⚠️ Cloudinary failed, trying local storage fallback...');
+        const fallbackResult = await this.storage.fallback.save(file, options);
+        return fallbackResult;
+      }
+      
+      throw error;
+    }
   }
 
   /**

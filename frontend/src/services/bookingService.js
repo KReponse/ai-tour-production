@@ -1,14 +1,47 @@
 // frontend/src/services/bookingService.js
-// ✅ FIXED - Using centralized api client with correct endpoints
+// ✅ COMPLETE FIXED - Using centralized api client with correct endpoints
+// ✅ ADDED: Response data extraction helper
+// ✅ ADDED: Retry logic for critical mutations
 // ✅ FIXED: getMyBookings now accepts params for pagination, filtering, sorting
 
 import api from './api';
 
+// ===============================
+// ✅ HELPER: Extract data from response
+// ===============================
+const extractData = (response) => {
+  // Handle different response structures
+  if (response?.data?.data) return response.data.data;
+  if (response?.data) return response.data;
+  return response;
+};
+
+// ===============================
+// ✅ HELPER: Retry with exponential backoff
+// ===============================
+const withRetry = async (fn, maxRetries = 3, delay = 2000) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.log(`⚠️ Attempt ${i + 1} failed:`, error.message);
+      if (i < maxRetries - 1) {
+        const waitTime = delay * (i + 1);
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  throw lastError;
+};
+
 // =========================
-// ✅ CREATE BOOKING
+// ✅ CREATE BOOKING - WITH RETRY
 // =========================
 export const createBooking = async (bookingData) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required. Please login.');
@@ -19,14 +52,8 @@ export const createBooking = async (bookingData) => {
     const response = await api.post('/bookings', bookingData);
     
     console.log('✅ Booking created:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Create booking error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    console.error('  - Data:', error.response?.data);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
@@ -69,6 +96,11 @@ export const getMyBookings = async (params = {}) => {
       queryParams.append('endDate', params.endDate);
     }
 
+    // Listing filter
+    if (params.listingId) {
+      queryParams.append('listingId', params.listingId);
+    }
+
     const url = `/bookings/my-bookings${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
     
     console.log('📤 Fetching my bookings with params:', params);
@@ -77,7 +109,7 @@ export const getMyBookings = async (params = {}) => {
     const response = await api.get(url);
     
     console.log('✅ My bookings fetched:', response.data);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get my bookings error:');
     console.error('  - Status:', error.response?.status);
@@ -113,7 +145,7 @@ export const getBookingById = async (id) => {
     const response = await api.get(`/bookings/${id}`);
     
     console.log('✅ Booking fetched:', response.data);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get booking by id error:');
     console.error('  - ID:', id);
@@ -124,10 +156,10 @@ export const getBookingById = async (id) => {
 };
 
 // =========================
-// ✅ CANCEL BOOKING
+// ✅ CANCEL BOOKING - WITH RETRY
 // =========================
 export const cancelBooking = async (id, reason) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication token is required');
@@ -140,13 +172,8 @@ export const cancelBooking = async (id, reason) => {
     });
     
     console.log('✅ Booking cancelled:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Cancel booking error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
@@ -160,7 +187,7 @@ export const getProviderBookings = async () => {
     }
 
     const response = await api.get('/bookings/provider');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider bookings error:');
     console.error('  - Status:', error.response?.status);
@@ -170,10 +197,10 @@ export const getProviderBookings = async () => {
 };
 
 // =========================
-// ✅ CONFIRM BOOKING
+// ✅ CONFIRM BOOKING - WITH RETRY
 // =========================
 export const confirmBooking = async (id) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication token is required');
@@ -184,21 +211,15 @@ export const confirmBooking = async (id) => {
     const response = await api.put(`/bookings/${id}/confirm`);
     
     console.log('✅ Booking confirmed:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Confirm booking error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    console.error('  - Data:', error.response?.data);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
-// ✅ REJECT BOOKING
+// ✅ REJECT BOOKING - WITH RETRY
 // =========================
 export const rejectBooking = async (id, reason) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication token is required');
@@ -211,21 +232,15 @@ export const rejectBooking = async (id, reason) => {
     });
     
     console.log('✅ Booking rejected:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Reject booking error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    console.error('  - Data:', error.response?.data);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
-// ✅ COMPLETE BOOKING
+// ✅ COMPLETE BOOKING - WITH RETRY
 // =========================
 export const completeBooking = async (id) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication token is required');
@@ -236,21 +251,15 @@ export const completeBooking = async (id) => {
     const response = await api.put(`/bookings/${id}/complete`);
     
     console.log('✅ Booking completed:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Complete booking error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    console.error('  - Data:', error.response?.data);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
-// ✅ MARK IN PROGRESS
+// ✅ MARK IN PROGRESS - WITH RETRY
 // =========================
 export const markInProgress = async (id) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication token is required');
@@ -261,18 +270,12 @@ export const markInProgress = async (id) => {
     const response = await api.put(`/bookings/${id}/mark-in-progress`);
     
     console.log('✅ Booking marked in progress:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Mark in progress error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    console.error('  - Data:', error.response?.data);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
-// ✅ GET PROVIDER ANALYTICS (FIXED)
+// ✅ GET PROVIDER ANALYTICS
 // =========================
 export const getProviderAnalytics = async () => {
   try {
@@ -281,9 +284,8 @@ export const getProviderAnalytics = async () => {
       throw new Error('Authentication token is required');
     }
 
-    // ✅ FIXED: Correct endpoint is /analytics/provider
     const response = await api.get('/analytics/provider');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider analytics error:');
     console.error('  - Status:', error.response?.status);
@@ -293,7 +295,7 @@ export const getProviderAnalytics = async () => {
 };
 
 // =========================
-// ✅ GET PROVIDER EARNINGS (FIXED)
+// ✅ GET PROVIDER EARNINGS
 // =========================
 export const getProviderEarnings = async () => {
   try {
@@ -302,9 +304,8 @@ export const getProviderEarnings = async () => {
       throw new Error('Authentication token is required');
     }
 
-    // ✅ FIXED: Correct endpoint is /earnings/provider
     const response = await api.get('/earnings/provider');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider earnings error:');
     console.error('  - Status:', error.response?.status);
@@ -324,7 +325,7 @@ export const getProviderTravelers = async () => {
     }
 
     const response = await api.get('/bookings/provider/travelers');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider travelers error:');
     console.error('  - Status:', error.response?.status);
@@ -344,7 +345,7 @@ export const checkDuplicateBooking = async (entityId, entityType = 'listing') =>
     }
 
     const response = await api.get(`/bookings/check-duplicate/${entityId}?entityType=${entityType}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Check duplicate booking error:');
     console.error('  - Status:', error.response?.status);
@@ -369,7 +370,7 @@ export const getAllBookings = async (status = null, page = 1, limit = 20) => {
     }
 
     const response = await api.get(url);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get all bookings error:');
     console.error('  - Status:', error.response?.status);
@@ -379,10 +380,10 @@ export const getAllBookings = async (status = null, page = 1, limit = 20) => {
 };
 
 // =========================
-// ✅ UPDATE BOOKING STATUS (Admin)
+// ✅ UPDATE BOOKING STATUS (Admin) - WITH RETRY
 // =========================
 export const updateBookingStatus = async (id, status) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication token is required');
@@ -393,13 +394,8 @@ export const updateBookingStatus = async (id, status) => {
     const response = await api.put(`/bookings/admin/${id}/status`, { status });
     
     console.log('✅ Booking status updated:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Update booking status error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // =========================
@@ -413,7 +409,7 @@ export const getBookingByCode = async (bookingCode) => {
     }
 
     const response = await api.get(`/bookings/code/${bookingCode}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get booking by code error:');
     console.error('  - Status:', error.response?.status);
@@ -433,7 +429,7 @@ export const getBookingStats = async () => {
     }
 
     const response = await api.get('/bookings/stats');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get booking stats error:');
     console.error('  - Status:', error.response?.status);
@@ -453,7 +449,7 @@ export const getRecentBookings = async (limit = 5) => {
     }
 
     const response = await api.get(`/bookings/recent?limit=${limit}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get recent bookings error:');
     console.error('  - Status:', error.response?.status);
@@ -473,7 +469,8 @@ export const getMyBookingsForListing = async (listingId) => {
     }
 
     const response = await api.get(`/bookings/my-bookings?listingId=${listingId}`);
-    return response.data.bookings || [];
+    const data = extractData(response);
+    return data.bookings || data || [];
   } catch (error) {
     console.error('❌ Get my bookings for listing error:', error);
     return [];

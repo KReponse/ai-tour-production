@@ -1,4 +1,9 @@
 // frontend/src/components/RequestForm.jsx
+// ✅ COMPLETE FIXED - Mobile responsive with proper sizing
+// ✅ ADDED: Responsive padding, font sizes, and touch targets
+// ✅ ADDED: Form validation with real-time feedback
+// ✅ ADDED: Field-level error messages
+// ✅ FIXED: Touch-friendly inputs and buttons
 
 import React, { useState } from 'react';
 import {
@@ -45,29 +50,56 @@ const RequestForm = ({ onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    // Validation
+  // ===============================
+  // VALIDATE FORM
+  // ===============================
+  const validateForm = () => {
+    const errors = {};
+
     if (formData.type === 'planning') {
       if (!formData.destination.trim()) {
-        setError('Destination is required');
-        return;
+        errors.destination = 'Destination is required';
       }
-      if (!formData.startDate || !formData.endDate) {
-        setError('Please select travel dates');
-        return;
+      if (!formData.startDate) {
+        errors.startDate = 'Start date is required';
+      }
+      if (!formData.endDate) {
+        errors.endDate = 'End date is required';
+      }
+      if (formData.startDate && formData.endDate && formData.endDate < formData.startDate) {
+        errors.endDate = 'End date must be after start date';
+      }
+      if (formData.travelers < 1) {
+        errors.travelers = 'At least 1 traveler required';
       }
     } else {
       if (!formData.subject.trim()) {
-        setError('Subject is required');
-        return;
+        errors.subject = 'Subject is required';
       }
       if (!formData.message.trim()) {
-        setError('Message is required');
-        return;
+        errors.message = 'Message is required';
       }
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // ===============================
+  // HANDLE SUBMIT
+  // ===============================
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      // Scroll to first error
+      const firstError = document.querySelector('.text-red-500');
+      if (firstError) {
+        firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
     }
 
     setLoading(true);
@@ -90,7 +122,7 @@ const RequestForm = ({ onSuccess }) => {
         message: formData.message,
       };
 
-      const response = await createRequest(requestData);
+      const response = await createRequest(requestData, token);
       
       console.log('✅ Request created:', response);
       setSuccess(true);
@@ -109,6 +141,7 @@ const RequestForm = ({ onSuccess }) => {
         subject: '',
         message: '',
       });
+      setFieldErrors({});
       
       onSuccess?.(response);
       
@@ -123,9 +156,16 @@ const RequestForm = ({ onSuccess }) => {
     }
   };
 
+  // ===============================
+  // HANDLE CHANGE
+  // ===============================
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    // Clear field error when user types
+    if (fieldErrors[name]) {
+      setFieldErrors(prev => ({ ...prev, [name]: '' }));
+    }
   };
 
   const handlePreferencesChange = (e) => {
@@ -133,34 +173,65 @@ const RequestForm = ({ onSuccess }) => {
     setFormData(prev => ({ ...prev, preferences: values }));
   };
 
-  // Input classes with AI Tour colors
-  const inputClasses = "w-full px-4 py-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent transition outline-none";
-  const labelClasses = "block text-sm font-medium text-[#374151] dark:text-white mb-2";
+  // ===============================
+  // INPUT CLASSES - Responsive
+  // ===============================
+  const getInputClasses = (fieldName) => {
+    const base = `
+      w-full px-3 sm:px-4 py-2.5 sm:py-3.5 
+      rounded-xl sm:rounded-2xl 
+      border ${fieldErrors[fieldName] ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'}
+      bg-white dark:bg-gray-800 
+      text-gray-900 dark:text-white 
+      focus:ring-2 focus:ring-[#0D9488] focus:border-transparent 
+      transition outline-none 
+      text-sm sm:text-base
+      min-h-[44px] sm:min-h-[48px]
+    `;
+    return base;
+  };
 
+  const labelClasses = `
+    block text-xs sm:text-sm font-medium 
+    text-[#374151] dark:text-white 
+    mb-1 sm:mb-2
+  `;
+
+  const errorClasses = `
+    mt-1 text-xs sm:text-sm text-red-500 
+    flex items-center gap-1
+  `;
+
+  // ===============================
+  // RENDER
+  // ===============================
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-md">
-          <Sparkles className="w-5 h-5 text-white" />
+    <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+      {/* Header - Responsive */}
+      <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-md">
+          <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
         </div>
-        <h2 className="text-2xl font-black text-[#374151] dark:text-white">
+        <h2 className="text-xl sm:text-2xl font-black text-[#374151] dark:text-white">
           Request a Trip
         </h2>
       </div>
 
       {/* SUCCESS */}
       {success && (
-        <div className="p-4 rounded-2xl bg-[#0D9488]/10 dark:bg-[#0D9488]/20 border border-[#0D9488]/20 flex items-center gap-3 animate-fade-in">
-          <CheckCircle className="w-5 h-5 text-[#0D9488]" />
-          <span className="text-[#0D9488] font-medium">Request submitted successfully! ✅</span>
+        <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-[#0D9488]/10 dark:bg-[#0D9488]/20 border border-[#0D9488]/20 flex items-center gap-2 sm:gap-3 animate-fade-in">
+          <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-[#0D9488] flex-shrink-0" />
+          <span className="text-sm sm:text-base text-[#0D9488] font-medium">
+            Request submitted successfully! ✅
+          </span>
         </div>
       )}
 
       {/* ERROR */}
       {error && (
-        <div className="p-4 rounded-2xl bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600" />
-          <span className="text-red-600 dark:text-red-400">{error}</span>
+        <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 flex items-center gap-2 sm:gap-3">
+          <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600 flex-shrink-0" />
+          <span className="text-sm sm:text-base text-red-600 dark:text-red-400">{error}</span>
         </div>
       )}
 
@@ -171,7 +242,7 @@ const RequestForm = ({ onSuccess }) => {
           name="type"
           value={formData.type}
           onChange={handleChange}
-          className={inputClasses}
+          className={getInputClasses('type')}
         >
           <option value="planning">Trip Planning</option>
           <option value="support">Support</option>
@@ -187,7 +258,7 @@ const RequestForm = ({ onSuccess }) => {
           {/* DESTINATION */}
           <div>
             <label className={labelClasses}>
-              <MapPin className="w-4 h-4 inline mr-1 text-[#0D9488]" />
+              <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#0D9488]" />
               Destination *
             </label>
             <input
@@ -195,17 +266,22 @@ const RequestForm = ({ onSuccess }) => {
               name="destination"
               value={formData.destination}
               onChange={handleChange}
-              required
               placeholder="e.g., Kigali, Rwanda"
-              className={inputClasses}
+              className={getInputClasses('destination')}
             />
+            {fieldErrors.destination && (
+              <p className={errorClasses}>
+                <AlertCircle className="w-3.5 h-3.5" />
+                {fieldErrors.destination}
+              </p>
+            )}
           </div>
 
-          {/* DATES */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* DATES - Responsive grid */}
+          <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className={labelClasses}>
-                <Calendar className="w-4 h-4 inline mr-1 text-[#0D9488]" />
+                <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#0D9488]" />
                 Start Date *
               </label>
               <input
@@ -213,14 +289,19 @@ const RequestForm = ({ onSuccess }) => {
                 name="startDate"
                 value={formData.startDate}
                 onChange={handleChange}
-                required
-                className={inputClasses}
+                className={getInputClasses('startDate')}
                 min={new Date().toISOString().split('T')[0]}
               />
+              {fieldErrors.startDate && (
+                <p className={errorClasses}>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  {fieldErrors.startDate}
+                </p>
+              )}
             </div>
             <div>
               <label className={labelClasses}>
-                <Calendar className="w-4 h-4 inline mr-1 text-[#F59E0B]" />
+                <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#F59E0B]" />
                 End Date *
               </label>
               <input
@@ -228,18 +309,23 @@ const RequestForm = ({ onSuccess }) => {
                 name="endDate"
                 value={formData.endDate}
                 onChange={handleChange}
-                required
-                className={inputClasses}
+                className={getInputClasses('endDate')}
                 min={new Date().toISOString().split('T')[0]}
               />
+              {fieldErrors.endDate && (
+                <p className={errorClasses}>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  {fieldErrors.endDate}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* TRAVELERS & BUDGET */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* TRAVELERS & BUDGET - Responsive grid */}
+          <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <label className={labelClasses}>
-                <Users className="w-4 h-4 inline mr-1 text-[#0D9488]" />
+                <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#0D9488]" />
                 Travelers
               </label>
               <input
@@ -248,12 +334,18 @@ const RequestForm = ({ onSuccess }) => {
                 value={formData.travelers}
                 onChange={handleChange}
                 min="1"
-                className={inputClasses}
+                className={getInputClasses('travelers')}
               />
+              {fieldErrors.travelers && (
+                <p className={errorClasses}>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  {fieldErrors.travelers}
+                </p>
+              )}
             </div>
             <div>
               <label className={labelClasses}>
-                <DollarSign className="w-4 h-4 inline mr-1 text-[#F59E0B]" />
+                <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#F59E0B]" />
                 Budget (USD)
               </label>
               <input
@@ -262,7 +354,7 @@ const RequestForm = ({ onSuccess }) => {
                 value={formData.budget}
                 onChange={handleChange}
                 placeholder="e.g., 500-1000"
-                className={inputClasses}
+                className={getInputClasses('budget')}
               />
             </div>
           </div>
@@ -270,14 +362,14 @@ const RequestForm = ({ onSuccess }) => {
           {/* ACCOMMODATION */}
           <div>
             <label className={labelClasses}>
-              <Bed className="w-4 h-4 inline mr-1 text-[#0D9488]" />
+              <Bed className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#0D9488]" />
               Accommodation
             </label>
             <select
               name="accommodation"
               value={formData.accommodation}
               onChange={handleChange}
-              className={inputClasses}
+              className={getInputClasses('accommodation')}
             >
               <option value="budget">Budget</option>
               <option value="mid-range">Mid-Range</option>
@@ -289,7 +381,7 @@ const RequestForm = ({ onSuccess }) => {
           {/* PREFERENCES */}
           <div>
             <label className={labelClasses}>
-              <Sparkles className="w-4 h-4 inline mr-1 text-[#F59E0B]" />
+              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 inline mr-1 text-[#F59E0B]" />
               Preferences
             </label>
             <input
@@ -298,9 +390,9 @@ const RequestForm = ({ onSuccess }) => {
               value={formData.preferences.join(', ')}
               onChange={handlePreferencesChange}
               placeholder="e.g., Culture, Nature, Adventure (comma separated)"
-              className={inputClasses}
+              className={getInputClasses('preferences')}
             />
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-[10px] sm:text-xs text-gray-400 mt-1">
               Separate preferences with commas
             </p>
           </div>
@@ -316,7 +408,7 @@ const RequestForm = ({ onSuccess }) => {
               onChange={handleChange}
               rows="3"
               placeholder="Any special requirements..."
-              className={`${inputClasses} resize-none`}
+              className={`${getInputClasses('specialRequests')} resize-none min-h-[80px] sm:min-h-[100px]`}
             />
           </div>
         </>
@@ -332,10 +424,15 @@ const RequestForm = ({ onSuccess }) => {
               name="subject"
               value={formData.subject}
               onChange={handleChange}
-              required
               placeholder="Subject of your request"
-              className={inputClasses}
+              className={getInputClasses('subject')}
             />
+            {fieldErrors.subject && (
+              <p className={errorClasses}>
+                <AlertCircle className="w-3.5 h-3.5" />
+                {fieldErrors.subject}
+              </p>
+            )}
           </div>
 
           {/* MESSAGE */}
@@ -348,34 +445,51 @@ const RequestForm = ({ onSuccess }) => {
               value={formData.message}
               onChange={handleChange}
               rows="4"
-              required
               placeholder="Describe your request..."
-              className={`${inputClasses} resize-none`}
+              className={`${getInputClasses('message')} resize-none min-h-[100px] sm:min-h-[120px]`}
             />
+            {fieldErrors.message && (
+              <p className={errorClasses}>
+                <AlertCircle className="w-3.5 h-3.5" />
+                {fieldErrors.message}
+              </p>
+            )}
           </div>
         </>
       )}
 
-      {/* SUBMIT */}
+      {/* SUBMIT - Responsive */}
       <button
         type="submit"
         disabled={loading}
-        className="w-full h-14 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2 text-lg"
+        className={`
+          w-full min-h-[50px] sm:min-h-[56px]
+          px-4 sm:px-6 py-3 sm:py-4
+          rounded-xl sm:rounded-2xl 
+          bg-gradient-to-r from-[#0D9488] to-[#F59E0B] 
+          text-white font-bold 
+          text-sm sm:text-base md:text-lg
+          shadow-lg shadow-[#0D9488]/30 
+          hover:scale-[1.02] transition-all duration-300 
+          disabled:opacity-50 disabled:hover:scale-100 
+          flex items-center justify-center gap-2
+          touch-manipulation
+        `}
       >
         {loading ? (
           <>
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
             Submitting...
           </>
         ) : (
           <>
-            <Send className="w-5 h-5" />
+            <Send className="w-4 h-4 sm:w-5 sm:h-5" />
             Submit Request
           </>
         )}
       </button>
 
-      <p className="text-center text-xs text-gray-400">
+      <p className="text-center text-[10px] sm:text-xs text-gray-400">
         We'll respond within 24 hours
       </p>
     </form>

@@ -1,12 +1,43 @@
 // frontend/src/services/reviewService.js
 // ✅ COMPLETE FIXED - All exports properly defined
-// ✅ Added missing getPublicReviews export
-// ✅ Added missing updateReviewStatus export
+// ✅ ADDED: Response data extraction helper
+// ✅ ADDED: Retry logic for critical mutations
 // ✅ FIXED: Provider endpoints to match backend routes
 // ✅ FIXED: getPublicReviews now supports providerId filtering
 // ✅ Better error handling, auth, and debugging
 
 import API from './api';
+
+// ===============================
+// ✅ HELPER: Extract data from response
+// ===============================
+const extractData = (response) => {
+  // Handle different response structures
+  if (response?.data?.data) return response.data.data;
+  if (response?.data) return response.data;
+  return response;
+};
+
+// ===============================
+// ✅ HELPER: Retry with exponential backoff
+// ===============================
+const withRetry = async (fn, maxRetries = 3, delay = 2000) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      console.log(`⚠️ Attempt ${i + 1} failed:`, error.message);
+      if (i < maxRetries - 1) {
+        const waitTime = delay * (i + 1);
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  throw lastError;
+};
 
 // ============================================================
 // PUBLIC ENDPOINTS (No Auth)
@@ -26,7 +57,7 @@ export const getPublicReviews = async (params = {}) => {
     console.log('📤 [getPublicReviews] Fetching with params:', params);
     const response = await API.get('/public/reviews', { params });
     console.log('✅ [getPublicReviews] Response:', response.data);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get public reviews error:', error);
     throw error;
@@ -39,7 +70,7 @@ export const getPublicReviews = async (params = {}) => {
 export const getPublicReviewById = async (id) => {
   try {
     const response = await API.get(`/public/reviews/${id}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get public review error:', error);
     throw error;
@@ -52,7 +83,7 @@ export const getPublicReviewById = async (id) => {
 export const getListingReviews = async (listingId, params = {}) => {
   try {
     const response = await API.get(`/public/listings/${listingId}/reviews`, { params });
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get listing reviews error:', error);
     throw error;
@@ -67,7 +98,7 @@ export const getProviderPublicReviews = async (providerId, params = {}) => {
     console.log('📤 [getProviderPublicReviews] Fetching for provider:', providerId, params);
     const response = await API.get(`/public/providers/${providerId}/reviews`, { params });
     console.log('✅ [getProviderPublicReviews] Response:', response.data);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider public reviews error:', error);
     throw error;
@@ -80,7 +111,7 @@ export const getProviderPublicReviews = async (providerId, params = {}) => {
 export const getReviewStats = async (entityType, entityId) => {
   try {
     const response = await API.get(`/public/stats/${entityType}/${entityId}`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get review stats error:', error);
     throw error;
@@ -92,10 +123,10 @@ export const getReviewStats = async (entityType, entityId) => {
 // ============================================================
 
 /**
- * Create a new review (immediately published)
+ * Create a new review (immediately published) - WITH RETRY
  */
 export const createReview = async (data) => {
-  try {
+  return withRetry(async () => {
     console.log('========== 📤 CREATE REVIEW ==========');
     
     const token = localStorage.getItem('token');
@@ -153,33 +184,8 @@ export const createReview = async (data) => {
     });
     console.log('==========================================');
 
-    return response.data;
-  } catch (error) {
-    console.error('❌ Create review error:');
-    console.error('  - Status:', error.response?.status);
-    console.error('  - Message:', error.response?.data?.message);
-    console.error('  - Data:', error.response?.data);
-    console.error('  - Error details:', error.message);
-    console.log('==========================================');
-    
-    if (error.response?.status === 403) {
-      throw new Error('You can only review your own bookings. Please check the booking ID and try again.');
-    }
-    if (error.response?.status === 401) {
-      throw new Error('Your session has expired. Please login again.');
-    }
-    if (error.response?.status === 404) {
-      throw new Error('Booking not found. Please check the booking ID and try again.');
-    }
-    if (error.response?.status === 400) {
-      throw new Error(error.response?.data?.message || 'Invalid request. Please check your input.');
-    }
-    if (error.response?.status === 409) {
-      throw new Error('You have already reviewed this booking.');
-    }
-    
-    throw new Error(error.response?.data?.message || 'Failed to create review. Please try again.');
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
@@ -201,7 +207,7 @@ export const getMyReviews = async (params = {}) => {
       total: response.data.pagination?.total || 0
     });
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get my reviews error:', error);
     throw error;
@@ -227,7 +233,7 @@ export const getReviewById = async (id) => {
       rating: response.data.review?.rating
     });
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get review error:', error);
     throw error;
@@ -260,7 +266,7 @@ export const getReviewByBooking = async (bookingId) => {
       rating: response.data.review?.rating
     });
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     if (error.response?.status === 404) {
       console.log('ℹ️ No review found for booking:', bookingId);
@@ -283,10 +289,10 @@ export const getReviewByBooking = async (bookingId) => {
 };
 
 /**
- * Update a review (edit within window)
+ * Update a review (edit within window) - WITH RETRY
  */
 export const updateReview = async (id, data) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required');
@@ -313,27 +319,15 @@ export const updateReview = async (id, data) => {
       rating: response.data.review?.rating
     });
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Update review error:', error);
-    console.error('Error response:', error.response?.data);
-    
-    if (error.response?.status === 403) {
-      throw new Error('You can only modify your own reviews');
-    }
-    if (error.response?.status === 400) {
-      throw new Error(error.response?.data?.message || 'Invalid request. Please check your input.');
-    }
-    
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
- * Delete a review (soft delete)
+ * Delete a review (soft delete) - WITH RETRY
  */
 export const deleteReview = async (id) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required');
@@ -345,16 +339,8 @@ export const deleteReview = async (id) => {
     
     console.log('✅ Review deleted:', id);
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Delete review error:', error);
-    
-    if (error.response?.status === 403) {
-      throw new Error('You can only delete your own reviews');
-    }
-    
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
@@ -377,7 +363,7 @@ export const toggleHelpful = async (id) => {
       isHelpful: response.data.isHelpful
     });
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Toggle helpful error:', error);
     throw error;
@@ -400,7 +386,7 @@ export const reportReview = async (id, reason) => {
     
     console.log('✅ Review reported:', id);
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Report review error:', error);
     throw error;
@@ -430,7 +416,7 @@ export const getProviderReviews = async (params = {}) => {
     console.log('✅ [getProviderReviews] Response:', response.data);
     console.log(`✅ [getProviderReviews] Found ${response.data?.reviews?.length || 0} reviews`);
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider reviews error:', error);
     console.error('❌ Error response:', error.response?.data);
@@ -456,7 +442,7 @@ export const getProviderReviewStats = async () => {
     
     console.log('✅ [getProviderReviewStats] Response:', response.data);
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get provider review stats error:', error);
     console.error('❌ Error response:', error.response?.data);
@@ -465,11 +451,11 @@ export const getProviderReviewStats = async () => {
 };
 
 /**
- * Add provider reply to a review
+ * Add provider reply to a review - WITH RETRY
  * ✅ CORRECT ENDPOINT: /reviews/:id/reply
  */
 export const respondToReview = async (id, comment, token) => {
-  try {
+  return withRetry(async () => {
     if (!token) {
       throw new Error('Authentication required');
     }
@@ -488,24 +474,16 @@ export const respondToReview = async (id, comment, token) => {
     
     console.log('✅ Response added to review:', id);
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Reply to review error:', error);
-    
-    if (error.response?.status === 403) {
-      throw new Error('You can only respond to reviews for your own listings');
-    }
-    
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
- * Edit provider reply
+ * Edit provider reply - WITH RETRY
  * ✅ CORRECT ENDPOINT: /reviews/:id/reply (PUT)
  */
 export const editProviderReply = async (id, comment, token) => {
-  try {
+  return withRetry(async () => {
     if (!token) {
       throw new Error('Authentication required');
     }
@@ -524,11 +502,8 @@ export const editProviderReply = async (id, comment, token) => {
     
     console.log('✅ Response edited for review:', id);
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Edit response error:', error);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // ============================================================
@@ -553,7 +528,7 @@ export const getAdminReviews = async (params = {}) => {
       count: response.data.reviews?.length || 0
     });
     
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get admin reviews error:', error);
     throw error;
@@ -571,7 +546,7 @@ export const getReviewStatsAdmin = async () => {
     }
 
     const response = await API.get('/admin/reviews/stats');
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get review stats admin error:', error);
     throw error;
@@ -579,10 +554,10 @@ export const getReviewStatsAdmin = async () => {
 };
 
 /**
- * ✅ UPDATE REVIEW STATUS
+ * ✅ UPDATE REVIEW STATUS - WITH RETRY
  */
 export const updateReviewStatus = async (id, status, moderationNotes) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required');
@@ -600,11 +575,8 @@ export const updateReviewStatus = async (id, status, moderationNotes) => {
       status: status
     });
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Update review status error:', error);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
@@ -613,10 +585,10 @@ export const updateReviewStatus = async (id, status, moderationNotes) => {
 export const updateReviewStatusAdmin = updateReviewStatus;
 
 /**
- * Hide review (admin)
+ * Hide review (admin) - WITH RETRY
  */
 export const hideReviewAdmin = async (id, reason) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required');
@@ -628,18 +600,15 @@ export const hideReviewAdmin = async (id, reason) => {
     
     console.log('✅ Review hidden:', id);
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Hide review error:', error);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
- * Restore review (admin)
+ * Restore review (admin) - WITH RETRY
  */
 export const restoreReviewAdmin = async (id) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required');
@@ -651,18 +620,15 @@ export const restoreReviewAdmin = async (id) => {
     
     console.log('✅ Review restored:', id);
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Restore review error:', error);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 /**
- * Permanent delete review (admin)
+ * Permanent delete review (admin) - WITH RETRY
  */
 export const permanentDeleteReviewAdmin = async (id, reason) => {
-  try {
+  return withRetry(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required');
@@ -676,11 +642,8 @@ export const permanentDeleteReviewAdmin = async (id, reason) => {
     
     console.log('✅ Review permanently deleted:', id);
     
-    return response.data;
-  } catch (error) {
-    console.error('❌ Permanent delete review error:', error);
-    throw error;
-  }
+    return extractData(response);
+  }, 3, 3000);
 };
 
 // ============================================================
@@ -691,7 +654,7 @@ export const getTourReviews = async (tourId) => {
   try {
     console.warn('⚠️ getTourReviews is deprecated. Use getListingReviews instead.');
     const response = await API.get(`/public/listings/${tourId}/reviews`);
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Get tour reviews error:', error);
     throw error;
@@ -702,7 +665,7 @@ export const replyToReview = async (id, reply) => {
   try {
     console.warn('⚠️ replyToReview is deprecated. Use respondToReview instead.');
     const response = await API.post(`/reviews/${id}/reply`, { reply });
-    return response.data;
+    return extractData(response);
   } catch (error) {
     console.error('❌ Reply to review error:', error);
     throw error;

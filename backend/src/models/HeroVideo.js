@@ -1,6 +1,7 @@
 // backend/src/models/HeroVideo.js
 // ✅ NEW - Dedicated Hero Video Model
 // ✅ Simple, focused on hero video management only
+// ✅ FIXED: Increased fileSize limit to 100MB for hero videos
 
 import mongoose from "mongoose";
 
@@ -30,20 +31,24 @@ const heroVideoSchema = new mongoose.Schema(
       default: null,
     },
 
-   duration: {
-  type: Number,
-  max: 120
-},
+    duration: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 600, // Max 10 minutes (600 seconds)
+    },
+
     mimeType: {
       type: String,
-      enum: ["video/mp4", "video/webm", null],
+      enum: ["video/mp4", "video/webm", "video/quicktime", null],
       default: null,
     },
 
+    // ✅ FIXED: Increased from 20MB to 100MB
     fileSize: {
       type: Number,
       default: 0,
-      max: 20 * 1024 * 1024,
+      max: 100 * 1024 * 1024, // 100MB max
     },
 
     // ─── Display Settings ──────────────────────────────────────

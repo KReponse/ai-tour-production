@@ -1,7 +1,8 @@
 // src/components/layout/Footer.jsx
 // ✅ COMPLETE FIXED - Removed heart icon, kept text heart
 // ✅ ADDED: Developer portfolio attribution with Reponse Dev link
-// ✅ ADDED: Minor polish for text heart
+// ✅ RESPONSIVE: Mobile-optimized layout
+// ✅ FIXED: Touch targets for mobile
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -15,7 +16,6 @@ import {
   MapPin,
   Globe,
   Send,
-  Heart,
   Sparkles,
   Loader2,
   CheckCircle,
@@ -223,48 +223,52 @@ const Footer = () => {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#0D9488] rounded-full blur-3xl" />
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto px-4 lg:px-8 py-16">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
 
-        {/* TOP GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-10">
+        {/* TOP GRID - Responsive */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-8 sm:gap-10">
 
-          {/* BRAND */}
+          {/* BRAND - Responsive */}
           <div className="lg:col-span-2">
-            <div className="flex items-center gap-3 mb-5">
-              <img src={logo} alt={data.brandName} className="w-12 h-12 object-contain" />
+            <div className="flex items-center gap-3 mb-4 sm:mb-5">
+              <img 
+                src={logo} 
+                alt={data.brandName} 
+                className="w-10 h-10 sm:w-12 sm:h-12 object-contain" 
+              />
               <div>
-                <h2 className="text-2xl font-black bg-gradient-to-r from-[#0D9488] to-[#F59E0B] bg-clip-text text-transparent">
+                <h2 className="text-xl sm:text-2xl font-black bg-gradient-to-r from-[#0D9488] to-[#F59E0B] bg-clip-text text-transparent">
                   {data.brandName}
                 </h2>
-                <p className="text-sm text-gray-400">{data.brandTagline}</p>
+                <p className="text-xs sm:text-sm text-gray-400">{data.brandTagline}</p>
               </div>
             </div>
 
-            <p className="text-gray-400 leading-relaxed mb-6 max-w-md">
+            <p className="text-sm sm:text-base text-gray-400 leading-relaxed mb-4 sm:mb-6 max-w-md">
               {data.description}
             </p>
 
-            {/* CONTACT */}
-            <div className="space-y-3 text-sm text-gray-400">
+            {/* CONTACT - Responsive */}
+            <div className="space-y-2 sm:space-y-3 text-xs sm:text-sm text-gray-400">
               {data.contact?.email && (
-                <div className="flex items-center gap-3">
-                  <Mail size={16} className="text-[#0D9488]" />
-                  <a href={`mailto:${data.contact.email}`} className="hover:text-white transition">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Mail size={14} className="sm:w-4 sm:h-4 text-[#0D9488] flex-shrink-0" />
+                  <a href={`mailto:${data.contact.email}`} className="hover:text-white transition break-all">
                     {data.contact.email}
                   </a>
                 </div>
               )}
               {data.contact?.phone && (
-                <div className="flex items-center gap-3">
-                  <Phone size={16} className="text-[#F59E0B]" />
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Phone size={14} className="sm:w-4 sm:h-4 text-[#F59E0B] flex-shrink-0" />
                   <a href={`tel:${data.contact.phone}`} className="hover:text-white transition">
                     {data.contact.phone}
                   </a>
                 </div>
               )}
               {data.contact?.address && (
-                <div className="flex items-center gap-3">
-                  <MapPin size={16} className="text-[#0D9488]" />
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <MapPin size={14} className="sm:w-4 sm:h-4 text-[#0D9488] flex-shrink-0" />
                   <span>{data.contact.address}</span>
                 </div>
               )}
@@ -272,7 +276,7 @@ const Footer = () => {
 
             {/* SOCIALS - Dynamic from backend */}
             {hasSocialLinks && (
-              <div className="flex items-center gap-4 mt-6 flex-wrap">
+              <div className="flex items-center gap-3 sm:gap-4 mt-4 sm:mt-6 flex-wrap">
                 {SOCIAL_ITEMS.map(({ key, Icon, color, label }) => {
                   const url = data.socialLinks?.[key];
                   if (!url || url.trim() === '') return null;
@@ -284,11 +288,11 @@ const Footer = () => {
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="w-10 h-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center hover:bg-[#0D9488] transition-all duration-300"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center hover:bg-[#0D9488] transition-all duration-300 touch-manipulation"
                       style={{ color: 'white' }}
                       aria-label={label}
                     >
-                      <Icon size={18} />
+                      <Icon size={16} className="sm:w-[18px] sm:h-[18px]" />
                     </motion.a>
                   );
                 })}
@@ -296,15 +300,15 @@ const Footer = () => {
             )}
           </div>
 
-          {/* QUICK LINKS (Static) */}
+          {/* QUICK LINKS (Static) - Responsive */}
           <div>
-            <h3 className="text-lg font-bold mb-5 text-white">Quick Links</h3>
-            <div className="space-y-3">
+            <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 text-white">Quick Links</h3>
+            <div className="space-y-2 sm:space-y-3">
               {QUICK_LINKS.map((link, index) => (
                 <Link
                   key={index}
                   to={link.path}
-                  className="block text-gray-400 hover:text-[#0D9488] transition duration-300"
+                  className="block text-sm sm:text-base text-gray-400 hover:text-[#0D9488] transition duration-300 touch-manipulation"
                 >
                   {link.name}
                 </Link>
@@ -312,16 +316,16 @@ const Footer = () => {
             </div>
           </div>
 
-          {/* DYNAMIC SECTIONS */}
+          {/* DYNAMIC SECTIONS - Responsive */}
           {sections.map((section) => (
             <div key={section.sectionId}>
-              <h3 className="text-lg font-bold mb-5 text-white">{section.title}</h3>
-              <div className="space-y-3">
+              <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 text-white">{section.title}</h3>
+              <div className="space-y-2 sm:space-y-3">
                 {section.links?.filter(link => link.active !== false).map((link, index) => (
                   <Link
                     key={index}
                     to={link.path}
-                    className="block text-gray-400 hover:text-[#0D9488] transition duration-300"
+                    className="block text-sm sm:text-base text-gray-400 hover:text-[#0D9488] transition duration-300 touch-manipulation"
                   >
                     {link.label}
                   </Link>
@@ -331,62 +335,86 @@ const Footer = () => {
           ))}
         </div>
 
-        {/* NEWSLETTER */}
+        {/* NEWSLETTER - Responsive */}
         {data.newsletter?.enabled !== false && (
-          <div className="mt-16 rounded-3xl bg-white/5 border border-white/10 p-8 flex flex-col lg:flex-row items-center justify-between gap-6">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <Sparkles className="text-[#F59E0B]" />
-                <h3 className="text-2xl font-bold text-white">
+          <div className="mt-12 sm:mt-16 rounded-2xl sm:rounded-3xl bg-white/5 border border-white/10 p-5 sm:p-6 md:p-8 flex flex-col lg:flex-row items-center justify-between gap-4 sm:gap-6">
+            <div className="text-center lg:text-left">
+              <div className="flex items-center justify-center lg:justify-start gap-2 sm:gap-3 mb-1 sm:mb-2">
+                <Sparkles className="text-[#F59E0B] w-5 h-5 sm:w-6 sm:h-6" />
+                <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-white">
                   {data.newsletter?.title || 'Travel Smarter with AI'}
                 </h3>
               </div>
-              <p className="text-gray-400">
+              <p className="text-xs sm:text-sm text-gray-400 max-w-md">
                 {data.newsletter?.description || 'Subscribe for AI travel tips, destination updates, and exclusive Rwanda experiences.'}
               </p>
             </div>
 
             <form onSubmit={handleNewsletterSubmit} className="flex flex-col w-full lg:w-auto gap-2">
-              <div className="flex w-full lg:w-auto items-center gap-3">
+              <div className="flex flex-col xs:flex-row w-full gap-2">
                 <input
                   type="email"
                   placeholder={data.newsletter?.placeholder || 'Enter your email'}
                   value={newsletterEmail}
                   onChange={handleNewsletterChange}
-                  className={`w-full lg:w-80 h-14 px-5 rounded-2xl bg-white/10 border ${
-                    newsletterError ? 'border-red-500' : 'border-white/10'
-                  } outline-none text-white placeholder:text-gray-400 focus:border-[#0D9488] transition focus:ring-2 focus:ring-[#0D9488]/30`}
+                  className={`
+                    flex-1 min-w-[200px] 
+                    px-3 sm:px-4 
+                    py-3 sm:py-3.5 
+                    min-h-[44px] sm:min-h-[48px]
+                    rounded-xl sm:rounded-2xl 
+                    bg-white/10 border 
+                    ${newsletterError ? 'border-red-500' : 'border-white/10'}
+                    outline-none text-white placeholder:text-gray-400 
+                    focus:border-[#0D9488] transition 
+                    focus:ring-2 focus:ring-[#0D9488]/30
+                    text-sm sm:text-base
+                  `}
                   required
                   disabled={newsletterLoading || newsletterSubscribed}
                 />
                 <button
                   type="submit"
                   disabled={newsletterLoading || newsletterSubscribed}
-                  className="h-14 px-6 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] font-semibold hover:scale-105 transition duration-300 flex items-center gap-2 shadow-lg shadow-[#0D9488]/30 whitespace-nowrap disabled:opacity-50 disabled:hover:scale-100"
+                  className={`
+                    px-4 sm:px-6 
+                    py-3 sm:py-3.5 
+                    min-h-[44px] sm:min-h-[48px]
+                    rounded-xl sm:rounded-2xl 
+                    bg-gradient-to-r from-[#0D9488] to-[#F59E0B] 
+                    font-semibold 
+                    text-sm sm:text-base
+                    hover:scale-105 transition duration-300 
+                    flex items-center justify-center gap-1.5 sm:gap-2 
+                    shadow-lg shadow-[#0D9488]/30 
+                    whitespace-nowrap 
+                    disabled:opacity-50 disabled:hover:scale-100
+                    touch-manipulation
+                  `}
                 >
                   {newsletterLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : newsletterSubscribed ? (
                     <>
-                      <CheckCircle size={18} />
+                      <CheckCircle size={16} className="sm:w-[18px] sm:h-[18px]" />
                       <span>Subscribed</span>
                     </>
                   ) : (
                     <>
-                      <Send size={18} />
-                      {data.newsletter?.buttonText || 'Subscribe'}
+                      <Send size={16} className="sm:w-[18px] sm:h-[18px]" />
+                      <span>{data.newsletter?.buttonText || 'Subscribe'}</span>
                     </>
                   )}
                 </button>
               </div>
               {newsletterError && (
-                <p className="text-red-400 text-sm flex items-center gap-1">
+                <p className="text-red-400 text-xs sm:text-sm flex items-center gap-1">
                   <AlertCircle size={14} />
                   {newsletterError}
                 </p>
               )}
               {newsletterSubscribed && (
-                <p className="text-green-400 text-sm flex items-center gap-1">
+                <p className="text-green-400 text-xs sm:text-sm flex items-center gap-1">
                   <CheckCircle size={14} />
                   Thank you for subscribing! Check your email for updates.
                 </p>
@@ -395,21 +423,21 @@ const Footer = () => {
           </div>
         )}
 
-        {/* ✅ BOTTOM - Text heart (no icon), developer attribution */}
-        <div className="mt-12 pt-6 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-gray-500 text-center md:text-left">
+        {/* ✅ BOTTOM - Text heart (no icon), developer attribution - Responsive */}
+        <div className="mt-10 sm:mt-12 pt-5 sm:pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+          <p className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
             © {currentYear} {data.brandName}. {data.copyrightText || 'All rights reserved.'}
           </p>
 
-          <div className="flex items-center gap-2 text-sm text-gray-500 flex-wrap justify-center">
-            <span>Built with <span className="text-red-500 inline-block">❤️</span> in Rwanda 🇷🇼</span>
-            <span className="text-[#0D9488] ml-1">✦</span>
-            <span className="text-gray-500 ml-1">by</span>
+          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-500">
+            <span>Built with <span className="text-red-500 inline-block"></span> in Rwanda 🇷🇼</span>
+            <span className="text-[#0D9488] hidden xs:inline">✦</span>
+            <span className="text-gray-500 hidden xs:inline">by</span>
             <a
               href="https://reponse-dev.vercel.app/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#0D9488] font-medium hover:text-[#F59E0B] transition-colors duration-300 hover:underline hover:underline-offset-2 group"
+              className="text-[#0D9488] font-medium hover:text-[#F59E0B] transition-colors duration-300 hover:underline hover:underline-offset-2 group touch-manipulation"
               aria-label="Reponse Dev - Developer Portfolio"
             >
               <span className="group-hover:opacity-80 transition-opacity">Reponse Dev</span>

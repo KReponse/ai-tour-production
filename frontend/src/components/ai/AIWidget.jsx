@@ -3,6 +3,8 @@
 // ✅ Updated "Tours" → "Experiences" for user-facing text
 // ✅ Added sessionId persistence for conversation continuity
 // ✅ FIXED: Mobile positioning with bottom navbar awareness
+// ✅ RESPONSIVE: Fully mobile-optimized with proper touch targets
+// ✅ ADDED: Smooth animations and transitions
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
@@ -51,17 +53,20 @@ const AIWidget = ({ isOpen, onClose }) => {
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // ✅ Check if mobile
+  // ✅ Check device type
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
+    const checkDevice = () => {
+      const width = window.innerWidth;
+      setIsMobile(width < 640);
+      setIsTablet(width >= 640 && width < 1024);
     };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    checkDevice();
+    window.addEventListener('resize', checkDevice);
+    return () => window.removeEventListener('resize', checkDevice);
   }, []);
 
   // Quick actions
@@ -224,15 +229,15 @@ const AIWidget = ({ isOpen, onClose }) => {
     if (!content) return null;
     return content.split('\n').map((line, i) => {
       if (line.startsWith('•') || line.startsWith('-')) {
-        return <div key={i} className="flex items-start gap-2 ml-2"><span className="text-[#0D9488]">•</span><span>{line.substring(1).trim()}</span></div>;
+        return <div key={i} className="flex items-start gap-1.5 sm:gap-2 ml-1 sm:ml-2"><span className="text-[#0D9488]">•</span><span className="text-xs sm:text-sm">{line.substring(1).trim()}</span></div>;
       }
       if (line.startsWith('**') && line.endsWith('**')) {
-        return <div key={i} className="font-bold">{line.replace(/\*\*/g, '')}</div>;
+        return <div key={i} className="font-bold text-xs sm:text-sm">{line.replace(/\*\*/g, '')}</div>;
       }
       if (line.trim() === '') {
-        return <div key={i} className="h-1" />;
+        return <div key={i} className="h-0.5 sm:h-1" />;
       }
-      return <div key={i} className="mb-1">{line}</div>;
+      return <div key={i} className="mb-0.5 sm:mb-1 text-xs sm:text-sm">{line}</div>;
     });
   };
 
@@ -240,7 +245,7 @@ const AIWidget = ({ isOpen, onClose }) => {
   const getBottomOffset = () => {
     if (isMobile) {
       // ✅ 16px gap + bottom nav height + safe area
-      return `calc(${BOTTOM_NAV_HEIGHT + 16}px + env(safe-area-inset-bottom))`;
+      return `calc(${BOTTOM_NAV_HEIGHT + 12}px + env(safe-area-inset-bottom))`;
     }
     return '6rem'; // default bottom-24
   };
@@ -248,9 +253,20 @@ const AIWidget = ({ isOpen, onClose }) => {
   // ✅ Get width for mobile
   const getWidgetWidth = () => {
     if (isMobile) {
-      return 'calc(100vw - 32px)';
+      return 'calc(100vw - 24px)';
+    }
+    if (isTablet) {
+      return '380px';
     }
     return '420px';
+  };
+
+  // ✅ Get height for mobile
+  const getWidgetHeight = () => {
+    if (isMobile) {
+      return 'calc(100vh - 160px)';
+    }
+    return 'auto';
   };
 
   if (!isOpen) return null;
@@ -262,68 +278,69 @@ const AIWidget = ({ isOpen, onClose }) => {
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.8, opacity: 0, y: 20 }}
         transition={{ type: 'spring', damping: 20 }}
-        className="fixed z-50 bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
+        className="fixed z-50 bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
         style={{
-          right: isMobile ? '16px' : '24px',
+          right: isMobile ? '12px' : '24px',
           bottom: getBottomOffset(),
           width: getWidgetWidth(),
           maxWidth: '420px',
-          maxHeight: isMobile ? 'calc(100vh - 120px)' : 'auto',
+          maxHeight: getWidgetHeight(),
+          height: isMobile ? getWidgetHeight() : 'auto',
         }}
       >
-        {/* Header */}
-        <div className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B] p-4 text-white flex-shrink-0">
+        {/* Header - Responsive */}
+        <div className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B] p-3 sm:p-4 text-white flex-shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <Bot className="w-5 h-5" />
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Bot className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <h3 className="font-bold text-sm md:text-base">AI Tour Assistant</h3>
-                <div className="flex items-center gap-2 text-xs text-white/70">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <div className="min-w-0">
+                <h3 className="font-bold text-xs sm:text-sm md:text-base truncate">AI Tour Assistant</h3>
+                <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-white/70 flex-wrap">
+                  <span className="inline-flex items-center gap-0.5 sm:gap-1">
+                    <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-green-400 animate-pulse" />
                     Online
                   </span>
-                  <span>•</span>
-                  <span>24/7</span>
+                  <span className="hidden xs:inline">•</span>
+                  <span className="hidden xs:inline">24/7</span>
                   {sessionId && (
                     <>
-                      <span>•</span>
-                      <span className="text-[10px]">Session active</span>
+                      <span className="hidden sm:inline">•</span>
+                      <span className="text-[8px] sm:text-[10px] hidden sm:inline">Session active</span>
                     </>
                   )}
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
               {messages.length > 1 && (
                 <button
                   onClick={resetChat}
-                  className="p-1.5 rounded-lg hover:bg-white/20 transition"
+                  className="p-1 sm:p-1.5 rounded-lg hover:bg-white/20 transition touch-manipulation"
                   title="Reset chat"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 </button>
               )}
               <button
                 onClick={() => setIsMinimized(!isMinimized)}
-                className="p-1.5 rounded-lg hover:bg-white/20 transition"
+                className="p-1 sm:p-1.5 rounded-lg hover:bg-white/20 transition touch-manipulation"
               >
-                {isMinimized ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                {isMinimized ? <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
               </button>
               <Link
                 to="/ai-chat"
-                className="p-1.5 rounded-lg hover:bg-white/20 transition"
+                className="p-1 sm:p-1.5 rounded-lg hover:bg-white/20 transition touch-manipulation"
                 title="Open Full Chat"
               >
-                <ExternalLink className="w-4 h-4" />
+                <ExternalLink className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               </Link>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-white/20 transition"
+                className="p-1 sm:p-1.5 rounded-lg hover:bg-white/20 transition touch-manipulation"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
           </div>
@@ -331,42 +348,45 @@ const AIWidget = ({ isOpen, onClose }) => {
 
         {!isMinimized && (
           <>
-            {/* Tabs */}
+            {/* Tabs - Responsive */}
             <div className="flex border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
               <button
                 onClick={() => setActiveTab('chat')}
-                className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2 sm:py-2.5 text-xs sm:text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1 sm:gap-2 ${
                   activeTab === 'chat'
                     ? 'text-[#0D9488] border-b-2 border-[#0D9488]'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
+                } touch-manipulation`}
               >
-                <MessageCircle className="w-4 h-4" />
-                Chat
+                <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>Chat</span>
               </button>
               <button
                 onClick={() => setActiveTab('planner')}
-                className={`flex-1 py-2.5 text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2 sm:py-2.5 text-xs sm:text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1 sm:gap-2 ${
                   activeTab === 'planner'
                     ? 'text-[#0D9488] border-b-2 border-[#0D9488]'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
+                } touch-manipulation`}
               >
-                <Sparkles className="w-4 h-4" />
-                Planner
+                <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>Planner</span>
               </button>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 flex flex-col overflow-hidden" style={{ height: isMobile ? 'calc(100vh - 280px)' : '400px' }}>
+            {/* Content - Responsive height */}
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ 
+              height: isMobile ? 'calc(100vh - 280px)' : '400px',
+              minHeight: isMobile ? '300px' : '350px'
+            }}>
               {activeTab === 'chat' ? (
                 <>
-                  {/* Messages */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth">
+                  {/* Messages - Responsive padding */}
+                  <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 sm:space-y-3 scroll-smooth">
                     {messages.map((msg) => {
                       if (msg.role === 'suggestion') {
                         return (
-                          <div key={msg.id} className="flex flex-wrap gap-2 justify-center p-2">
+                          <div key={msg.id} className="flex flex-wrap gap-1.5 sm:gap-2 justify-center p-1.5 sm:p-2">
                             {msg.suggestions?.map((suggestion, idx) => (
                               <button
                                 key={idx}
@@ -374,7 +394,7 @@ const AIWidget = ({ isOpen, onClose }) => {
                                   setInput(suggestion);
                                   setTimeout(() => handleSend(suggestion), 100);
                                 }}
-                                className="px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs hover:bg-[#0D9488]/20 hover:text-[#0D9488] transition"
+                                className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-[10px] sm:text-xs hover:bg-[#0D9488]/20 hover:text-[#0D9488] transition touch-manipulation min-h-[32px]"
                               >
                                 {suggestion}
                               </button>
@@ -389,19 +409,19 @@ const AIWidget = ({ isOpen, onClose }) => {
                           className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
                         >
                           <div
-                            className={`max-w-[85%] rounded-2xl p-3 ${
+                            className={`max-w-[85%] rounded-xl sm:rounded-2xl p-2 sm:p-3 ${
                               msg.role === 'user'
                                 ? 'bg-[#0D9488] text-white'
                                 : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
                             }`}
                           >
-                            <div className="text-sm whitespace-pre-wrap">
+                            <div className="whitespace-pre-wrap break-words">
                               {formatMessage(msg.content)}
                             </div>
-                            <div className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
+                            <div className={`text-[8px] sm:text-[10px] mt-0.5 sm:mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
                               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               {msg.metadata?.isFollowUp && (
-                                <span className="ml-2 text-[8px] opacity-50">(follow-up)</span>
+                                <span className="ml-1 sm:ml-2 text-[6px] sm:text-[8px] opacity-50">(follow-up)</span>
                               )}
                             </div>
                           </div>
@@ -410,11 +430,11 @@ const AIWidget = ({ isOpen, onClose }) => {
                     })}
                     {typing && (
                       <div className="flex justify-start animate-fade-in">
-                        <div className="bg-gray-100 dark:bg-gray-700 rounded-2xl p-3">
-                          <div className="flex gap-1">
-                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        <div className="bg-gray-100 dark:bg-gray-700 rounded-xl sm:rounded-2xl p-2 sm:p-3">
+                          <div className="flex gap-0.5 sm:gap-1">
+                            <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                           </div>
                         </div>
                       </div>
@@ -424,32 +444,33 @@ const AIWidget = ({ isOpen, onClose }) => {
 
                   {/* Error Message */}
                   {error && (
-                    <div className="px-4 pb-2 flex-shrink-0">
-                      <div className="p-2 rounded-xl bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4" />
-                        {error}
+                    <div className="px-3 sm:px-4 pb-1.5 sm:pb-2 flex-shrink-0">
+                      <div className="p-1.5 sm:p-2 rounded-xl bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[10px] sm:text-xs flex items-center gap-1.5 sm:gap-2">
+                        <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                        <span className="break-words">{error}</span>
                       </div>
                     </div>
                   )}
 
-                  {/* Quick Actions */}
+                  {/* Quick Actions - Responsive */}
                   {messages.length <= 2 && (
-                    <div className="px-4 pb-2 flex-shrink-0">
-                      <p className="text-[10px] text-gray-400 mb-2 flex items-center gap-1">
-                        <HelpCircle className="w-3 h-3" />
+                    <div className="px-3 sm:px-4 pb-1.5 sm:pb-2 flex-shrink-0">
+                      <p className="text-[8px] sm:text-[10px] text-gray-400 mb-1 sm:mb-2 flex items-center gap-0.5 sm:gap-1">
+                        <HelpCircle className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                         Try asking:
                       </p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1 sm:gap-2">
                         {quickActions.map((action) => {
                           const Icon = action.icon;
                           return (
                             <button
                               key={action.label}
                               onClick={() => handleQuickAction(action.action)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${action.color} hover:scale-105 transition`}
+                              className={`flex items-center gap-0.5 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-xs font-medium ${action.color} hover:scale-105 transition touch-manipulation min-h-[32px]`}
                             >
-                              <Icon className="w-3 h-3" />
-                              {action.label}
+                              <Icon className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                              <span className="hidden xs:inline">{action.label}</span>
+                              <span className="inline xs:hidden">{action.label.split(' ')[0]}</span>
                             </button>
                           );
                         })}
@@ -457,43 +478,43 @@ const AIWidget = ({ isOpen, onClose }) => {
                     </div>
                   )}
 
-                  {/* Input */}
-                  <div className="p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
-                    <div className="flex items-center gap-2">
+                  {/* Input - Responsive */}
+                  <div className="p-2 sm:p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                       <input
                         ref={inputRef}
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                        placeholder="Ask AI Tour..."
-                        className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none dark:text-white min-h-[44px]"
+                        placeholder="Ask AI..."
+                        className="flex-1 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs sm:text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none dark:text-white min-h-[40px] sm:min-h-[44px]"
                         disabled={loading}
                       />
                       <button
                         onClick={() => handleSend()}
                         disabled={!input.trim() || loading}
-                        className="w-10 h-10 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white flex items-center justify-center disabled:opacity-50 hover:scale-105 transition shadow-lg shadow-[#0D9488]/30 min-w-[44px] min-h-[44px]"
+                        className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white flex items-center justify-center disabled:opacity-50 hover:scale-105 transition shadow-lg shadow-[#0D9488]/30 min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] touch-manipulation"
                       >
                         {loading ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
                         ) : (
-                          <Send className="w-4 h-4" />
+                          <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         )}
                       </button>
                     </div>
-                    <p className="text-[10px] text-gray-400 text-center mt-1.5">
+                    <p className="text-[8px] sm:text-[10px] text-gray-400 text-center mt-1 sm:mt-1.5">
                       Powered by AI • Responses are AI-generated {sessionId && '• Session active'}
                     </p>
                   </div>
                 </>
               ) : (
-                // Planner Tab
-                <div className="flex-1 p-4 overflow-y-auto">
-                  <div className="bg-gray-50 dark:bg-gray-800 rounded-2xl p-4 text-center">
-                    <Sparkles className="w-12 h-12 text-[#0D9488] mx-auto mb-3" />
-                    <h3 className="font-bold text-[#374151] dark:text-white">Plan Your Trip</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                // Planner Tab - Responsive
+                <div className="flex-1 p-3 sm:p-4 overflow-y-auto">
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-center">
+                    <Sparkles className="w-10 h-10 sm:w-12 sm:h-12 text-[#0D9488] mx-auto mb-2 sm:mb-3" />
+                    <h3 className="font-bold text-sm sm:text-base text-[#374151] dark:text-white">Plan Your Trip</h3>
+                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5 sm:mt-1">
                       Answer a few questions and let AI create your perfect itinerary.
                     </p>
                     <button
@@ -502,38 +523,38 @@ const AIWidget = ({ isOpen, onClose }) => {
                         setInput('I want to plan a trip to Rwanda. Can you help me?');
                         setTimeout(() => handleSend(), 200);
                       }}
-                      className="mt-4 px-4 py-2 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white text-sm font-medium hover:scale-105 transition shadow-lg shadow-[#0D9488]/30"
+                      className="mt-3 sm:mt-4 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white text-xs sm:text-sm font-medium hover:scale-105 transition shadow-lg shadow-[#0D9488]/30 touch-manipulation min-h-[36px] sm:min-h-[44px]"
                     >
                       Start Planning
                     </button>
                   </div>
 
-                  <div className="mt-4 space-y-3">
-                    <div className="p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2 text-sm">
-                        <MapPin className="w-4 h-4 text-[#0D9488]" />
+                  <div className="mt-3 sm:mt-4 space-y-2 sm:space-y-3">
+                    <div className="p-2.5 sm:p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                        <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0D9488] flex-shrink-0" />
                         <span className="font-medium">Top Destinations</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">Volcanoes, Kigali, Lake Kivu, Nyungwe</p>
+                      <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1">Volcanoes, Kigali, Lake Kivu, Nyungwe</p>
                     </div>
-                    <div className="p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Calendar className="w-4 h-4 text-[#F59E0B]" />
+                    <div className="p-2.5 sm:p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                        <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#F59E0B] flex-shrink-0" />
                         <span className="font-medium">Best Time to Visit</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">June - September (Dry Season)</p>
+                      <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1">June - September (Dry Season)</p>
                     </div>
-                    <div className="p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center gap-2 text-sm">
-                        <DollarSign className="w-4 h-4 text-[#0D9488]" />
+                    <div className="p-2.5 sm:p-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                        <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#0D9488] flex-shrink-0" />
                         <span className="font-medium">Budget Tips</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">Gorilla trekking: $1500, Safari: $800+</p>
+                      <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1">Gorilla trekking: $1500, Safari: $800+</p>
                     </div>
                   </div>
 
-                  <div className="mt-4 p-3 rounded-xl bg-[#0D9488]/5 border border-[#0D9488]/10">
-                    <p className="text-xs text-gray-400 text-center">
+                  <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 rounded-xl bg-[#0D9488]/5 border border-[#0D9488]/10">
+                    <p className="text-[9px] sm:text-xs text-gray-400 text-center">
                       💡 AI will create a personalized plan based on your preferences
                     </p>
                   </div>

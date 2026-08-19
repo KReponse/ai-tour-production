@@ -1,5 +1,11 @@
 // src/pages/admin/FooterSettings.jsx
-// ✅ UPDATED - Added Social Media settings
+// ✅ COMPLETE FIXED - Mobile Responsive Optimizations
+// ✅ Fixed: Header buttons on mobile (wrap, text-size, hidden labels)
+// ✅ Fixed: Social media grid on mobile
+// ✅ Fixed: Link editing on mobile (flex-col)
+// ✅ Fixed: Contact info grid on mobile
+// ✅ Fixed: Spacing and padding for mobile
+// ✅ Fixed: Touch targets for mobile
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -198,21 +204,21 @@ const FooterSettings = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
         <div className="relative w-16 h-16">
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">Loading footer settings...</p>
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Loading footer settings...</p>
       </div>
     );
   }
 
   if (!footerData) {
     return (
-      <div className="bg-white dark:bg-gray-900 rounded-3xl p-12 text-center border border-gray-200 dark:border-gray-800">
+      <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 sm:p-12 text-center border border-gray-200 dark:border-gray-800 mx-4 sm:mx-0">
         <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-2xl font-bold text-[#374151] dark:text-white">Failed to load footer data</h2>
+        <h2 className="text-xl sm:text-2xl font-bold text-[#374151] dark:text-white">Failed to load footer data</h2>
         <button
           onClick={fetchFooterData}
           className="mt-4 px-6 py-3 rounded-xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/90 transition"
@@ -224,59 +230,68 @@ const FooterSettings = () => {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8 px-4 sm:px-0">
+
+      {/* ─── HEADER - Mobile Responsive ─── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-3xl font-black text-[#374151] dark:text-white">Footer Settings</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">Manage your website footer content</p>
+          <h1 className="text-2xl sm:text-3xl font-black text-[#374151] dark:text-white">
+            Footer Settings
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Manage your website footer content
+          </p>
         </div>
-        <div className="flex gap-3">
+
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             onClick={() => setPreviewMode(!previewMode)}
-            className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-[#0D9488] hover:text-[#0D9488] transition font-medium flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-[#0D9488] hover:text-[#0D9488] transition font-medium flex items-center gap-1.5 text-xs sm:text-sm"
           >
             <Eye className="w-4 h-4" />
-            {previewMode ? 'Edit Mode' : 'Preview'}
+            <span className="hidden xs:inline">{previewMode ? 'Edit' : 'Preview'}</span>
           </button>
+
           <button
             onClick={handleReset}
-            className="px-4 py-2.5 rounded-xl border-2 border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition font-medium"
+            className="px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border-2 border-red-500 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition font-medium text-xs sm:text-sm"
           >
-            <RefreshCw className="w-4 h-4 inline mr-2" />
-            Reset
+            <RefreshCw className="w-4 h-4 inline mr-1 sm:mr-2" />
+            <span className="hidden xs:inline">Reset</span>
           </button>
+
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition disabled:opacity-50 flex items-center gap-2"
+            className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition disabled:opacity-50 flex items-center gap-2 text-xs sm:text-sm"
           >
             {saving ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Save className="w-4 h-4" />
             )}
-            {saving ? 'Saving...' : 'Save Changes'}
+            <span className="hidden xs:inline">{saving ? 'Saving...' : 'Save Changes'}</span>
+            <span className="inline xs:hidden">{saving ? '...' : 'Save'}</span>
           </button>
         </div>
       </div>
 
       {/* ─── SOCIAL MEDIA SETTINGS ─── */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">
             <Share2 className="w-5 h-5 text-[#0D9488]" />
-            <h2 className="text-xl font-bold text-[#374151] dark:text-white">Social Media</h2>
+            <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white">Social Media</h2>
             {hasAnySocialLinks() && (
               <span className="text-xs bg-[#0D9488]/10 text-[#0D9488] px-2 py-0.5 rounded-full">
                 Active
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-400">Links will appear in the footer</p>
+          <p className="text-xs text-gray-400">Links appear in footer</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           {SOCIAL_PLATFORMS.map((platform) => {
             const Icon = platform.icon;
             const value = footerData.socialLinks?.[platform.key] || '';
@@ -285,7 +300,7 @@ const FooterSettings = () => {
             return (
               <div
                 key={platform.key}
-                className={`p-4 rounded-xl border transition-all duration-300 ${
+                className={`p-3 sm:p-4 rounded-xl border transition-all duration-300 ${
                   isActive
                     ? 'border-[#0D9488] bg-[#0D9488]/5 dark:bg-[#0D9488]/10'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
@@ -293,7 +308,7 @@ const FooterSettings = () => {
               >
                 <div className="flex items-center gap-3 mb-2">
                   <div
-                    className="w-9 h-9 rounded-lg flex items-center justify-center"
+                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                     style={{ backgroundColor: isActive ? platform.color : 'transparent' }}
                   >
                     <Icon
@@ -330,7 +345,7 @@ const FooterSettings = () => {
                       href={value}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="w-10 h-10 rounded-lg bg-[#0D9488]/10 text-[#0D9488] hover:bg-[#0D9488] hover:text-white transition flex items-center justify-center flex-shrink-0"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-[#0D9488]/10 text-[#0D9488] hover:bg-[#0D9488] hover:text-white transition flex items-center justify-center flex-shrink-0"
                     >
                       <Globe className="w-4 h-4" />
                     </a>
@@ -352,7 +367,7 @@ const FooterSettings = () => {
 
         {/* Social Preview */}
         {hasAnySocialLinks() && (
-          <div className="mt-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+          <div className="mt-4 p-3 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
             <p className="text-xs text-gray-500 mb-2">Preview:</p>
             <div className="flex flex-wrap gap-2">
               {SOCIAL_PLATFORMS.map((platform) => {
@@ -368,7 +383,7 @@ const FooterSettings = () => {
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 hover:border-[#0D9488] transition text-xs"
                   >
                     <Icon className="w-3.5 h-3.5" style={{ color: platform.color }} />
-                    <span className="text-gray-600 dark:text-gray-300">{platform.label}</span>
+                    <span className="text-gray-600 dark:text-gray-300 hidden sm:inline">{platform.label}</span>
                   </a>
                 );
               })}
@@ -378,9 +393,9 @@ const FooterSettings = () => {
       </div>
 
       {/* ─── BRAND INFO ─── */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4">Brand Information</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-sm">
+        <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white mb-4">Brand Information</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
               Brand Name
@@ -418,9 +433,9 @@ const FooterSettings = () => {
       </div>
 
       {/* ─── CONTACT INFO ─── */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4">Contact Information</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-sm">
+        <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white mb-4">Contact Information</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
               <Mail className="w-4 h-4 inline mr-1 text-[#0D9488]" />
@@ -445,7 +460,7 @@ const FooterSettings = () => {
               className="w-full h-11 px-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
             />
           </div>
-          <div>
+          <div className="sm:col-span-2 lg:col-span-1">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
               <MapPin className="w-4 h-4 inline mr-1 text-[#0D9488]" />
               Address
@@ -461,12 +476,14 @@ const FooterSettings = () => {
       </div>
 
       {/* ─── FOOTER SECTIONS ─── */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4">Footer Sections</h2>
+      <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-sm">
+        <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white mb-4">Footer Sections</h2>
         {footerData.sections?.map((section) => (
-          <div key={section.sectionId} className="mb-6 last:mb-0 p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-[#374151] dark:text-white">{section.title}</h3>
+          <div key={section.sectionId} className="mb-6 last:mb-0 p-3 sm:p-4 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h3 className="font-bold text-[#374151] dark:text-white text-sm sm:text-base">
+                {section.title}
+              </h3>
               <button
                 onClick={() => addLink(section.sectionId)}
                 className="px-3 py-1.5 rounded-lg bg-[#0D9488] text-white text-sm hover:bg-[#0D9488]/80 transition flex items-center gap-1"
@@ -477,24 +494,24 @@ const FooterSettings = () => {
             </div>
             <div className="space-y-2">
               {section.links?.map((link, index) => (
-                <div key={index} className="flex items-center gap-3">
+                <div key={index} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     value={link.label || ''}
                     onChange={(e) => updateLink(section.sectionId, index, 'label', e.target.value)}
                     placeholder="Label"
-                    className="flex-1 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
+                    className="flex-1 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition min-w-[80px]"
                   />
                   <input
                     type="text"
                     value={link.path || ''}
                     onChange={(e) => updateLink(section.sectionId, index, 'path', e.target.value)}
                     placeholder="/path"
-                    className="flex-1 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
+                    className="flex-1 h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition min-w-[80px]"
                   />
                   <button
                     onClick={() => removeLink(section.sectionId, index)}
-                    className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/20 text-red-500 hover:bg-red-200 dark:hover:bg-red-900/40 transition flex items-center justify-center flex-shrink-0"
+                    className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/20 text-red-500 hover:bg-red-200 dark:hover:bg-red-900/40 transition flex items-center justify-center flex-shrink-0 self-end sm:self-auto"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -506,9 +523,9 @@ const FooterSettings = () => {
       </div>
 
       {/* ─── NEWSLETTER SETTINGS ─── */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4">Newsletter</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-sm">
+        <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white mb-4">Newsletter</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
               Title
@@ -555,8 +572,8 @@ const FooterSettings = () => {
       </div>
 
       {/* ─── COPYRIGHT ─── */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4">Copyright</h2>
+      <div className="bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 shadow-sm">
+        <h2 className="text-lg sm:text-xl font-bold text-[#374151] dark:text-white mb-4">Copyright</h2>
         <input
           type="text"
           value={footerData.copyrightText || ''}
