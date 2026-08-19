@@ -1,10 +1,13 @@
 // backend/src/controllers/heroController.js
-// ✅ FIXED - Uses Media Service for Cloudinary uploads
+// ✅ COMPLETE FIXED - Uses Media Service for Cloudinary uploads
 // ✅ All hero videos now stored as Cloudinary URLs (secure_url)
+// ✅ ADDED: Signed upload endpoint for direct browser uploads
+// ✅ ADDED: createHeroVideoFromCloudinary for metadata-only saves
 
 import HeroVideo from "../models/HeroVideo.js";
 import Listing from "../models/Listing.js";
 import { getMediaService } from "../services/media/index.js";
+import { v2 as cloudinary } from "cloudinary";
 
 // ===============================
 // ✅ HELPER: Upload video to Cloudinary
@@ -229,6 +232,142 @@ export const createHeroVideo = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+// ============================================================
+// ✅ CREATE HERO VIDEO FROM CLOUDINARY (Direct Upload)
+// ============================================================
+export const createHeroVideoFromCloudinary = async (req, res) => {
+  try {
+    const { 
+      title, 
+      description, 
+      listingId, 
+      priority = 0, 
+      isActive = true,
+      videoUrl,
+      thumbnail,
+      duration,
+      mimeType,
+      fileSize,
+      publicId,
+    } = req.body;
+
+    // Validate required fields
+    if (!videoUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "videoUrl is required",
+      });
+    }
+
+    // If listingId is provided, validate it exists
+    if (listingId) {
+      const listing = await Listing.findById(listingId);
+      if (!listing) {
+        return res.status(404).json({
+          success: false,
+          message: "Listing not found",
+        });
+      }
+    }
+
+    // Generate thumbnail if not provided
+    let thumbnailUrl = thumbnail || null;
+    if (!thumbnailUrl && publicId) {
+      try {
+        const mediaService = getMediaService();
+        thumbnailUrl = mediaService.getVideoThumbnail(publicId, {
+          time: 1,
+          width: 1280,
+          height: 720,
+        });
+      } catch (error) {
+        console.warn("⚠️ Thumbnail generation failed:", error.message);
+      }
+    }
+
+    const heroVideo = new HeroVideo({
+      title: title || "",
+      description: description || "",
+      videoUrl: videoUrl, // Cloudinary secure_url from direct upload
+      thumbnail: thumbnailUrl || null,
+      duration: duration || 0,
+      mimeType: mimeType || "video/mp4",
+      fileSize: fileSize || 0,
+      priority: parseInt(priority) || 0,
+      isActive: isActive !== false,
+      listingId: listingId || null,
+      createdBy: req.user._id,
+    });
+
+    await heroVideo.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Hero video created successfully",
+      data: heroVideo,
+    });
+  } catch (error) {
+    console.error("❌ Create hero video from Cloudinary error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// ============================================================
+// ✅ GET SIGNED UPLOAD PARAMS (Direct Browser Upload)
+// ============================================================
+export const getSignedUploadParams = async (req, res) => {
+  try {
+    const timestamp = Math.round(new Date().getTime() / 1000);
+    const folder = 'ai-tour/hero-videos';
+    const publicId = `hero-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    
+    // Check if Cloudinary is configured
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      return res.status(500).json({
+        success: false,
+        message: "Cloudinary is not configured",
+      });
+    }
+
+    // Generate signature
+    const signature = cloudinary.utils.api_sign_request(
+      {
+        timestamp,
+        folder,
+        resource_type: 'video',
+        public_id: publicId,
+      },
+      apiSecret
+    );
+
+    res.json({
+      success: true,
+      data: {
+        cloudName,
+        apiKey,
+        timestamp,
+        folder,
+        signature,
+        publicId,
+        resourceType: 'video',
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error generating signed upload params:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to generate upload parameters",
     });
   }
 };
