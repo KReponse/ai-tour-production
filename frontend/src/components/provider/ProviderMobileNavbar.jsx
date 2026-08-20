@@ -4,6 +4,7 @@
 // ✅ ADDED: Messages icon with unread badge for provider chat
 // ✅ RESPONSIVE: Mobile-optimized with proper touch targets (44px+)
 // ✅ FIXED: Touch-friendly buttons for mobile
+// ✅ FIXED: Import from conversationService instead of chatService
 
 import React, {
   useState,
@@ -21,7 +22,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import notificationService from "../../services/notification.service";
-import { getTotalUnreadCount } from "../../services/chatService";
+// ✅ FIXED: Import from conversationService
+import { getTotalUnreadCount } from "../../services/conversationService";
 import logo from "../../assets/images/logo.png";
 
 // ===============================

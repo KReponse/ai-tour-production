@@ -2,12 +2,10 @@
 // ============================================================
 // Cloudinary Storage Provider - Production Media Storage
 // ============================================================
-// FIXES:
-// ✅ Increased timeout to 5 minutes for video uploads
-// ✅ Added retry logic with exponential backoff
+// ✅ Increased timeout to 10 minutes for large video uploads
 // ✅ Added chunked upload for large files
+// ✅ Added retry logic with exponential backoff
 // ✅ Better error handling and logging
-// ============================================================
 
 import { v2 as cloudinary } from "cloudinary";
 import streamifier from "streamifier";
@@ -24,11 +22,11 @@ cloudinary.config({
   api_key: mediaConfig.cloudinary.apiKey,
   api_secret: mediaConfig.cloudinary.apiSecret,
   secure: true,
-  timeout: 300000, // 5 minutes
+  timeout: 600000, // 10 minutes
 });
 
 // ============================================================
-// UPLOAD FILE TO CLOUDINARY WITH RETRY
+// UPLOAD FILE TO CLOUDINARY WITH RETRY AND CHUNKING
 // ============================================================
 
 const uploadToCloudinary = async (fileData, options = {}, retries = 3) => {
@@ -44,7 +42,7 @@ const uploadToCloudinary = async (fileData, options = {}, retries = 3) => {
           overwrite: options.overwrite !== false,
           invalidate: options.invalidate !== false,
           transformation: options.transformation || [],
-          timeout: 300000, // 5 minutes
+          timeout: 600000, // 10 minutes
           chunk_size: 20000000, // 20MB chunks for large files
           ...(options.extraOptions || {}),
         };
@@ -52,7 +50,7 @@ const uploadToCloudinary = async (fileData, options = {}, retries = 3) => {
         // ✅ Add timeout handler
         let timeoutId = setTimeout(() => {
           uploadStream.destroy(new Error('Upload timeout'));
-        }, 300000);
+        }, 600000);
 
         const uploadStream = cloudinary.uploader.upload_stream(
           uploadOptions,
@@ -267,7 +265,7 @@ export const cloudinaryStorageProvider = {
       overwrite: true,
       invalidate: true,
       transformation: Array.isArray(transformation) ? transformation : [],
-      timeout: 300000, // 5 minutes
+      timeout: 600000, // 10 minutes
       chunk_size: 20000000, // 20MB chunks
     };
 

@@ -1,6 +1,6 @@
 // frontend/src/services/heroService.js
-// ✅ NEW - Hero Video API Service
-// ✅ Added increased timeout for video uploads
+// ✅ COMPLETE FIXED - Uses backend-only upload (no direct Cloudinary)
+// ✅ Removed direct upload/signature functions
 
 import API from "./api";
 
@@ -46,7 +46,7 @@ export const getHeroVideoById = async (id) => {
 };
 
 // ============================================================
-// ✅ CREATE HERO VIDEO (with increased timeout)
+// ✅ CREATE HERO VIDEO (Backend upload with progress)
 // ============================================================
 export const createHeroVideo = async (data, onProgress) => {
   try {
@@ -54,7 +54,7 @@ export const createHeroVideo = async (data, onProgress) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
-      timeout: 180000, // ✅ 3 minutes for video upload
+      timeout: 600000, // 10 minutes for large video uploads
       onUploadProgress: (progress) => {
         if (typeof onProgress === "function") {
           const percent = Math.round((progress.loaded * 100) / progress.total);
@@ -83,7 +83,7 @@ export const updateHeroVideo = async (id, data) => {
 };
 
 // ============================================================
-// ✅ UPLOAD/REPLACE HERO VIDEO (with increased timeout)
+// ✅ UPLOAD/REPLACE HERO VIDEO (Backend upload with progress)
 // ============================================================
 export const uploadHeroVideoFile = async (id, file, onProgress) => {
   try {
@@ -94,7 +94,7 @@ export const uploadHeroVideoFile = async (id, file, onProgress) => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
-      timeout: 180000, // ✅ 3 minutes for video upload
+      timeout: 600000, // 10 minutes for large video uploads
       onUploadProgress: (progress) => {
         if (typeof onProgress === "function") {
           const percent = Math.round((progress.loaded * 100) / progress.total);
@@ -146,4 +146,16 @@ export const deleteHeroVideo = async (id) => {
     console.error("❌ Delete hero video error:", error);
     throw error;
   }
+};
+
+export default {
+  getActiveHeroVideos,
+  getAllHeroVideos,
+  getHeroVideoById,
+  createHeroVideo,
+  uploadHeroVideoFile,
+  updateHeroVideo,
+  toggleHeroVideo,
+  updateHeroVideoPriority,
+  deleteHeroVideo,
 };

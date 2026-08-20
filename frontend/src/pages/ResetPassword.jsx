@@ -1,7 +1,8 @@
 // src/pages/ResetPassword.jsx
+// ✅ FIXED: Use useSearchParams to read token from query string
 
-import React, { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Lock, Eye, EyeOff, CheckCircle, Loader2, Shield, Sparkles } from "lucide-react";
 import axios from "axios";
 
@@ -18,10 +19,13 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api/auth";
 
 const ResetPassword = () => {
   const navigate = useNavigate();
-  const { token } = useParams();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token');
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [tokenValid, setTokenValid] = useState(null);
+  const [checkingToken, setCheckingToken] = useState(true);
 
   const [formData, setFormData] = useState({
     password: "",
@@ -31,6 +35,36 @@ const ResetPassword = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
+
+  // ─── Validate Token ──────────────────────────────────────────
+  useEffect(() => {
+    const validateToken = async () => {
+      if (!token) {
+        setTokenValid(false);
+        setCheckingToken(false);
+        setError("Invalid or missing reset token");
+        return;
+      }
+
+      try {
+        // Optional: Validate token before showing form
+        const response = await axios.get(`${API}/validate-reset-token/${token}`);
+        if (response.data.success) {
+          setTokenValid(true);
+        } else {
+          setTokenValid(false);
+          setError("This reset link is invalid or has expired");
+        }
+      } catch (err) {
+        setTokenValid(false);
+        setError(err.response?.data?.message || "Invalid or expired reset token");
+      } finally {
+        setCheckingToken(false);
+      }
+    };
+
+    validateToken();
+  }, [token]);
 
   const validatePassword = (password) => {
     return password.length >= 8;
@@ -79,8 +113,45 @@ const ResetPassword = () => {
     }
   };
 
+  // ─── Checking Token ──────────────────────────────────────────
+  if (checkingToken) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center px-4">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-[#0D9488] animate-spin mx-auto" />
+          <p className="text-gray-500 dark:text-gray-400 mt-4">Validating reset link...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Invalid Token ────────────────────────────────────────────
+  if (tokenValid === false) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center px-4">
+        <div className="text-center max-w-md w-full">
+          <div className="w-20 h-20 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Shield className="w-10 h-10 text-red-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-[#374151] dark:text-white">
+            Invalid Reset Link
+          </h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">
+            {error || "This password reset link is invalid or has expired."}
+          </p>
+          <button
+            onClick={() => navigate("/forgot-password")}
+            className="mt-6 px-6 py-3 rounded-2xl bg-[#0D9488] text-white font-bold hover:bg-[#0f766e] transition"
+          >
+            Request New Link
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   /* =========================
-  SUCCESS SCREEN - Updated with AI Tour colors
+  SUCCESS SCREEN
   ========================= */
   if (submitted) {
     return (
@@ -109,7 +180,7 @@ const ResetPassword = () => {
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
-        {/* HEADER - Updated with AI Tour colors */}
+        {/* HEADER */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center mx-auto mb-4 shadow-lg shadow-[#0D9488]/30">
             <Shield className="w-8 h-8 text-white" />
@@ -125,7 +196,7 @@ const ResetPassword = () => {
         {/* CARD */}
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 md:p-8 shadow-xl">
 
-          {/* ERROR - Updated colors */}
+          {/* ERROR */}
           {error && (
             <div className="mb-4 text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 rounded-xl">
               {error}
@@ -236,7 +307,7 @@ const ResetPassword = () => {
               </div>
             )}
 
-            {/* BUTTON - Updated with AI Tour colors */}
+            {/* BUTTON */}
             <button
               type="submit"
               disabled={loading}

@@ -4,6 +4,7 @@
 // ✅ Added progress tracking for uploads
 // ✅ Added retry logic
 // ✅ Added draft support with useDraftStorage
+// ✅ FIXED: setUploadProgress is not defined - removed reference
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -748,9 +749,9 @@ const AddListing = () => {
       const response = await createListing(listingData);
 
       if (response && response.success) {
+        // ✅ FIXED: setUploadProgress removed - use setSubmitStatus instead
         setSubmitStatus('Listing created successfully! 🎉');
         clearDraftOnSuccess();
-        setUploadProgress(100);
         setTimeout(() => navigate('/provider/listings'), 600);
       } else {
         throw new Error(response?.message || 'Failed to create listing');
