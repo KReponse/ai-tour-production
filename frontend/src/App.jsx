@@ -10,6 +10,7 @@
 // ✅ ADDED: Admin Chat route
 // ✅ ADDED: Provider Chat route
 // ✅ FIXED: ResetPassword and VerifyEmail use query parameters (?token=)
+// ✅ ADDED: /messages routes for backward compatibility
 // ❌ REMOVED: Featured Experiences (completely removed)
 
 import React, { Suspense, lazy, useState, useEffect } from 'react';
@@ -269,6 +270,10 @@ function App() {
             {/* ✅ CHAT ROUTES - Real-time messaging */}
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
             <Route path="/chat/:conversationId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+
+            {/* ✅ MESSAGES ROUTES - Alias for /chat (backward compatibility) */}
+            <Route path="/messages" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+            <Route path="/messages/:conversationId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
           </Route>
 
           {/* ================= PROVIDER STATUS ================= */}

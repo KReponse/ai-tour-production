@@ -1,5 +1,6 @@
 // backend/src/controllers/conversationController.js
 // ✅ COMPLETE FIXED - All functions properly exported
+// ✅ FIXED: sendMessage uses req.params.id instead of req.body.conversationId
 
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
@@ -249,10 +250,13 @@ export const createConversation = async (req, res) => {
 };
 
 // ─── SEND MESSAGE ───────────────────────────────────────────────
+// ✅ FIXED: Use req.params.id instead of req.body.conversationId
 
 export const sendMessage = async (req, res) => {
   try {
-    const { conversationId, content } = req.body;
+    // ✅ FIXED: Use req.params.id (from URL), not req.body.conversationId
+    const conversationId = req.params.id;
+    const { content } = req.body;
     const userId = req.user.id;
 
     if (!conversationId || !content) {

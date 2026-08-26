@@ -4,6 +4,7 @@
 // ✅ ADDED: Mobile conversation list toggle
 // ✅ ADDED: Pull to refresh
 // ✅ FIXED: Import from conversationService instead of chatService
+// ✅ FIXED: Duplicate conversation keys - deduplicated by _id
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -87,8 +88,18 @@ const ProviderChat = () => {
     try {
       const response = await getConversations();
       if (response.success) {
-        setConversations(response.data || []);
-        return response.data || [];
+        const data = response.data || [];
+        // ✅ FIXED: Deduplicate conversations by _id
+        const uniqueConversations = data.filter(
+          (conv, index, self) => index === self.findIndex(c => c._id === conv._id)
+        );
+        
+        if (uniqueConversations.length !== data.length) {
+          console.log(`📊 Removed ${data.length - uniqueConversations.length} duplicate conversations`);
+        }
+        
+        setConversations(uniqueConversations);
+        return uniqueConversations;
       }
       return [];
     } catch (error) {
@@ -103,7 +114,12 @@ const ProviderChat = () => {
     try {
       const response = await getConversationMessages(id);
       if (response.success) {
-        setMessages(response.data || []);
+        // ✅ Also deduplicate messages just in case
+        const data = response.data || [];
+        const uniqueMessages = data.filter(
+          (msg, index, self) => index === self.findIndex(m => m._id === msg._id)
+        );
+        setMessages(uniqueMessages);
         // Mark as read
         await markConversationAsRead(id);
       }
@@ -157,7 +173,12 @@ const ProviderChat = () => {
       const response = await sendConversationMessage(currentConversation._id, content);
 
       if (response.success) {
-        setMessages(prev => [...prev, response.data]);
+        setMessages(prev => {
+          // ✅ Check for duplicate before adding
+          const exists = prev.some(m => m._id === response.data._id);
+          if (exists) return prev;
+          return [...prev, response.data];
+        });
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
         setConversations(prev =>
