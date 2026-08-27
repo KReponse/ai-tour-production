@@ -1,5 +1,8 @@
 // backend/src/ai/utils/intentDetector.js
 // ✅ COMPLETE - Intent detection with context awareness
+// ✅ ADDED: Listing-specific intent detection
+// ✅ ADDED: Follow-up context tracking
+// ✅ ADDED: Booking intent detection
 
 // Intent patterns with priority
 const intentPatterns = {
@@ -18,7 +21,8 @@ const intentPatterns = {
       /create itinerary/i,
       /build itinerary/i,
       /customize trip/i,
-      /design trip/i
+      /design trip/i,
+      /suggest itinerary/i
     ],
     confidence: 0.9
   },
@@ -35,7 +39,9 @@ const intentPatterns = {
       /national park/i,
       /lake/i,
       /mountain/i,
-      /volcano/i
+      /volcano/i,
+      /top destinations/i,
+      /best places/i
     ],
     confidence: 0.85
   },
@@ -53,7 +59,9 @@ const intentPatterns = {
       /nature/i,
       /adventure/i,
       /culture/i,
-      /experience/i
+      /experience/i,
+      /excursions/i,
+      /day trips/i
     ],
     confidence: 0.85
   },
@@ -68,7 +76,12 @@ const intentPatterns = {
       /booking price/i,
       /cost of booking/i,
       /availability/i,
-      /available for booking/i
+      /available for booking/i,
+      /can i book/i,
+      /i want to book/i,
+      /i'd like to book/i,
+      /booking confirmation/i,
+      /reservation/i
     ],
     confidence: 0.9
   },
@@ -84,7 +97,10 @@ const intentPatterns = {
       /budget/i,
       /expensive/i,
       /cheap/i,
-      /affordable/i
+      /affordable/i,
+      /pricing/i,
+      /rates/i,
+      /discount/i
     ],
     confidence: 0.9
   },
@@ -100,7 +116,39 @@ const intentPatterns = {
       /dry season/i,
       /rainy season/i,
       /high season/i,
-      /low season/i
+      /low season/i,
+      /peak season/i,
+      /off season/i
+    ],
+    confidence: 0.85
+  },
+  details: {
+    patterns: [
+      /tell me more/i,
+      /more info/i,
+      /more details/i,
+      /information about/i,
+      /details of/i,
+      /what is (?:included|excluded)/i,
+      /what's included/i,
+      /what's not included/i,
+      /about this tour/i,
+      /about this experience/i,
+      /learn more/i
+    ],
+    confidence: 0.8
+  },
+  compare: {
+    patterns: [
+      /compare/i,
+      /difference between/i,
+      /which is better/i,
+      /which one/i,
+      /vs/i,
+      /versus/i,
+      /or/i,
+      /which should i choose/i,
+      /best option/i
     ],
     confidence: 0.85
   },
@@ -116,7 +164,8 @@ const intentPatterns = {
       /overview/i,
       /introduction/i,
       /about rwanda/i,
-      /land of a thousand hills/i
+      /land of a thousand hills/i,
+      /rwanda travel/i
     ],
     confidence: 0.7
   }
@@ -125,10 +174,12 @@ const intentPatterns = {
 // Entity extraction patterns
 const entityPatterns = {
   location: /(?:in|at|near|around|to)\s+([A-Za-z\s]+)/i,
-  price: /(\d+)\s*(?:usd|dollar|dollars|$|usd)/i,
+  price: /(\d+)\s*(?:usd|dollar|dollars|$|usd|rwf|rwf)/i,
   date: /(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{4})/i,
-  people: /(\d+)\s*(?:people|persons|pax|adults?|travelers?)/i,
-  duration: /(\d+)\s*(?:day|night|week|month)/i
+  people: /(\d+)\s*(?:people|persons|pax|adults?|travelers?|guests?)/i,
+  duration: /(\d+)\s*(?:day|night|week|month|hour)/i,
+  experience: /(?:gorilla trek|safari|canoe|kayak|hike|trek|tour|visit|excursion)/i,
+  accommodation: /(?:hotel|lodge|camp|hostel|resort|airbnb|guesthouse|villa)/i
 };
 
 // Known locations in Rwanda for better entity extraction
@@ -136,7 +187,20 @@ const knownLocations = [
   'kigali', 'musanze', 'ruhengeri', 'gisagara', 'gisenyi', 'kibuye', 'cyangugu',
   'akagera', 'nyungwe', 'volcanoes', 'bisate', 'kivu', 'kabgayi', 'butare',
   'huye', 'rwamagana', 'kayonza', 'gatsibo', 'nyamagabe', 'karongi', 'rutsiro',
-  'nyabihu', 'burera', 'gakenke', 'rulindo', 'gasabo', 'nyarugenge', 'kicukiro'
+  'nyabihu', 'burera', 'gakenke', 'rulindo', 'gasabo', 'nyarugenge', 'kicukiro',
+  'lake kivu', 'lake mutanda', 'lake burera', 'lake ruhondo', 'mount bisoke',
+  'mount karisimbi', 'mount muhabura', 'mount sabinyo', 'mount gahinga',
+  'volcanoes national park', 'nyungwe national park', 'akagera national park'
+];
+
+// Known experience types
+const experienceTypes = [
+  'gorilla trekking', 'chimpanzee trekking', 'golden monkey trekking',
+  'safari', 'game drive', 'boat cruise', 'kayaking', 'canoeing',
+  'hiking', 'trekking', 'nature walk', 'canopy walk', 'bird watching',
+  'cultural tour', 'city tour', 'culinary experience', 'coffee tour',
+  'market tour', 'museum visit', 'memorial visit', 'village visit',
+  'community experience', 'volcano climbing', 'mountain climbing'
 ];
 
 /**
@@ -145,7 +209,7 @@ const knownLocations = [
 export function detectIntent(message, history = []) {
   const messageLower = message.toLowerCase().trim();
   
-  // If message is very short, use previous context
+  // ✅ If message is very short, use previous context
   if (message.length < 10 && history && history.length > 0) {
     const lastIntent = history[history.length - 1]?.metadata?.intent || null;
     if (lastIntent) {
@@ -154,32 +218,38 @@ export function detectIntent(message, history = []) {
         intent: lastIntent,
         confidence: 0.8,
         isFollowUp: true,
-        entities: extractEntities(message, lastIntent)
+        entities: extractEntities(message, lastIntent),
+        context: history[history.length - 1]?.metadata?.context || {}
       };
     }
   }
 
   let bestIntent = 'general';
   let bestConfidence = 0;
+  let matchedPatterns = [];
 
   // Score each intent
   for (const [intent, data] of Object.entries(intentPatterns)) {
     let score = 0;
+    let matched = false;
     
     // Check patterns
     for (const pattern of data.patterns) {
       if (pattern.test(messageLower)) {
+        matched = true;
+        matchedPatterns.push({ intent, pattern: pattern.source });
         score += data.confidence;
         break;
       }
     }
 
     // Boost score for exact matches
-    if (score > 0) {
+    if (matched) {
       // Check if message is exactly a pattern
       const exactMatch = data.patterns.some(p => {
         const cleaned = p.source.replace(/\\/g, '').replace(/\^|\$/g, '');
-        return messageLower.includes(cleaned.toLowerCase());
+        return messageLower.includes(cleaned.toLowerCase()) || 
+               messageLower === cleaned.toLowerCase();
       });
       
       if (exactMatch) {
@@ -190,6 +260,16 @@ export function detectIntent(message, history = []) {
       if (history && history.length > 0 && history[history.length - 1]?.metadata?.intent === intent) {
         score += 0.3;
       }
+
+      // ✅ If message contains location and intent is location, boost
+      if (intent === 'location' && knownLocations.some(l => messageLower.includes(l))) {
+        score += 0.2;
+      }
+
+      // ✅ If message contains experience type and intent is experience, boost
+      if (intent === 'experience' && experienceTypes.some(e => messageLower.includes(e))) {
+        score += 0.2;
+      }
     }
 
     if (score > bestConfidence) {
@@ -198,7 +278,7 @@ export function detectIntent(message, history = []) {
     }
   }
 
-  // If confidence is low but we have history, use previous intent
+  // ✅ If confidence is low but we have history, use previous intent
   if (bestConfidence < 0.3 && history && history.length > 0) {
     const lastIntent = history[history.length - 1]?.metadata?.intent;
     if (lastIntent) {
@@ -207,7 +287,8 @@ export function detectIntent(message, history = []) {
         intent: lastIntent,
         confidence: 0.5,
         isFollowUp: true,
-        entities: extractEntities(message, lastIntent)
+        entities: extractEntities(message, lastIntent),
+        context: history[history.length - 1]?.metadata?.context || {}
       };
     }
   }
@@ -218,11 +299,21 @@ export function detectIntent(message, history = []) {
   // Check if this is a follow-up
   const isFollowUp = determineFollowUp(message, history);
 
+  // ✅ Build context
+  const context = {
+    lastIntent: bestIntent,
+    confidence: bestConfidence,
+    entities: entities,
+    matchedPatterns: matchedPatterns
+  };
+
   return {
     intent: bestIntent,
     confidence: bestConfidence,
     isFollowUp,
-    entities
+    entities,
+    context,
+    matchedPatterns: matchedPatterns.slice(0, 3) // Keep top 3 matches
   };
 }
 
@@ -231,10 +322,11 @@ export function detectIntent(message, history = []) {
  */
 export function extractEntities(message, intent = 'general') {
   const entities = {};
+  const messageLower = message.toLowerCase();
   
-  // Extract location
+  // Extract location from known locations
   for (const location of knownLocations) {
-    if (message.toLowerCase().includes(location.toLowerCase())) {
+    if (messageLower.includes(location.toLowerCase())) {
       entities.location = location;
       break;
     }
@@ -244,14 +336,36 @@ export function extractEntities(message, intent = 'general') {
   for (const [key, pattern] of Object.entries(entityPatterns)) {
     const match = message.match(pattern);
     if (match) {
-      entities[key] = match[1];
+      entities[key] = match[1].trim();
+    }
+  }
+
+  // ✅ Extract experience type from known experiences
+  if (!entities.experience) {
+    for (const exp of experienceTypes) {
+      if (messageLower.includes(exp)) {
+        entities.experience = exp;
+        break;
+      }
     }
   }
 
   // If no location found but location intent, use context
-  if (!entities.location && intent === 'location' && knownLocations.some(l => message.includes(l))) {
-    const found = knownLocations.find(l => message.includes(l));
+  if (!entities.location && intent === 'location' && knownLocations.some(l => messageLower.includes(l))) {
+    const found = knownLocations.find(l => messageLower.includes(l));
     if (found) entities.location = found;
+  }
+
+  // ✅ Extract price range
+  const priceMatch = messageLower.match(/(?:under|less than|around|about)\s*\$?(\d+)/i);
+  if (priceMatch) {
+    entities.maxPrice = parseInt(priceMatch[1]);
+  }
+
+  // ✅ Extract number of days
+  const dayMatch = messageLower.match(/(\d+)\s*(?:day|night)s?/i);
+  if (dayMatch) {
+    entities.days = parseInt(dayMatch[1]);
   }
 
   return entities;
@@ -274,7 +388,9 @@ export function determineFollowUp(message, history) {
     /^(can you|could you|would you)\s*(explain|elaborate|clarify|expand|tell|show|give)\s*(more|further)?$/i,
     /^(that sounds|this is|it seems|looks)\s*(good|great|interesting|nice|fine|cool|amazing)$/i,
     /^(how about|what about)\s*(the|that|this|it)?$/i,
-    /^and\s*(then|so|what|how|why|when|where|who|which)?$/i
+    /^and\s*(then|so|what|how|why|when|where|who|which)?$/i,
+    /^(first|second|third|last|next|previous|one|two|three)/i,
+    /^(the|that|this)\s*(one|thing|place|tour|experience|listing)/i
   ];
 
   const messageLower = message.toLowerCase().trim();
@@ -287,12 +403,13 @@ export function determineFollowUp(message, history) {
   }
 
   // Check if message is very short (likely a follow-up)
-  if (message.length < 10 && message.split(' ').length < 4) {
+  if (message.length < 15 && message.split(' ').length < 4) {
     // But not if it's a clear new topic
     const newTopicPatterns = [
       /^(hi|hello|hey|muraho|good morning|good afternoon|good evening)$/i,
       /^(i want|i need|i'd like|i would like)\s*(to book|to go|to visit|a tour|a trip|a listing)/i,
-      /^(show me|find|search for)\s*(tours|listings|experiences|activities|things to do)/i
+      /^(show me|find|search for)\s*(tours|listings|experiences|activities|things to do)/i,
+      /^(what|where|when)\s*(is|are)\s*(the|a)\s*(best|good|top|popular)/i
     ];
     
     for (const pattern of newTopicPatterns) {
@@ -347,6 +464,18 @@ export function getSuggestions(intent, context = null) {
       'Are there any festivals?',
       'Is it crowded?'
     ],
+    details: [
+      'Tell me more',
+      'What\'s included?',
+      'How long is it?',
+      'What should I bring?'
+    ],
+    compare: [
+      'Which one is cheaper?',
+      'What\'s the difference?',
+      'Which is more popular?',
+      'Which is shorter?'
+    ],
     general: [
       'Show me tours in Rwanda',
       'What is the best time to visit?',
@@ -371,12 +500,32 @@ export function getSuggestions(intent, context = null) {
   return result.slice(0, 4);
 }
 
+/**
+ * ✅ Get response type based on intent
+ */
+export function getResponseType(intent) {
+  const types = {
+    plan: 'planning',
+    location: 'location_info',
+    experience: 'experience_info',
+    booking: 'booking_help',
+    price: 'pricing_info',
+    time: 'timing_info',
+    details: 'details_info',
+    compare: 'comparison',
+    general: 'general_info'
+  };
+  return types[intent] || 'general_info';
+}
+
 // Default export for compatibility
 export default {
   detectIntent,
   extractEntities,
   determineFollowUp,
   getSuggestions,
+  getResponseType,
   intentPatterns,
-  knownLocations
+  knownLocations,
+  experienceTypes
 };

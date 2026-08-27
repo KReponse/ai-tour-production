@@ -2,9 +2,10 @@
 // ✅ COMPLETE FIXED - Full session management with conversation memory
 // ✅ Updated "Tours" → "Experiences" for user-facing text
 // ✅ Added sessionId persistence for conversation continuity
+// ✅ ADDED: Real listing card rendering from AI responses
+// ✅ ADDED: Experience cards with "View Details" links
 // ✅ FIXED: Mobile positioning with bottom navbar awareness
 // ✅ RESPONSIVE: Fully mobile-optimized with proper touch targets
-// ✅ ADDED: Smooth animations and transitions
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
@@ -24,11 +25,14 @@ import {
   MessageCircle,
   HelpCircle,
   AlertCircle,
+  Star,
+  Eye,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { getAIChat } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';
+import ListingCard from '../listing/ListingCard';
 
 // ===============================
 // AI TOUR COLORS (Brand Name - Keep as is)
@@ -41,6 +45,85 @@ import { useAuth } from '../../contexts/AuthContext';
 
 // ✅ Bottom navbar height constant
 const BOTTOM_NAV_HEIGHT = 72; // pixels
+
+// ✅ Experience Card Component
+const ExperienceCard = ({ experience }) => {
+  if (!experience) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-all duration-300 mb-3">
+      {/* Image */}
+      {experience.coverImage && (
+        <div className="relative h-32 sm:h-40 overflow-hidden">
+          <img
+            src={experience.coverImage}
+            alt={experience.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              e.target.src = 'https://via.placeholder.com/400x200?text=No+Image';
+            }}
+          />
+          {/* Rating badge */}
+          {experience.rating > 0 && (
+            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
+              <Star className="w-3 h-3 text-[#F59E0B] fill-[#F59E0B]" />
+              {experience.rating}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="p-3 sm:p-4">
+        <h4 className="font-bold text-[#374151] dark:text-white text-sm sm:text-base line-clamp-1">
+          {experience.title}
+        </h4>
+        
+        <div className="flex items-center gap-1 text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+          <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#0D9488] flex-shrink-0" />
+          <span className="truncate">{experience.location}</span>
+        </div>
+
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#0D9488] text-sm sm:text-base">
+              ${experience.price} {experience.currency || 'USD'}
+            </span>
+            {experience.duration && (
+              <span className="text-xs text-gray-400">• {experience.duration}</span>
+            )}
+          </div>
+          
+          <Link
+            to={`/listing/${experience.id}`}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0D9488] text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-[#0D9488]/80 transition touch-manipulation min-h-[32px]"
+          >
+            <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            View Details
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ Experience List Component
+const ExperienceList = ({ experiences }) => {
+  if (!experiences || experiences.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-2">
+      <p className="text-xs font-semibold text-[#0D9488] flex items-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5" />
+        Recommended Experiences
+      </p>
+      {experiences.map((exp, index) => (
+        <ExperienceCard key={exp.id || index} experience={exp} />
+      ))}
+    </div>
+  );
+};
 
 const AIWidget = ({ isOpen, onClose }) => {
   const { user } = useAuth();
@@ -69,6 +152,21 @@ const AIWidget = ({ isOpen, onClose }) => {
     return () => window.removeEventListener('resize', checkDevice);
   }, []);
 
+  // ✅ Restore sessionId from localStorage
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem('aiSessionId');
+    if (savedSessionId) {
+      setSessionId(savedSessionId);
+    }
+  }, []);
+
+  // ✅ Save sessionId to localStorage when it changes
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('aiSessionId', sessionId);
+    }
+  }, [sessionId]);
+
   // Quick actions
   const quickActions = [
     { label: 'Plan a Trip', icon: Calendar, action: 'plan', color: 'bg-[#0D9488]/10 text-[#0D9488]' },
@@ -86,9 +184,9 @@ const AIWidget = ({ isOpen, onClose }) => {
           role: 'assistant',
           content: `👋 Hi ${user?.name || 'Traveler'}! I'm your AI Tour assistant. I can help you plan trips, find amazing experiences, and explore Rwanda. What would you like to do?`,
           timestamp: new Date().toISOString(),
+          experiences: [],
         },
       ]);
-      setSessionId(null);
     }
   }, [isOpen, user]);
 
@@ -130,6 +228,7 @@ const AIWidget = ({ isOpen, onClose }) => {
       role: 'user',
       content: messageToSend.trim(),
       timestamp: new Date().toISOString(),
+      experiences: [],
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -153,21 +252,28 @@ const AIWidget = ({ isOpen, onClose }) => {
 
       setTyping(false);
 
+      // ✅ Extract AI response
       const aiText = response.reply || response.message || response.response || "I couldn't generate a response. Please try again.";
+      
+      // ✅ Extract experiences from response
+      const experiences = response.experiences || [];
 
       const aiMessage = {
         id: Date.now() + 1,
         role: 'assistant',
         content: aiText,
         timestamp: new Date().toISOString(),
+        experiences: experiences,
         metadata: {
           isFollowUp: response.isFollowUp || false,
           intent: response.intent || 'general',
+          totalResults: response.totalResults || experiences.length,
         },
       };
 
       setMessages(prev => [...prev, aiMessage]);
 
+      // ✅ Add quick replies if available
       if (response.quickReplies && response.quickReplies.length > 0) {
         const suggestionMessage = {
           id: Date.now() + 2,
@@ -200,6 +306,7 @@ const AIWidget = ({ isOpen, onClose }) => {
         role: 'assistant',
         content: errorMessage,
         timestamp: new Date().toISOString(),
+        experiences: [],
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
@@ -217,9 +324,11 @@ const AIWidget = ({ isOpen, onClose }) => {
             role: 'assistant',
             content: `👋 Hi ${user?.name || 'Traveler'}! I'm your AI Tour assistant. How can I help you today?`,
             timestamp: new Date().toISOString(),
+            experiences: [],
           },
         ]);
         setSessionId(null);
+        localStorage.removeItem('aiSessionId');
       }
     }
   };
@@ -244,10 +353,9 @@ const AIWidget = ({ isOpen, onClose }) => {
   // ✅ Get bottom offset for mobile
   const getBottomOffset = () => {
     if (isMobile) {
-      // ✅ 16px gap + bottom nav height + safe area
       return `calc(${BOTTOM_NAV_HEIGHT + 12}px + env(safe-area-inset-bottom))`;
     }
-    return '6rem'; // default bottom-24
+    return '6rem';
   };
 
   // ✅ Get width for mobile
@@ -404,27 +512,32 @@ const AIWidget = ({ isOpen, onClose }) => {
                       }
                       
                       return (
-                        <div
-                          key={msg.id}
-                          className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
-                        >
-                          <div
-                            className={`max-w-[85%] rounded-xl sm:rounded-2xl p-2 sm:p-3 ${
-                              msg.role === 'user'
-                                ? 'bg-[#0D9488] text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
-                            }`}
-                          >
-                            <div className="whitespace-pre-wrap break-words">
-                              {formatMessage(msg.content)}
-                            </div>
-                            <div className={`text-[8px] sm:text-[10px] mt-0.5 sm:mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
-                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              {msg.metadata?.isFollowUp && (
-                                <span className="ml-1 sm:ml-2 text-[6px] sm:text-[8px] opacity-50">(follow-up)</span>
-                              )}
+                        <div key={msg.id}>
+                          <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                            <div
+                              className={`max-w-[85%] rounded-xl sm:rounded-2xl p-2 sm:p-3 ${
+                                msg.role === 'user'
+                                  ? 'bg-[#0D9488] text-white'
+                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                              }`}
+                            >
+                              <div className="whitespace-pre-wrap break-words">
+                                {formatMessage(msg.content)}
+                              </div>
+                              <div className={`text-[8px] sm:text-[10px] mt-0.5 sm:mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-gray-400'}`}>
+                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {msg.metadata?.isFollowUp && (
+                                  <span className="ml-1 sm:ml-2 text-[6px] sm:text-[8px] opacity-50">(follow-up)</span>
+                                )}
+                              </div>
                             </div>
                           </div>
+                          {/* ✅ Render experiences if present */}
+                          {msg.experiences && msg.experiences.length > 0 && (
+                            <div className="mt-2">
+                              <ExperienceList experiences={msg.experiences} />
+                            </div>
+                          )}
                         </div>
                       );
                     })}

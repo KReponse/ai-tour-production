@@ -1,5 +1,5 @@
 // backend/src/ai/providers/gemini.provider.js
-// ✅ PRODUCTION-READY - Fixed quota handling, no wasteful validation
+// ✅ PRODUCTION-READY - Fixed timeout issues, reduced to 15s, proper fallback
 
 import { GoogleGenAI } from '@google/genai';
 
@@ -25,13 +25,15 @@ export class GeminiProvider {
     this.lastError = null;
     this.lastErrorCode = null;
     this.lastErrorTime = null;
+    this.consecutiveFailures = 0;
+    this.maxConsecutiveFailures = 2;
     
     // ── Retry Configuration ─────────────────────────────────────
-    this.maxRetries = 1; // Only 1 retry for temporary errors
-    this.baseDelay = 1000;
-    this.maxDelay = 5000;
+    this.maxRetries = 1; // ✅ Reduced to 1 for faster fallback
+    this.baseDelay = 500;
+    this.maxDelay = 2000;
     
-    // ── Model Selection ─────────────────────────────────────────
+    // ── Model Configuration ─────────────────────────────────────
     this.defaultModel = 'gemini-2.0-flash';
     this.fallbackModel = 'gemini-2.0-flash-lite';
     this.useFallbackModel = false;
@@ -65,6 +67,7 @@ export class GeminiProvider {
       this.modelName = this.userModel || this.defaultModel;
       this.available = true;
       this.initialized = true;
+      this.consecutiveFailures = 0;
       
       console.log(`✅ Gemini client created (model: ${this.modelName})`);
       console.log('📌 Model validation will happen on first request (lazy)');
@@ -85,7 +88,14 @@ export class GeminiProvider {
   // =========================
 
   isReady() {
-    return this.available && this.ai !== null && !this.quotaExceeded;
+    const ready = this.available && this.ai !== null && !this.quotaExceeded;
+    
+    if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+      console.warn(`⚠️ Gemini has ${this.consecutiveFailures} consecutive failures, marking unavailable`);
+      return false;
+    }
+    
+    return ready;
   }
 
   // =========================
@@ -108,6 +118,7 @@ export class GeminiProvider {
       lastErrorTime: this.lastErrorTime,
       useFallbackModel: this.useFallbackModel,
       modelNotFound: this.modelNotFound,
+      consecutiveFailures: this.consecutiveFailures,
     };
   }
 
@@ -119,60 +130,42 @@ export class GeminiProvider {
     const message = error.message || '';
     const code = error.code || error.status || '';
     const fullMessage = JSON.stringify(message);
+    const errorName = error.name || '';
     
-    // ── Quota Exhaustion (429) ────────────────────────────────
+    // ── Quota Exhaustion (429) - NO RETRY ─────────────────────
     if (message.includes('429') || 
         code === 'RESOURCE_EXHAUSTED' ||
         message.includes('RESOURCE_EXHAUSTED') ||
         message.includes('quota') ||
-        fullMessage.includes('quota_exceeded')) {
+        fullMessage.includes('quota_exceeded') ||
+        fullMessage.includes('quotaExceeded')) {
       
-      // Check if daily quota
-      if (message.includes('daily quota') || 
-          message.includes('quota exceeded') ||
-          fullMessage.includes('GenerateRequestsPerDay')) {
-        return {
-          code: 'QUOTA_EXHAUSTED',
-          retryable: false,
-          switchProvider: true,
-          dailyQuota: true,
-        };
-      }
-      
-      // Check for RetryInfo
-      let retryDelay = null;
-      if (error.details) {
-        for (const detail of error.details) {
-          if (detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo') {
-            const delayStr = detail.retryDelay || '';
-            const match = delayStr.match(/(\d+)/);
-            if (match) {
-              retryDelay = parseInt(match[1]) * 1000;
-            }
-          }
-          if (detail['@type'] === 'type.googleapis.com/google.rpc.QuotaFailure') {
-            const violations = detail.violations || [];
-            for (const v of violations) {
-              if (v.quotaMetric && v.quotaMetric.includes('generate_content')) {
-                return {
-                  code: 'QUOTA_EXHAUSTED',
-                  retryable: false,
-                  switchProvider: true,
-                  dailyQuota: true,
-                  retryDelay: retryDelay,
-                  quotaMetric: v.quotaMetric,
-                };
-              }
-            }
-          }
-        }
-      }
-      
+      console.error('⛔ Gemini quota exhausted - NO RETRY');
       return {
-        code: 'RATE_LIMITED',
+        code: 'QUOTA_EXHAUSTED',
         retryable: false,
         switchProvider: true,
-        retryDelay: retryDelay,
+        dailyQuota: true,
+      };
+    }
+    
+    // ── Network/Timeout Error - 1 retry max ──────────────────
+    if (errorName === 'TypeError' && message.includes('fetch') ||
+        message.includes('fetch failed') || 
+        message.includes('ECONNREFUSED') || 
+        message.includes('ETIMEDOUT') ||
+        message.includes('ENOTFOUND') ||
+        message.includes('getaddrinfo') ||
+        message.includes('network') ||
+        message.includes('connect') ||
+        message.includes('timeout') ||
+        message.includes('abort') ||
+        message.includes('AbortError')) {
+      return {
+        code: 'NETWORK_ERROR',
+        retryable: true,
+        switchProvider: false,
+        shouldIncrementFailures: true,
       };
     }
     
@@ -208,36 +201,23 @@ export class GeminiProvider {
       };
     }
     
-    // ── Network Error ──────────────────────────────────────────
-    if (message.includes('fetch failed') || 
-        message.includes('ECONNREFUSED') || 
-        message.includes('ETIMEDOUT') ||
-        message.includes('ENOTFOUND')) {
-      return {
-        code: 'NETWORK_ERROR',
-        retryable: true,
-        switchProvider: false,
-      };
-    }
-    
     return {
       code: 'UNKNOWN',
       retryable: false,
       switchProvider: true,
+      shouldIncrementFailures: true,
     };
   }
 
   // =========================
-  // ✅ EXECUTE WITH RETRY
+  // ✅ EXECUTE WITH RETRY (MAX 1 RETRY)
   // =========================
 
   async executeWithRetry(fn, context, attempt = 1) {
     // ── Check quota first ──────────────────────────────────────
     if (this.quotaExceeded) {
       if (this.quotaResetAt && new Date() < this.quotaResetAt) {
-        const remainingMs = this.quotaResetAt - new Date();
-        const remainingSec = Math.ceil(remainingMs / 1000);
-        console.warn(`⛔ Quota exceeded, reset in ${remainingSec}s`);
+        console.warn(`⛔ Quota exceeded, skipping Gemini`);
         return { fallback: true, reason: 'quota_exceeded', code: 'QUOTA_EXHAUSTED' };
       }
       
@@ -249,36 +229,51 @@ export class GeminiProvider {
     }
 
     try {
-      return await fn();
+      const result = await fn();
+      this.consecutiveFailures = 0;
+      return result;
     } catch (error) {
       const classification = this.classifyError(error);
       
-      // ── Quota Exhausted ──────────────────────────────────────
+      // ── QUOTA_EXHAUSTED - No retry, immediate fallback ──────
       if (classification.code === 'QUOTA_EXHAUSTED') {
-        console.error('⛔ Gemini quota exhausted');
+        console.error('⛔ Gemini quota exhausted - skipping to fallback');
         this.quotaExceeded = true;
-        this.quotaError = classification.dailyQuota ? 'daily_quota_exceeded' : 'rate_limit_exceeded';
+        this.quotaError = 'daily_quota_exceeded';
         this.lastError = error.message || error;
         this.lastErrorCode = 'QUOTA_EXHAUSTED';
         this.lastErrorTime = new Date();
-        
-        if (classification.retryDelay) {
-          this.quotaResetAt = new Date(Date.now() + classification.retryDelay);
-          console.log(`📌 Quota reset at: ${this.quotaResetAt.toISOString()}`);
-        }
-        
+        this.consecutiveFailures = 0;
         return { fallback: true, reason: 'quota_exhausted', code: 'QUOTA_EXHAUSTED' };
       }
       
-      // ── Model Not Found ──────────────────────────────────────
+      // ── NETWORK_ERROR - 1 retry max ──────────────────────────
+      if (classification.code === 'NETWORK_ERROR' && attempt <= this.maxRetries) {
+        this.consecutiveFailures += 1;
+        console.warn(`⚠️ Network error (attempt ${attempt}/${this.maxRetries})`);
+        
+        if (attempt < this.maxRetries) {
+          const delay = 500;
+          console.log(`⏳ Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return this.executeWithRetry(fn, context, attempt + 1);
+        }
+        
+        console.warn(`⚠️ Network error after ${this.maxRetries} attempts, falling back`);
+        this.lastError = error.message;
+        this.lastErrorCode = 'NETWORK_ERROR';
+        this.lastErrorTime = new Date();
+        return { fallback: true, reason: 'network_error', code: 'NETWORK_ERROR' };
+      }
+      
+      // ── MODEL_NOT_FOUND - Try fallback model ──────────────────
       if (classification.code === 'MODEL_NOT_FOUND') {
         this.modelNotFound = true;
         if (!this.useFallbackModel && this.fallbackModel && this.fallbackModel !== this.modelName) {
           console.warn(`⚠️ Model "${this.modelName}" not found, trying fallback "${this.fallbackModel}"`);
           this.useFallbackModel = true;
-          const oldModel = this.modelName;
           this.modelName = this.fallbackModel;
-          this.lastError = `Model "${oldModel}" not found, using fallback "${this.fallbackModel}"`;
+          this.lastError = `Model not found, using fallback "${this.fallbackModel}"`;
           this.lastErrorCode = 'MODEL_NOT_FOUND';
           this.lastErrorTime = new Date();
           return this.executeWithRetry(fn, context, 1);
@@ -291,10 +286,10 @@ export class GeminiProvider {
         return { fallback: true, reason: 'model_not_found', code: 'MODEL_NOT_FOUND' };
       }
       
-      // ── Service Unavailable (retryable) ──────────────────────
+      // ── SERVICE_UNAVAILABLE - 1 retry ────────────────────────
       if (classification.retryable && attempt < this.maxRetries) {
-        const delay = Math.min(this.baseDelay * Math.pow(2, attempt - 1), this.maxDelay);
-        console.warn(`⚠️ ${classification.code}, retrying in ${delay}ms... (attempt ${attempt}/${this.maxRetries})`);
+        const delay = 500;
+        console.warn(`⚠️ ${classification.code}, retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         return this.executeWithRetry(fn, context, attempt + 1);
       }
@@ -304,12 +299,13 @@ export class GeminiProvider {
       this.lastError = error.message;
       this.lastErrorCode = classification.code || 'UNKNOWN_ERROR';
       this.lastErrorTime = new Date();
+      this.consecutiveFailures += 1;
       return { fallback: true, reason: 'error', code: classification.code, error: error.message };
     }
   }
 
   // =========================
-  // ✅ CHAT
+  // ✅ CHAT - 15 second timeout
   // =========================
 
   async chat(messages, options = {}) {
@@ -330,7 +326,6 @@ export class GeminiProvider {
     }
 
     try {
-      // ── Format messages ──────────────────────────────────────
       const formattedMessages = [];
       let systemInstruction = null;
       
@@ -345,61 +340,76 @@ export class GeminiProvider {
         });
       }
 
-      // ── Build config ──────────────────────────────────────────
       const config = {
         temperature: options.temperature ?? 0.7,
-        maxOutputTokens: options.maxTokens ?? 500,
+        maxOutputTokens: options.maxTokens ?? 300,
         topP: options.topP ?? 0.95,
         topK: options.topK ?? 40,
+        timeout: 15000, // ✅ 15 seconds hard timeout
       };
 
       if (systemInstruction) {
         config.systemInstruction = systemInstruction;
       }
 
-      // ── Execute with retry ────────────────────────────────────
-      const result = await this.executeWithRetry(async () => {
-        const response = await this.ai.models.generateContent({
-          model: this.modelName,
-          contents: formattedMessages,
-          config,
-        });
-        
-        if (!response || !response.text) {
-          throw new Error('Empty response from Gemini');
-        }
-        
-        this.validated = true;
-        return response;
-      }, 'chat');
+      // ✅ Create abort controller for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.warn('⏰ Gemini request aborted after 15s');
+      }, 15000);
 
-      if (result.fallback) {
-        console.warn(`⚠️ Gemini chat fallback: ${result.reason}`);
+      try {
+        const result = await this.executeWithRetry(async () => {
+          const response = await this.ai.models.generateContent({
+            model: this.modelName,
+            contents: formattedMessages,
+            config,
+            signal: controller.signal,
+          });
+          
+          if (!response || !response.text) {
+            throw new Error('Empty response from Gemini');
+          }
+          
+          this.validated = true;
+          clearTimeout(timeoutId);
+          return response;
+        }, 'chat');
+
+        clearTimeout(timeoutId);
+
+        if (result.fallback) {
+          console.warn(`⚠️ Gemini chat fallback: ${result.reason}`);
+          return {
+            success: true,
+            content: "I'm currently experiencing high demand. Please try again in a moment.",
+            fallback: true,
+            provider: 'gemini',
+            reason: result.reason,
+            code: result.code,
+            timestamp: new Date().toISOString(),
+          };
+        }
+
+        console.log('📥 Gemini chat response received');
+        
         return {
           success: true,
-          content: "I'm currently experiencing high demand. Please try again in a moment.",
-          fallback: true,
+          content: result.text,
+          usage: {
+            promptTokens: result.usageMetadata?.promptTokenCount || 0,
+            completionTokens: result.usageMetadata?.candidatesTokenCount || 0,
+            totalTokens: result.usageMetadata?.totalTokenCount || 0,
+          },
           provider: 'gemini',
-          reason: result.reason,
-          code: result.code,
+          model: this.modelName,
           timestamp: new Date().toISOString(),
         };
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
       }
-
-      console.log('📥 Gemini chat response received');
-      
-      return {
-        success: true,
-        content: result.text,
-        usage: {
-          promptTokens: result.usageMetadata?.promptTokenCount || 0,
-          completionTokens: result.usageMetadata?.candidatesTokenCount || 0,
-          totalTokens: result.usageMetadata?.totalTokenCount || 0,
-        },
-        provider: 'gemini',
-        model: this.modelName,
-        timestamp: new Date().toISOString(),
-      };
       
     } catch (error) {
       console.error('❌ Gemini Chat Error:', error.message);
@@ -416,7 +426,7 @@ export class GeminiProvider {
   }
 
   // =========================
-  // ✅ PLAN
+  // ✅ PLAN - 20 second timeout
   // =========================
 
   async plan(params) {
@@ -456,43 +466,59 @@ Return ONLY valid JSON (no markdown, no code fences):
   "weather": "Weather information"
 }`;
 
-      const result = await this.executeWithRetry(async () => {
-        const response = await this.ai.models.generateContent({
-          model: this.modelName,
-          contents: prompt,
-          config: {
-            temperature: 0.7,
-            maxOutputTokens: 1000,
-          },
-        });
-        
-        if (!response || !response.text) {
-          throw new Error('Empty response from Gemini');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.warn('⏰ Gemini plan aborted after 20s');
+      }, 20000);
+
+      try {
+        const result = await this.executeWithRetry(async () => {
+          const response = await this.ai.models.generateContent({
+            model: this.modelName,
+            contents: prompt,
+            config: {
+              temperature: 0.7,
+              maxOutputTokens: 800,
+              timeout: 20000,
+            },
+            signal: controller.signal,
+          });
+          
+          if (!response || !response.text) {
+            throw new Error('Empty response from Gemini');
+          }
+          
+          this.validated = true;
+          clearTimeout(timeoutId);
+          return response;
+        }, 'plan');
+
+        clearTimeout(timeoutId);
+
+        if (result.fallback) {
+          return this.createFallbackPlan(params, result.reason);
         }
+
+        const plan = this.parsePlanResponse(result.text, params);
         
-        this.validated = true;
-        return response;
-      }, 'plan');
+        if (!plan) {
+          console.warn('⚠️ Failed to parse plan response, using fallback');
+          return this.createFallbackPlan(params, 'parse_error');
+        }
 
-      if (result.fallback) {
-        return this.createFallbackPlan(params, result.reason);
+        return {
+          success: true,
+          plan,
+          raw: result.text,
+          provider: 'gemini',
+          model: this.modelName,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
       }
-
-      const plan = this.parsePlanResponse(result.text, params);
-      
-      if (!plan) {
-        console.warn('⚠️ Failed to parse plan response, using fallback');
-        return this.createFallbackPlan(params, 'parse_error');
-      }
-
-      return {
-        success: true,
-        plan,
-        raw: result.text,
-        provider: 'gemini',
-        model: this.modelName,
-        timestamp: new Date().toISOString(),
-      };
       
     } catch (error) {
       console.error('❌ Gemini Plan Error:', error.message);
@@ -501,7 +527,7 @@ Return ONLY valid JSON (no markdown, no code fences):
   }
 
   // =========================
-  // ✅ RECOMMEND
+  // ✅ RECOMMEND - 15 second timeout
   // =========================
 
   async recommend(params) {
@@ -540,38 +566,54 @@ Return ONLY valid JSON array (no markdown, no code fences):
   }
 ]`;
 
-      const result = await this.executeWithRetry(async () => {
-        const response = await this.ai.models.generateContent({
-          model: this.modelName,
-          contents: prompt,
-          config: {
-            temperature: 0.7,
-            maxOutputTokens: 1000,
-          },
-        });
-        
-        if (!response || !response.text) {
-          throw new Error('Empty response from Gemini');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.warn('⏰ Gemini recommend aborted after 15s');
+      }, 15000);
+
+      try {
+        const result = await this.executeWithRetry(async () => {
+          const response = await this.ai.models.generateContent({
+            model: this.modelName,
+            contents: prompt,
+            config: {
+              temperature: 0.7,
+              maxOutputTokens: 800,
+              timeout: 15000,
+            },
+            signal: controller.signal,
+          });
+          
+          if (!response || !response.text) {
+            throw new Error('Empty response from Gemini');
+          }
+          
+          this.validated = true;
+          clearTimeout(timeoutId);
+          return response;
+        }, 'recommend');
+
+        clearTimeout(timeoutId);
+
+        if (result.fallback) {
+          return this.createFallbackRecommendations(params, result.reason);
         }
+
+        const recommendations = this.parseRecommendations(result.text);
         
-        this.validated = true;
-        return response;
-      }, 'recommend');
-
-      if (result.fallback) {
-        return this.createFallbackRecommendations(params, result.reason);
+        return {
+          success: true,
+          recommendations: recommendations.length > 0 ? recommendations : [],
+          raw: result.text,
+          provider: 'gemini',
+          model: this.modelName,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
       }
-
-      const recommendations = this.parseRecommendations(result.text);
-      
-      return {
-        success: true,
-        recommendations: recommendations.length > 0 ? recommendations : [],
-        raw: result.text,
-        provider: 'gemini',
-        model: this.modelName,
-        timestamp: new Date().toISOString(),
-      };
       
     } catch (error) {
       console.error('❌ Gemini Recommend Error:', error.message);

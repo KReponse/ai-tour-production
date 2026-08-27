@@ -1,28 +1,44 @@
 // backend/src/ai/services/chat.service.js
 // ✅ COMPLETE FIXED - Full conversation memory with session persistence
+// ✅ FIXED - Limited history to 2 messages for faster responses
 // ✅ FIXED - ES Module imports
+// ✅ ENHANCED - Real MongoDB listing integration
+// ✅ ENHANCED - Proper fallback when AI fails
+// ✅ ENHANCED - Response formatting with real listing data
 
 import aiProvider from '../providers/providerInterface.js';
-import chatPrompt from '../prompts/chat.prompt.js';
 import systemPrompt from '../prompts/system.prompt.js';
 import Listing from '../../models/Listing.js';
-import ChatSession from '../../models/ChatSession.js'; // ✅ Now works with ES Module
+import ChatSession from '../../models/ChatSession.js';
 import { transformToExperiences } from '../utils/experienceTransformer.js';
 import aiCache from '../utils/aiCache.js';
 import { detectIntent, determineFollowUp, extractEntities } from '../utils/intentDetector.js';
 import { buildChatPrompt, buildFollowUpPrompt } from '../utils/promptBuilder.js';
+import responseFormatter from '../utils/responseFormatter.js';
+
+// ===============================
+// AI TOUR COLORS
+// ===============================
+// Teal  : #0D9488
+// Gold  : #F59E0B
+// Slate : #374151
+// White : #FFFFFF
+// ===============================
 
 class ChatService {
   constructor() {
     // In-memory cache for active sessions (for performance)
     this.sessionCache = new Map();
     this.sessionTimeout = 30 * 60 * 1000; // 30 minutes
-    this.MAX_HISTORY = 10; // Keep last 10 messages for context
+    // ✅ FIXED: Reduced from 10 to 2 messages for faster responses
+    this.MAX_HISTORY = 2;
     this.cacheEnabled = process.env.AI_CACHE_ENABLED !== 'false';
+    this.maxResults = 10;
     
     console.log('🤖 Chat Service initialized with session management');
     console.log(`📦 Cache ${this.cacheEnabled ? 'enabled' : 'disabled'}`);
     console.log(`📋 Max history: ${this.MAX_HISTORY} messages`);
+    console.log(`📋 Max results: ${this.maxResults} listings`);
   }
 
   /**
@@ -117,7 +133,7 @@ class ChatService {
           ...message,
           timestamp: message.timestamp || new Date()
         });
-        // Keep only last MAX_HISTORY messages
+        // ✅ Keep only last MAX_HISTORY messages
         if (cached.messages.length > this.MAX_HISTORY * 2) {
           cached.messages = cached.messages.slice(-this.MAX_HISTORY * 2);
         }
@@ -159,7 +175,7 @@ class ChatService {
   /**
    * ✅ Get conversation history
    */
-  async getConversationHistory(sessionId, limit = 10) {
+  async getConversationHistory(sessionId, limit = 2) {
     try {
       // Check cache first
       if (this.sessionCache.has(sessionId)) {
@@ -244,7 +260,7 @@ class ChatService {
         timestamp: new Date()
       });
 
-      // ✅ Get conversation history
+      // ✅ Get conversation history (limited to 2 messages)
       const history = await this.getConversationHistory(session.id, this.MAX_HISTORY);
       console.log(`📌 Retrieved ${history.length} messages from history`);
 
@@ -290,16 +306,80 @@ class ChatService {
         console.log('📌 Processing as follow-up question');
         
         // Use context from previous messages
-        const lastAssistantMsg = history.filter(m => m.role === 'assistant').pop();
-        const lastUserMsg = history.filter(m => m.role === 'user').pop();
+        const previousResults = session.context?.lastResults || [];
+        const previousIntent = session.context?.lastIntent || intent;
 
-        // Build follow-up prompt
+        // If it's a follow-up about specific results, filter/refine
+        if (previousResults.length > 0) {
+          // Check if user is asking about a specific one
+          const indexMatch = message.match(/(\d+)/);
+          if (indexMatch) {
+            const idx = parseInt(indexMatch[1]) - 1;
+            if (idx >= 0 && idx < previousResults.length) {
+              const specific = previousResults[idx];
+              experiences = [specific];
+              searchResults = [specific];
+              
+              // Build specific response
+              const aiResponse = await this.getAIResponse(
+                `The user is asking about "${specific.title}". Provide details about this experience. Include price, location, duration, and key highlights.`,
+                history
+              );
+              
+              response = {
+                reply: aiResponse.content,
+                fallback: aiResponse.fallback || false,
+                experiences: [specific],
+                totalResults: 1,
+                intent: previousIntent,
+                isFollowUp: true
+              };
+              
+              return this.formatFinalResponse(response, session, startTime);
+            }
+          }
+
+          // Check if user is asking about "first", "second", etc.
+          const ordinalMap = {
+            'first': 0,
+            'second': 1,
+            'third': 2,
+            'fourth': 3,
+            'fifth': 4,
+            'last': previousResults.length - 1
+          };
+          for (const [key, idx] of Object.entries(ordinalMap)) {
+            if (message.toLowerCase().includes(key) && idx < previousResults.length) {
+              const specific = previousResults[idx];
+              experiences = [specific];
+              searchResults = [specific];
+              
+              const aiResponse = await this.getAIResponse(
+                `The user is asking about "${specific.title}". Provide a detailed overview of this experience.`,
+                history
+              );
+              
+              response = {
+                reply: aiResponse.content,
+                fallback: aiResponse.fallback || false,
+                experiences: [specific],
+                totalResults: 1,
+                intent: previousIntent,
+                isFollowUp: true
+              };
+              
+              return this.formatFinalResponse(response, session, startTime);
+            }
+          }
+        }
+
+        // Build follow-up prompt with context
         const followUpPrompt = buildFollowUpPrompt({
           message,
           history,
           context: session.context || {},
-          lastIntent: session.context?.lastIntent || intent,
-          lastResults: session.context?.lastResults || []
+          lastIntent: previousIntent,
+          lastResults: previousResults.slice(0, 5)
         });
 
         // Get AI response with context
@@ -308,14 +388,13 @@ class ChatService {
         response = {
           reply: aiResponse.content,
           fallback: aiResponse.fallback || false,
-          experiences: session.context?.lastResults?.slice(0, 5) || [],
-          intent: session.context?.lastIntent || intent,
-          totalResults: session.context?.lastResults?.length || 0,
+          experiences: previousResults.slice(0, 5),
+          totalResults: previousResults.length,
+          intent: previousIntent,
           isFollowUp: true
         };
 
-        // Use previous search results
-        experiences = session.context?.lastResults?.slice(0, 5) || [];
+        experiences = previousResults.slice(0, 5);
 
       } else {
         console.log('📌 Processing as new topic');
@@ -331,13 +410,13 @@ class ChatService {
         // ✅ Get user context from database
         const enrichedContext = await this.enrichUserContext(userId, userContext);
 
-        // ✅ Build enhanced prompt
+        // ✅ Build enhanced prompt with real experiences
         const userPrompt = buildChatPrompt({
           message,
           intent,
           entities,
           experiences: experiences.slice(0, 5),
-          history: history.slice(-5),
+          history: history.slice(-2),
           userLocation: session.context?.location || userLocation,
           isFollowUp: false
         });
@@ -345,34 +424,31 @@ class ChatService {
         // ✅ Get AI response
         const aiResponse = await this.getAIResponse(userPrompt, history);
         
-        response = {
-          reply: aiResponse.content,
-          fallback: aiResponse.fallback || false,
-          experiences: experiences.slice(0, 5),
-          intent: intent,
-          totalResults: searchResults.length,
-          isFollowUp: false
-        };
+        // ✅ If AI response is fallback but we have experiences, use them
+        if (aiResponse.fallback && experiences.length > 0) {
+          const fallbackMessage = this.buildFallbackMessage(message, experiences);
+          response = {
+            reply: fallbackMessage,
+            fallback: true,
+            experiences: experiences.slice(0, 5),
+            totalResults: searchResults.length,
+            intent: intent,
+            isFollowUp: false
+          };
+        } else {
+          response = {
+            reply: aiResponse.content,
+            fallback: aiResponse.fallback || false,
+            experiences: experiences.slice(0, 5),
+            totalResults: searchResults.length,
+            intent: intent,
+            isFollowUp: false
+          };
+        }
       }
 
-      // ✅ Extract quick replies
-      const quickReplies = this.getQuickReplies(intent, isFollowUp);
-
       // ✅ Format final response
-      const formattedResponse = {
-        success: true,
-        reply: response.reply,
-        experiences: response.experiences || experiences.slice(0, 5),
-        intent: response.intent || intent,
-        totalResults: response.totalResults || searchResults.length,
-        fallback: response.fallback || false,
-        sessionId: session.id,
-        isNewSession: !sessionId,
-        isFollowUp: isFollowUp,
-        quickReplies: quickReplies,
-        responseTime: Date.now() - startTime,
-        provider: aiProvider.getProviderInfo ? aiProvider.getProviderInfo() : 'gemini'
-      };
+      const formattedResponse = this.formatFinalResponse(response, session, startTime);
 
       // ✅ Add AI response to history
       await this.addMessageToSession(session.id, {
@@ -425,21 +501,64 @@ class ChatService {
   }
 
   /**
+   * ✅ Format final response
+   */
+  formatFinalResponse(response, session, startTime) {
+    const quickReplies = this.getQuickReplies(response.intent || 'general', response.isFollowUp || false);
+    
+    return {
+      success: true,
+      reply: response.reply,
+      experiences: response.experiences || [],
+      intent: response.intent || 'general',
+      totalResults: response.totalResults || 0,
+      fallback: response.fallback || false,
+      sessionId: session.id,
+      isNewSession: !session.id || session.messages?.length === 0,
+      isFollowUp: response.isFollowUp || false,
+      quickReplies: quickReplies,
+      responseTime: Date.now() - startTime,
+      provider: aiProvider.getProviderInfo ? aiProvider.getProviderInfo() : 'gemini'
+    };
+  }
+
+  /**
+   * ✅ Build fallback message when AI fails but listings exist
+   */
+  buildFallbackMessage(message, experiences) {
+    const count = experiences.length;
+    let msg = "I found some great experiences that match your interest! 🌍\n\n";
+
+    experiences.slice(0, 5).forEach((exp, i) => {
+      msg += `${i + 1}. **${exp.title}** - ${exp.location}\n`;
+      msg += `   💰 $${exp.price} ${exp.currency || 'USD'} • ⭐ ${exp.rating || 'New'}\n`;
+      msg += `   📍 ${exp.duration || 'Flexible duration'}\n\n`;
+    });
+
+    if (count > 5) {
+      msg += `... and ${count - 5} more experiences.\n\n`;
+    }
+
+    msg += "Would you like more details about any of these?";
+    return msg;
+  }
+
+  /**
    * ✅ Get AI response with provider
    */
   async getAIResponse(prompt, history) {
     try {
       // Build system prompt
-      const systemPromptText = systemPrompt.build ? systemPrompt.build() : systemPrompt.base;
+      const systemPromptText = systemPrompt.base || systemPrompt;
 
-      // Build messages with history
+      // Build messages with history - ✅ Only last 2 messages
       const messages = [
         { role: 'system', content: systemPromptText }
       ];
 
-      // Add recent history (last 5 messages)
+      // ✅ Only add last 2 messages from history (reduced from 5)
       if (history && history.length > 0) {
-        const recentHistory = history.slice(-5);
+        const recentHistory = history.slice(-2);
         for (const msg of recentHistory) {
           messages.push({
             role: msg.role,
@@ -454,7 +573,7 @@ class ChatService {
       // Get AI response
       const response = await aiProvider.chat(messages, {
         temperature: 0.7,
-        maxTokens: 800
+        maxTokens: 500 // ✅ Reduced from 800 to 500 for faster responses
       });
 
       return {
@@ -465,7 +584,7 @@ class ChatService {
     } catch (error) {
       console.error('❌ AI Provider error:', error);
       return {
-        content: this.getFallbackResponse(prompt, 'en'),
+        content: null,
         fallback: true
       };
     }
@@ -483,7 +602,7 @@ class ChatService {
         'Plan a 3-day itinerary'
       ],
       location: [
-        'What\'s the best time to visit?',
+        "What's the best time to visit?",
         'What activities are there?',
         'How do I get there?',
         'Where to stay?'
@@ -491,26 +610,38 @@ class ChatService {
       experience: [
         'Tell me more about this',
         'Is it suitable for families?',
-        'What\'s included in the price?',
+        "What's included in the price?",
         'How long does it take?'
       ],
       booking: [
         'How do I book?',
-        'What\'s the cancellation policy?',
+        "What's the cancellation policy?",
         'Are there group discounts?',
         'Can I customize?'
       ],
       price: [
-        'What\'s included in the price?',
+        "What's included in the price?",
         'Are there extra fees?',
         'Do you offer group discounts?',
         'Is there a payment plan?'
       ],
       time: [
-        'What\'s the weather like?',
+        "What's the weather like?",
         'What should I pack?',
         'Are there any festivals?',
         'Is it crowded?'
+      ],
+      details: [
+        'Tell me more',
+        "What's included?",
+        'How long is it?',
+        'What should I bring?'
+      ],
+      compare: [
+        'Which one is cheaper?',
+        "What's the difference?",
+        'Which is more popular?',
+        'Which is shorter?'
       ],
       general: [
         'Show me tours in Rwanda',
@@ -533,8 +664,6 @@ class ChatService {
 
     return replies[intent] || replies.general;
   }
-
-  // ... (rest of the methods remain the same: searchListingsByIntent, extractKeywords, scoreAndRankListings, enrichUserContext, getFallbackResponse, cleanupSessions, getSessionHistory, clearSessionHistory)
 
   /**
    * ✅ Search Listings by intent with enhanced matching
@@ -628,7 +757,7 @@ class ChatService {
     listings = this.scoreAndRankListings(listings, message, userContext);
 
     // Apply limit
-    return listings.slice(0, 15);
+    return listings.slice(0, this.maxResults);
   }
 
   /**
@@ -715,6 +844,7 @@ class ChatService {
     if (!userId) return context;
 
     try {
+      // Dynamic imports to avoid circular dependencies
       const User = await import('../../models/User.js');
       const Booking = await import('../../models/Booking.js');
 

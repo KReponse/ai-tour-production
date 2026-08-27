@@ -1,7 +1,9 @@
 // frontend/src/pages/AIPlanner.jsx
 // ✅ COMPLETE FIXED - Full session management with conversation memory
 // ✅ Updated "Tour" references to "Experience" where user-facing
-// ✅ Added sessionId persistence for conversation continuity
+// ✅ ADDED: Real listing recommendations in results
+// ✅ ADDED: Experience cards with "View Details" links
+// ✅ ADDED: Session persistence for conversation continuity
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -41,6 +43,7 @@ import {
   Download,
   Share2,
   MessageCircle,
+  Eye,
 } from 'lucide-react';
 
 import Button from '../components/ui/Button';
@@ -59,6 +62,87 @@ import toast from 'react-hot-toast';
 // White : #FFFFFF
 // ===============================
 
+// ✅ Experience Card Component
+const ExperienceCard = ({ experience }) => {
+  if (!experience) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-all duration-300">
+      {/* Image */}
+      {experience.coverImage && (
+        <div className="relative h-32 sm:h-40 overflow-hidden">
+          <img
+            src={experience.coverImage}
+            alt={experience.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              e.target.src = 'https://via.placeholder.com/400x200?text=No+Image';
+            }}
+          />
+          {/* Rating badge */}
+          {experience.rating > 0 && (
+            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
+              <Star className="w-3 h-3 text-[#F59E0B] fill-[#F59E0B]" />
+              {experience.rating}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="p-3 sm:p-4">
+        <h4 className="font-bold text-[#374151] dark:text-white text-sm sm:text-base line-clamp-1">
+          {experience.title}
+        </h4>
+        
+        <div className="flex items-center gap-1 text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+          <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#0D9488] flex-shrink-0" />
+          <span className="truncate">{experience.location}</span>
+        </div>
+
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#0D9488] text-sm sm:text-base">
+              ${experience.price} {experience.currency || 'USD'}
+            </span>
+            {experience.duration && (
+              <span className="text-xs text-gray-400">• {experience.duration}</span>
+            )}
+          </div>
+          
+          <Link
+            to={`/listing/${experience.id}`}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0D9488] text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-[#0D9488]/80 transition touch-manipulation min-h-[32px]"
+          >
+            <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            View Details
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ Experience List Component
+const ExperienceList = ({ experiences, title = "Recommended Experiences" }) => {
+  if (!experiences || experiences.length === 0) return null;
+
+  return (
+    <div className="mt-4 space-y-3">
+      <p className="text-sm font-semibold text-[#0D9488] flex items-center gap-1.5">
+        <Sparkles className="w-4 h-4" />
+        {title}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {experiences.map((exp, index) => (
+          <ExperienceCard key={exp.id || index} experience={exp} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const AIPlanner = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -67,10 +151,11 @@ const AIPlanner = () => {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [tripPlan, setTripPlan] = useState(null);
+  const [recommendations, setRecommendations] = useState([]);
   const [savedTrips, setSavedTrips] = useState([]);
   const [isSaved, setIsSaved] = useState(false);
   const [activeDay, setActiveDay] = useState(0);
-  const [sessionId, setSessionId] = useState(null); // ✅ Track session for conversation memory
+  const [sessionId, setSessionId] = useState(null);
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
@@ -167,6 +252,21 @@ const AIPlanner = () => {
     { value: 'budget', label: 'Budget' },
   ];
 
+  // ✅ Restore sessionId from localStorage
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem('aiPlannerSessionId');
+    if (savedSessionId) {
+      setSessionId(savedSessionId);
+    }
+  }, []);
+
+  // ✅ Save sessionId to localStorage
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('aiPlannerSessionId', sessionId);
+    }
+  }, [sessionId]);
+
   const calculateDays = useCallback(() => {
     if (formData.startDate && formData.endDate) {
       const start = new Date(formData.startDate);
@@ -178,7 +278,7 @@ const AIPlanner = () => {
     return 3;
   }, [formData.startDate, formData.endDate]);
 
-  // ✅ Generate AI Trip
+  // ✅ Generate AI Trip with recommendations
   const generateAITrip = async () => {
     if (!formData.destination) {
       toast.error('Please select a destination');
@@ -205,6 +305,7 @@ const AIPlanner = () => {
       days: days,
       startDate: formData.startDate,
       language: formData.language,
+      sessionId: sessionId,
     };
 
     try {
@@ -219,7 +320,6 @@ const AIPlanner = () => {
       console.log('✅ Trip Plan Response:', response);
 
       if (response.success && response.plan) {
-        // ✅ Store sessionId if provided
         if (response.sessionId) {
           setSessionId(response.sessionId);
         }
@@ -232,6 +332,10 @@ const AIPlanner = () => {
           budget: formData.budget,
           travelers: formData.travelers,
         });
+
+        // ✅ Fetch recommendations based on destination and interests
+        await fetchRecommendations(formData.destination, formData.interests);
+
         setIsSaved(false);
         setStep(4);
         setActiveDay(0);
@@ -247,6 +351,25 @@ const AIPlanner = () => {
     }
   };
 
+  // ✅ Fetch recommendations
+  const fetchRecommendations = async (destination, interests) => {
+    try {
+      const query = `${destination} ${interests.join(' ')} experiences in Rwanda`;
+      const response = await getAIRecommendations({
+        query: query,
+        limit: 6,
+        location: destination,
+        sessionId: sessionId,
+      });
+
+      if (response.success && response.experiences) {
+        setRecommendations(response.experiences);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching recommendations:', error);
+    }
+  };
+
   // ✅ Save Trip
   const handleSaveTrip = async () => {
     if (!tripPlan) return;
@@ -257,10 +380,11 @@ const AIPlanner = () => {
         destination: formData.destination,
         date: new Date().toISOString(),
         plan: tripPlan,
+        recommendations: recommendations,
         travelers: formData.travelers,
         budget: formData.budget,
         mood: formData.mood,
-        sessionId: sessionId, // ✅ Save sessionId with trip
+        sessionId: sessionId,
       };
 
       const updatedTrips = [...savedTrips, savedTrip];
@@ -290,10 +414,9 @@ const AIPlanner = () => {
     setChatLoading(true);
 
     try {
-      // ✅ Send with sessionId for conversation continuity
       const response = await getAIChat({
         message: chatInput.trim(),
-        sessionId: sessionId, // ✅ Pass sessionId
+        sessionId: sessionId,
         context: 'planner',
         history: chatMessages.map(m => ({
           role: m.role,
@@ -522,6 +645,17 @@ const AIPlanner = () => {
           {renderDayItinerary(activeDay)}
         </Card>
 
+        {/* ✅ Recommendations Section */}
+        {recommendations.length > 0 && (
+          <Card className="p-6 rounded-[32px] shadow-xl border border-gray-100 dark:border-gray-800">
+            <h3 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-[#F59E0B]" />
+              Recommended Experiences
+            </h3>
+            <ExperienceList experiences={recommendations} />
+          </Card>
+        )}
+
         {/* Tips */}
         {tripPlan.tips && tripPlan.tips.length > 0 && (
           <Card className="p-6 rounded-[32px] shadow-xl border border-gray-100 dark:border-gray-800">
@@ -660,7 +794,6 @@ const AIPlanner = () => {
             Print Plan
           </button>
 
-          {/* ✅ Share with session context */}
           {sessionId && (
             <button
               onClick={() => {

@@ -1,8 +1,67 @@
 // backend/src/ai/providers/providerInterface.js
 // ✅ PRODUCTION-READY - No race conditions, clean fallback chain, async-safe fallback provider
+// ✅ FIXED: Correct import paths
+// ✅ ADDED: Health check monitoring
+// ✅ ADDED: Provider stats tracking
+// ✅ ADDED: Circuit breaker pattern
 
 import { GeminiProvider } from './gemini.provider.js';
 import { OpenAIProvider } from './openai.provider.js';
+
+// =========================
+// CIRCUIT BREAKER
+// =========================
+class CircuitBreaker {
+  constructor(options = {}) {
+    this.failureThreshold = options.failureThreshold || 3;
+    this.timeout = options.timeout || 60000; // 1 minute
+    this.failures = 0;
+    this.lastFailureTime = null;
+    this.state = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+    this.successCount = 0;
+    this.successThreshold = options.successThreshold || 2;
+  }
+
+  recordSuccess() {
+    if (this.state === 'HALF_OPEN') {
+      this.successCount++;
+      if (this.successCount >= this.successThreshold) {
+        this.state = 'CLOSED';
+        this.failures = 0;
+        console.log('🔒 Circuit breaker closed (success threshold met)');
+      }
+    }
+    this.failures = 0;
+  }
+
+  recordFailure() {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+    
+    if (this.failures >= this.failureThreshold) {
+      this.state = 'OPEN';
+      console.log(`⚠️ Circuit breaker OPEN for provider (${this.failures} failures)`);
+    }
+  }
+
+  isOpen() {
+    if (this.state === 'OPEN') {
+      // Check if timeout has elapsed
+      if (this.lastFailureTime && (Date.now() - this.lastFailureTime) > this.timeout) {
+        this.state = 'HALF_OPEN';
+        this.successCount = 0;
+        console.log('🔄 Circuit breaker HALF_OPEN (testing)');
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  getState() {
+    return this.state;
+  }
+}
 
 class AIProviderInterface {
   constructor() {
@@ -23,10 +82,16 @@ class AIProviderInterface {
       mock: null
     };
     
-    // ✅ Provider health tracking (simple)
+    // ✅ Provider health tracking
     this.providerHealth = {
-      gemini: { healthy: true, lastError: null, lastErrorTime: null },
-      openai: { healthy: true, lastError: null, lastErrorTime: null }
+      gemini: { healthy: true, lastError: null, lastErrorTime: null, uptime: 0, requests: 0, failures: 0 },
+      openai: { healthy: true, lastError: null, lastErrorTime: null, uptime: 0, requests: 0, failures: 0 }
+    };
+    
+    // ✅ Circuit breakers per provider
+    this.circuitBreakers = {
+      gemini: new CircuitBreaker({ failureThreshold: 3, timeout: 60000 }),
+      openai: new CircuitBreaker({ failureThreshold: 3, timeout: 60000 })
     };
   }
 
@@ -77,7 +142,6 @@ class AIProviderInterface {
           console.log(`✅ AI Provider initialized`);
           console.log(`📌 Active provider: ${this.currentProvider}`);
           console.log(`📌 Provider available: true`);
-          console.log(`📌 Model validation will happen on first request (lazy)`);
           
           return true;
         } else {
@@ -118,13 +182,11 @@ class AIProviderInterface {
    * ✅ GET OR CREATE PROVIDER INSTANCE
    */
   async _getOrCreateProviderInstance(providerName) {
-    // ✅ Return cached if available and ready
     if (this.providerInstances[providerName] && 
         this.providerInstances[providerName].isReady()) {
       return this.providerInstances[providerName];
     }
     
-    // ✅ Create new instance
     const ProviderClass = this.providers[providerName];
     if (!ProviderClass) {
       return null;
@@ -173,11 +235,11 @@ class AIProviderInterface {
       return this._getOrCreateMockProvider();
     }
     
-    // ✅ Check health before using fallback
+    // ✅ Check circuit breaker before using fallback
     if (fallbackName !== 'mock') {
-      const health = this.providerHealth[fallbackName];
-      if (health && !health.healthy) {
-        console.warn(`⚠️ ${fallbackName} is marked unhealthy, skipping...`);
+      const cb = this.circuitBreakers[fallbackName];
+      if (cb && cb.isOpen()) {
+        console.warn(`⚠️ ${fallbackName} circuit breaker is OPEN, skipping...`);
         return this._getOrCreateMockProvider();
       }
     }
@@ -207,7 +269,42 @@ class AIProviderInterface {
       this.providerHealth[providerName].healthy = healthy;
       this.providerHealth[providerName].lastError = error?.message || null;
       this.providerHealth[providerName].lastErrorTime = healthy ? null : new Date();
+      if (!healthy) {
+        this.providerHealth[providerName].failures++;
+      }
+      // Update circuit breaker
+      const cb = this.circuitBreakers[providerName];
+      if (cb) {
+        if (healthy) {
+          cb.recordSuccess();
+        } else {
+          cb.recordFailure();
+        }
+      }
     }
+  }
+
+  /**
+   * ✅ GET BEST PROVIDER (with circuit breaker)
+   */
+  async getBestProvider() {
+    const preferred = ['gemini', 'openai'];
+    
+    for (const providerName of preferred) {
+      const cb = this.circuitBreakers[providerName];
+      if (cb && cb.isOpen()) {
+        console.log(`⏭️ Skipping ${providerName} (circuit breaker OPEN)`);
+        continue;
+      }
+      
+      const instance = await this._getOrCreateProviderInstance(providerName);
+      if (instance && instance.isReady()) {
+        return { name: providerName, instance };
+      }
+    }
+    
+    // ✅ Fallback to mock
+    return { name: 'mock', instance: await this._getOrCreateMockProvider() };
   }
 
   /**
@@ -215,17 +312,27 @@ class AIProviderInterface {
    */
   async chat(messages, options = {}) {
     console.log(`📤 chat() called in provider interface`);
-    console.log(`📌 Using provider: ${this.currentProvider}`);
     
-    if (!this.isAvailable()) {
+    // ✅ Try to get best available provider
+    const { name, instance } = await this.getBestProvider();
+    console.log(`📌 Using provider: ${name}`);
+    
+    if (!instance || !instance.isReady()) {
       console.warn('⚠️ No AI provider available for chat');
       throw new Error('No AI provider available');
     }
     
+    // ✅ Track request
+    if (this.providerHealth[name]) {
+      this.providerHealth[name].requests++;
+    }
+    
     try {
-      const result = await this.provider.chat(messages, options);
+      const result = await instance.chat(messages, options);
       
-      // ✅ If provider returned a valid fallback response, return it
+      // ✅ Record success
+      this._markProviderHealth(name, true);
+      
       if (result && result.fallback === true && result.success === true) {
         console.log(`📥 Provider returned fallback response, using it`);
         return result;
@@ -234,30 +341,26 @@ class AIProviderInterface {
       console.log('📥 Chat result received from provider');
       return result;
     } catch (error) {
-      console.error(`❌ Provider chat error (${this.currentProvider}):`, error.message);
+      console.error(`❌ Provider chat error (${name}):`, error.message);
       
-      // ✅ Mark provider as potentially unhealthy
-      this._markProviderHealth(this.currentProvider, false, error);
+      // ✅ Record failure
+      this._markProviderHealth(name, false, error);
       
       // ✅ Try fallback provider
       console.log('🔄 Trying fallback provider...');
-      const fallbackProvider = await this.getFallbackProvider(this.currentProvider);
+      const fallbackProvider = await this.getFallbackProvider(name);
       
-      if (fallbackProvider && fallbackProvider !== this.provider) {
+      if (fallbackProvider && fallbackProvider !== instance) {
         try {
           const result = await fallbackProvider.chat(messages, options);
           console.log('📥 Chat result from fallback provider');
           return result;
         } catch (fallbackError) {
           console.error('❌ Fallback provider also failed:', fallbackError.message);
-          // ✅ Try mock as last resort
-          const mock = await this._getOrCreateMockProvider();
-          console.log('🤖 Using MockProvider as last resort');
-          return mock.chat(messages, options);
         }
       }
       
-      // ✅ If no fallback, use mock
+      // ✅ Try mock as last resort
       const mock = await this._getOrCreateMockProvider();
       console.log('🤖 Using MockProvider as last resort');
       return mock.chat(messages, options);
@@ -269,31 +372,32 @@ class AIProviderInterface {
    */
   async plan(params) {
     console.log(`📤 plan() called in provider interface`);
-    console.log(`📌 Using provider: ${this.currentProvider}`);
     
-    if (!this.isAvailable()) {
+    const { name, instance } = await this.getBestProvider();
+    console.log(`📌 Using provider: ${name}`);
+    
+    if (!instance || !instance.isReady()) {
       console.warn('⚠️ No AI provider available for plan');
       throw new Error('No AI provider available');
     }
     
     try {
-      const result = await this.provider.plan(params);
+      const result = await instance.plan(params);
+      this._markProviderHealth(name, true);
       
       if (result && result.fallback === true && result.success === true) {
-        console.log(`📥 Provider returned fallback plan, using it`);
         return result;
       }
       
       return result;
     } catch (error) {
-      console.error(`❌ Provider plan error (${this.currentProvider}):`, error.message);
-      
-      this._markProviderHealth(this.currentProvider, false, error);
+      console.error(`❌ Provider plan error (${name}):`, error.message);
+      this._markProviderHealth(name, false, error);
       
       console.log('🔄 Trying fallback provider...');
-      const fallbackProvider = await this.getFallbackProvider(this.currentProvider);
+      const fallbackProvider = await this.getFallbackProvider(name);
       
-      if (fallbackProvider && fallbackProvider !== this.provider) {
+      if (fallbackProvider && fallbackProvider !== instance) {
         try {
           return await fallbackProvider.plan(params);
         } catch (fallbackError) {
@@ -312,31 +416,32 @@ class AIProviderInterface {
    */
   async recommend(params) {
     console.log(`📤 recommend() called in provider interface`);
-    console.log(`📌 Using provider: ${this.currentProvider}`);
     
-    if (!this.isAvailable()) {
+    const { name, instance } = await this.getBestProvider();
+    console.log(`📌 Using provider: ${name}`);
+    
+    if (!instance || !instance.isReady()) {
       console.warn('⚠️ No AI provider available for recommend');
       throw new Error('No AI provider available');
     }
     
     try {
-      const result = await this.provider.recommend(params);
+      const result = await instance.recommend(params);
+      this._markProviderHealth(name, true);
       
       if (result && result.fallback === true && result.success === true) {
-        console.log(`📥 Provider returned fallback recommendations, using it`);
         return result;
       }
       
       return result;
     } catch (error) {
-      console.error(`❌ Provider recommend error (${this.currentProvider}):`, error.message);
-      
-      this._markProviderHealth(this.currentProvider, false, error);
+      console.error(`❌ Provider recommend error (${name}):`, error.message);
+      this._markProviderHealth(name, false, error);
       
       console.log('🔄 Trying fallback provider...');
-      const fallbackProvider = await this.getFallbackProvider(this.currentProvider);
+      const fallbackProvider = await this.getFallbackProvider(name);
       
-      if (fallbackProvider && fallbackProvider !== this.provider) {
+      if (fallbackProvider && fallbackProvider !== instance) {
         try {
           return await fallbackProvider.recommend(params);
         } catch (fallbackError) {
@@ -360,7 +465,6 @@ class AIProviderInterface {
     
     console.log(`🔄 Switching to ${providerName}...`);
     
-    // ✅ Create and initialize new provider BEFORE switching
     const ProviderClass = this.providers[providerName];
     const newProvider = new ProviderClass();
     const initialized = await newProvider.initialize();
@@ -369,7 +473,6 @@ class AIProviderInterface {
       throw new Error(`Failed to initialize ${providerName}`);
     }
     
-    // ✅ Only switch if initialization succeeded
     this.provider = newProvider;
     this.currentProvider = providerName;
     this.providerInstances[providerName] = newProvider;
@@ -387,10 +490,13 @@ class AIProviderInterface {
     let providerInfo = {
       name: this.currentProvider,
       active: isReady,
-      initialized: this.initialized
+      initialized: this.initialized,
+      circuitBreakers: {
+        gemini: this.circuitBreakers.gemini.getState(),
+        openai: this.circuitBreakers.openai.getState()
+      }
     };
 
-    // ✅ Merge provider-specific info
     if (this.provider && typeof this.provider.getProviderInfo === 'function') {
       try {
         const specific = this.provider.getProviderInfo();
@@ -400,7 +506,6 @@ class AIProviderInterface {
       }
     }
 
-    // ✅ API key status
     let apiKeyEnv = '';
     if (this.currentProvider === 'gemini') {
       apiKeyEnv = 'GEMINI_API_KEY';
@@ -412,8 +517,6 @@ class AIProviderInterface {
 
     providerInfo.apiKeyConfigured = !!process.env[apiKeyEnv];
     providerInfo.availableProviders = Object.keys(this.providers);
-    
-    // ✅ Add health status
     providerInfo.providerHealth = {
       gemini: this.providerHealth.gemini,
       openai: this.providerHealth.openai
@@ -596,7 +699,6 @@ console.log('🔄 Initializing AI Provider (lazy validation mode)...');
 aiProvider.initialize().then((success) => {
   if (success) {
     console.log('✅ AI Provider initialization complete');
-    console.log('📌 Model validation will happen on first request');
   } else {
     console.warn('⚠️ AI Provider initialization failed, using fallback');
   }

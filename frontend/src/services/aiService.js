@@ -1,13 +1,145 @@
 // frontend/src/services/aiService.js
 // ✅ COMPLETE FIXED - Full session management with conversation memory
-// ✅ Added search, trending, featured methods
-// ✅ Added session persistence across all AI features
-// ✅ Added conversation history support
+// ✅ ADDED: Response normalization for consistent frontend data
+// ✅ ADDED: Real listing card data formatting
+// ✅ ADDED: Fallback handling when AI fails
+// ✅ ADDED: Session persistence across all AI features
 
 import axios from 'axios';
 import API from './api';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+// ===============================
+// ✅ HELPER: Normalize AI Response
+// ===============================
+const normalizeAIResponse = (response, sessionId = null) => {
+  // If response is already normalized, return it
+  if (response._normalized) return response;
+
+  // Handle error responses
+  if (!response.success) {
+    return {
+      success: false,
+      reply: response.reply || response.message || 'Sorry, I encountered an error. Please try again.',
+      fallback: true,
+      sessionId: response.sessionId || sessionId,
+      experiences: [],
+      quickReplies: response.quickReplies || [
+        'Try again',
+        'Contact support',
+        'Browse experiences'
+      ],
+      _normalized: true
+    };
+  }
+
+  // Extract reply from various response formats
+  const reply = response.reply || response.message || response.content || response.answer || '';
+  
+  // Extract experiences from various response formats
+  let experiences = [];
+  if (response.experiences && Array.isArray(response.experiences)) {
+    experiences = response.experiences;
+  } else if (response.recommendations && Array.isArray(response.recommendations)) {
+    experiences = response.recommendations;
+  } else if (response.data && Array.isArray(response.data)) {
+    experiences = response.data;
+  } else if (response.listings && Array.isArray(response.listings)) {
+    experiences = response.listings;
+  }
+
+  // Format experiences for frontend cards
+  const formattedExperiences = experiences.map(exp => ({
+    id: exp._id || exp.id || exp.listingId,
+    title: exp.title || 'Untitled Experience',
+    location: exp.location || 'Rwanda',
+    price: exp.price || 0,
+    currency: exp.currency || 'USD',
+    duration: exp.duration || 'Flexible',
+    rating: exp.rating || exp.averageRating || 0,
+    reviewCount: exp.reviewCount || exp.totalReviews || 0,
+    description: exp.description || 'Discover this amazing experience in Rwanda.',
+    coverImage: exp.coverImage || exp.coverMedia || exp.image || null,
+    coverMedia: exp.coverMedia || null,
+    coverMediaType: exp.coverMediaType || 'image',
+    category: exp.category || exp.businessType || 'Experience',
+    provider: exp.provider?.name || exp.provider?.businessName || 'Verified Provider',
+    providerId: exp.provider?._id || exp.providerId || null,
+    url: `/listing/${exp._id || exp.id}`,
+    score: exp.score || exp.relevance || 0,
+    isFeatured: exp.isFeatured || false,
+    status: exp.status || 'active'
+  }));
+
+  // Extract quick replies
+  const quickReplies = response.quickReplies || response.suggestions || [];
+
+  // Extract intent
+  const intent = response.intent || 'general';
+
+  return {
+    success: true,
+    reply: reply,
+    fallback: response.fallback || false,
+    sessionId: response.sessionId || sessionId,
+    experiences: formattedExperiences,
+    quickReplies: quickReplies,
+    intent: intent,
+    totalResults: response.totalResults || formattedExperiences.length,
+    isFollowUp: response.isFollowUp || false,
+    _normalized: true
+  };
+};
+
+// ===============================
+// ✅ HELPER: Handle API Errors
+// ===============================
+const handleAPIError = (error, fallbackMessage = 'Something went wrong. Please try again.') => {
+  console.error('❌ AI Service Error:', error);
+  
+  if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+    return {
+      success: false,
+      reply: 'The AI is taking too long to respond. Please try again.',
+      fallback: true,
+      experiences: [],
+      quickReplies: ['Try again', 'Browse experiences'],
+      _normalized: true
+    };
+  }
+  
+  if (error.response?.status === 429) {
+    return {
+      success: false,
+      reply: 'Too many requests. Please wait a moment and try again.',
+      fallback: true,
+      experiences: [],
+      quickReplies: ['Wait a moment', 'Browse experiences'],
+      _normalized: true
+    };
+  }
+  
+  if (error.response?.status === 401) {
+    return {
+      success: false,
+      reply: 'Please login to use the AI assistant.',
+      fallback: true,
+      experiences: [],
+      quickReplies: ['Login', 'Browse as guest'],
+      _normalized: true
+    };
+  }
+
+  return {
+    success: false,
+    reply: error.response?.data?.message || error.message || fallbackMessage,
+    fallback: true,
+    experiences: [],
+    quickReplies: ['Try again', 'Contact support'],
+    _normalized: true
+  };
+};
 
 // ===============================
 // ✅ AI CHAT with Session Management
@@ -21,7 +153,7 @@ export const getAIChat = async (data) => {
       language: data.language || 'English',
       context: data.context || 'general',
       chatHistory: data.history || [],
-      sessionId: data.sessionId || null, // ✅ Pass sessionId for conversation continuity
+      sessionId: data.sessionId || null,
       userLocation: data.userLocation || 'Rwanda'
     };
 
@@ -29,7 +161,6 @@ export const getAIChat = async (data) => {
       requestData.userContext = data.userContext;
     }
 
-    // ✅ If we have images, send them too
     if (data.images && data.images.length > 0) {
       requestData.images = data.images;
     }
@@ -42,36 +173,24 @@ export const getAIChat = async (data) => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        timeout: 30000
+        timeout: 60000
       }
     );
 
-    // ✅ Return sessionId in response for client to store
-    return {
-      ...response.data,
-      sessionId: response.data.sessionId || data.sessionId || null
-    };
+    // ✅ Normalize response
+    return normalizeAIResponse(response.data, data.sessionId);
   } catch (error) {
-    console.error('❌ AI Chat error:', error);
-    
-    if (error.code === 'ECONNABORTED') {
-      throw new Error('The AI is taking too long to respond. Please try again.');
-    }
-    if (error.response?.status === 429) {
-      throw new Error('Too many requests. Please wait a moment and try again.');
-    }
-    throw error;
+    return handleAPIError(error);
   }
 };
 
 // ===============================
-// ✅ AI CHAT WITH SESSION (New endpoint)
+// ✅ AI CHAT WITH SESSION
 // ===============================
 export const getAIChatWithSession = async (data) => {
   try {
     const token = localStorage.getItem('token');
     
-    // ✅ Must have sessionId for this endpoint
     if (!data.sessionId) {
       throw new Error('Session ID is required for continuing conversation');
     }
@@ -101,17 +220,13 @@ export const getAIChatWithSession = async (data) => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        timeout: 30000
+        timeout: 60000
       }
     );
 
-    return {
-      ...response.data,
-      sessionId: response.data.sessionId || data.sessionId
-    };
+    return normalizeAIResponse(response.data, data.sessionId);
   } catch (error) {
-    console.error('❌ AI Chat Session error:', error);
-    throw error;
+    return handleAPIError(error);
   }
 };
 
@@ -136,10 +251,19 @@ export const getChatHistory = async (sessionId) => {
       }
     );
 
-    return response.data;
+    return {
+      success: true,
+      messages: response.data.messages || [],
+      context: response.data.context || {}
+    };
   } catch (error) {
     console.error('❌ Get Chat History error:', error);
-    throw error;
+    return {
+      success: false,
+      messages: [],
+      context: {},
+      error: error.message
+    };
   }
 };
 
@@ -164,10 +288,16 @@ export const clearChatHistory = async (sessionId) => {
       }
     );
 
-    return response.data;
+    return {
+      success: true,
+      message: 'Chat history cleared'
+    };
   } catch (error) {
     console.error('❌ Clear Chat History error:', error);
-    throw error;
+    return {
+      success: false,
+      error: error.message
+    };
   }
 };
 
@@ -200,31 +330,31 @@ export const generateTripPlan = async (data) => {
         startDate: data.startDate || null,
         interests: data.interests || [],
         language: data.language || 'English',
-        sessionId: data.sessionId || null // ✅ Pass sessionId
+        sessionId: data.sessionId || null
       },
       {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        timeout: 45000
+        timeout: 60000
       }
     );
 
     return {
-      ...response.data,
-      sessionId: response.data.sessionId || data.sessionId || null
+      success: true,
+      plan: response.data.plan || response.data,
+      sessionId: response.data.sessionId || data.sessionId,
+      fallback: response.data.fallback || false
     };
   } catch (error) {
     console.error('❌ AI Planner error:', error);
-    
-    if (error.code === 'ECONNABORTED') {
-      throw new Error('Plan generation is taking too long. Please try again.');
-    }
-    if (error.response?.status === 429) {
-      throw new Error('Too many requests. Please wait a moment and try again.');
-    }
-    throw error;
+    return {
+      success: false,
+      plan: null,
+      error: error.message,
+      fallback: true
+    };
   }
 };
 
@@ -246,18 +376,22 @@ export const getAIRecommendations = async (params = {}) => {
           location: params.location,
           category: params.category,
           sortBy: params.sortBy || 'relevance',
-          sessionId: params.sessionId || null // ✅ Pass sessionId
+          sessionId: params.sessionId || null
         },
         headers: {
           Authorization: `Bearer ${token}`,
         },
-        timeout: 20000
+        timeout: 30000
       }
     );
-    return response.data;
+
+    // ✅ Normalize recommendations
+    return normalizeAIResponse({
+      ...response.data,
+      experiences: response.data.recommendations || response.data.experiences || []
+    }, params.sessionId);
   } catch (error) {
-    console.error('❌ AI Recommendations error:', error);
-    throw error;
+    return handleAPIError(error, 'Failed to get recommendations');
   }
 };
 
@@ -277,7 +411,7 @@ export const searchExperiences = async (params = {}) => {
           page: params.page || 1,
           sortBy: params.sortBy || 'relevance',
           filters: params.filters ? JSON.stringify(params.filters) : undefined,
-          sessionId: params.sessionId || null // ✅ Pass sessionId
+          sessionId: params.sessionId || null
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -285,10 +419,13 @@ export const searchExperiences = async (params = {}) => {
         timeout: 15000
       }
     );
-    return response.data;
+
+    return normalizeAIResponse({
+      ...response.data,
+      experiences: response.data.results || response.data.experiences || []
+    }, params.sessionId);
   } catch (error) {
-    console.error('❌ AI Search error:', error);
-    throw error;
+    return handleAPIError(error, 'Failed to search experiences');
   }
 };
 
@@ -309,10 +446,13 @@ export const getTrendingExperiences = async (limit = 10) => {
         timeout: 10000
       }
     );
-    return response.data;
+
+    return normalizeAIResponse({
+      ...response.data,
+      experiences: response.data.experiences || response.data.trending || []
+    });
   } catch (error) {
-    console.error('❌ Trending Experiences error:', error);
-    throw error;
+    return handleAPIError(error, 'Failed to get trending experiences');
   }
 };
 
@@ -333,10 +473,13 @@ export const getFeaturedExperiences = async (limit = 10) => {
         timeout: 10000
       }
     );
-    return response.data;
+
+    return normalizeAIResponse({
+      ...response.data,
+      experiences: response.data.experiences || response.data.featured || []
+    });
   } catch (error) {
-    console.error('❌ Featured Experiences error:', error);
-    throw error;
+    return handleAPIError(error, 'Failed to get featured experiences');
   }
 };
 
@@ -360,7 +503,7 @@ export const getAISuggestions = async (sessionId = null) => {
       const response = await axios.get(
         `${API_URL}/ai/suggestions`,
         {
-          params: { sessionId }, // ✅ Pass sessionId
+          params: { sessionId },
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -369,7 +512,11 @@ export const getAISuggestions = async (sessionId = null) => {
       );
       
       if (response.data?.success && response.data?.suggestions?.length > 0) {
-        return response.data;
+        return {
+          success: true,
+          suggestions: response.data.suggestions,
+          sessionId: response.data.sessionId || sessionId
+        };
       }
     } catch (error) {
       console.warn('⚠️ Failed to fetch suggestions, using fallback');
@@ -454,7 +601,7 @@ export const getTravelInsights = async (destination, sessionId = null) => {
     const token = localStorage.getItem('token');
     const response = await axios.post(
       `${API_URL}/ai/insights`,
-      { destination, sessionId }, // ✅ Pass sessionId
+      { destination, sessionId },
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -488,7 +635,7 @@ export const getRecommendationsByInterests = async (interests, limit = 10, sessi
   return getAIRecommendations({
     query: interests.join(' '),
     limit,
-    sessionId // ✅ Pass sessionId
+    sessionId
   });
 };
 
@@ -524,7 +671,6 @@ export const getActiveSessions = async (params = {}) => {
 // ===============================
 export const continueConversation = async (message, sessionId, language = 'English') => {
   if (!sessionId) {
-    // If no sessionId, start a new conversation
     return getAIChat({
       message,
       language,
@@ -532,7 +678,6 @@ export const continueConversation = async (message, sessionId, language = 'Engli
     });
   }
   
-  // Use the session endpoint
   return getAIChatWithSession({
     message,
     sessionId,
@@ -562,5 +707,8 @@ export default {
   sendChatMessage,
   getRecommendationsByInterests,
   getActiveSessions,
-  continueConversation
+  continueConversation,
+  // Helpers
+  normalizeAIResponse,
+  handleAPIError
 };

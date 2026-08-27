@@ -2,7 +2,9 @@
 // ✅ COMPLETE FIXED - Full session management with conversation memory
 // ✅ Updated "Tours" → "Experiences" for user-facing text
 // ✅ Added sessionId persistence for conversation continuity
-// ✅ Added quick replies and follow-up detection
+// ✅ ADDED: Real listing card rendering from AI responses
+// ✅ ADDED: Experience cards with "View Details" links
+// ✅ ADDED: Quick replies and follow-up detection
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
@@ -37,11 +39,14 @@ import {
   FileImage,
   Trash,
   ZoomIn,
+  Eye,
+  Star,
 } from 'lucide-react';
 
-// ✅ Import AI service instead of direct Gemini
+// ✅ Import AI service
 import { getAIChat } from '../services/aiService';
 import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
 
 // ===============================
 // AI TOUR COLORS
@@ -52,6 +57,87 @@ import { useAuth } from '../contexts/AuthContext';
 // White : #FFFFFF
 // ===============================
 
+// ✅ Experience Card Component
+const ExperienceCard = ({ experience }) => {
+  if (!experience) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-all duration-300 mb-3 max-w-sm">
+      {/* Image */}
+      {experience.coverImage && (
+        <div className="relative h-32 sm:h-40 overflow-hidden">
+          <img
+            src={experience.coverImage}
+            alt={experience.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              e.target.src = 'https://via.placeholder.com/400x200?text=No+Image';
+            }}
+          />
+          {/* Rating badge */}
+          {experience.rating > 0 && (
+            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
+              <Star className="w-3 h-3 text-[#F59E0B] fill-[#F59E0B]" />
+              {experience.rating}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="p-3 sm:p-4">
+        <h4 className="font-bold text-[#374151] dark:text-white text-sm sm:text-base line-clamp-1">
+          {experience.title}
+        </h4>
+        
+        <div className="flex items-center gap-1 text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+          <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#0D9488] flex-shrink-0" />
+          <span className="truncate">{experience.location}</span>
+        </div>
+
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#0D9488] text-sm sm:text-base">
+              ${experience.price} {experience.currency || 'USD'}
+            </span>
+            {experience.duration && (
+              <span className="text-xs text-gray-400">• {experience.duration}</span>
+            )}
+          </div>
+          
+          <Link
+            to={`/listing/${experience.id}`}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0D9488] text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-[#0D9488]/80 transition touch-manipulation min-h-[32px]"
+          >
+            <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            View Details
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ✅ Experience List Component
+const ExperienceList = ({ experiences }) => {
+  if (!experiences || experiences.length === 0) return null;
+
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-xs font-semibold text-[#0D9488] flex items-center gap-1.5">
+        <Sparkles className="w-3.5 h-3.5" />
+        Recommended Experiences
+      </p>
+      <div className="grid grid-cols-1 gap-3">
+        {experiences.map((exp, index) => (
+          <ExperienceCard key={exp.id || index} experience={exp} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // Language configurations
 const languages = [
   { code: 'en', name: 'English', flag: '🇬🇧', nativeName: 'English' },
@@ -60,7 +146,7 @@ const languages = [
   { code: 'sw', name: 'Swahili', flag: '🇹🇿', nativeName: 'Kiswahili' },
 ];
 
-// Suggested questions by language (UPDATED - Experience terminology)
+// Suggested questions by language
 const suggestedQuestionsByLang = {
   en: [
     { text: "Best experiences in Rwanda", icon: MapPin },
@@ -100,7 +186,7 @@ const AIChat = () => {
   const [copiedId, setCopiedId] = useState(null);
   const [language, setLanguage] = useState('en');
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
-  const [sessionId, setSessionId] = useState(null); // ✅ Track session for conversation memory
+  const [sessionId, setSessionId] = useState(null);
   
   // Voice input states
   const [isListening, setIsListening] = useState(false);
@@ -120,6 +206,21 @@ const AIChat = () => {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // ✅ Restore sessionId from localStorage
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem('aiChatSessionId');
+    if (savedSessionId) {
+      setSessionId(savedSessionId);
+    }
+  }, []);
+
+  // ✅ Save sessionId to localStorage
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('aiChatSessionId', sessionId);
+    }
+  }, [sessionId]);
 
   // Get placeholders based on language
   const getPlaceholder = () => {
@@ -192,6 +293,7 @@ const AIChat = () => {
     }
     // ✅ Reset sessionId when language changes
     setSessionId(null);
+    localStorage.removeItem('aiChatSessionId');
   }, [language]);
 
   const setWelcomeMessage = () => {
@@ -207,6 +309,7 @@ const AIChat = () => {
       role: 'assistant',
       text: welcomeMessages[language] || welcomeMessages.en,
       timestamp: new Date().toISOString(),
+      experiences: [],
     }]);
   };
 
@@ -345,9 +448,7 @@ const AIChat = () => {
     setUploadedImages(prev => prev.filter(img => img.id !== imageId));
   };
 
-  // ============================================================
   // ✅ Send to Backend API with Session Management
-  // ============================================================
   const sendMessage = async () => {
     if ((!message.trim() && uploadedImages.length === 0) || loading) return;
 
@@ -357,6 +458,7 @@ const AIChat = () => {
       text: message || '📷 Shared image',
       images: uploadedImages.map((img) => img.url),
       timestamp: new Date().toISOString(),
+      experiences: [],
     };
 
     setChat((prev) => [...prev, userMessage]);
@@ -377,7 +479,7 @@ const AIChat = () => {
       // ✅ Call backend API with sessionId for conversation memory
       const response = await getAIChat({
         message: currentMessage,
-        sessionId: sessionId, // ✅ Pass sessionId for conversation continuity
+        sessionId: sessionId,
         language: language,
         images: currentImages.map((img) => img.url),
         history: chat.map((msg) => ({
@@ -394,14 +496,19 @@ const AIChat = () => {
       setTyping(false);
 
       const aiText = response.reply || response.message || "I couldn't generate a response. Please try again.";
+      
+      // ✅ Extract experiences from response
+      const experiences = response.experiences || [];
 
       const aiMessage = {
         id: Date.now() + 1,
         role: 'assistant',
         text: aiText,
         timestamp: new Date().toISOString(),
+        experiences: experiences,
         isFollowUp: response.isFollowUp || false,
         intent: response.intent || 'general',
+        totalResults: response.totalResults || experiences.length,
       };
 
       setChat((prev) => [...prev, aiMessage]);
@@ -439,6 +546,7 @@ const AIChat = () => {
           role: 'assistant',
           text: errorMessage,
           timestamp: new Date().toISOString(),
+          experiences: [],
         },
       ]);
     } finally {
@@ -479,8 +587,10 @@ const AIChat = () => {
       role: 'assistant',
       text: clearMessages[language] || clearMessages.en,
       timestamp: new Date().toISOString(),
+      experiences: [],
     }]);
-    setSessionId(null); // ✅ Reset session when chat is cleared
+    setSessionId(null);
+    localStorage.removeItem('aiChatSessionId');
     setShowClearConfirm(false);
   };
 
@@ -686,103 +796,111 @@ const AIChat = () => {
               }
 
               return (
-                <div
-                  key={msg.id}
-                  className={`flex animate-slide-up ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  <div className={`flex gap-3 max-w-[85%] md:max-w-[75%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                    
-                    {/* Avatar */}
-                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                      msg.role === 'user'
-                        ? 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20'
-                        : 'bg-gradient-to-r from-[#0D9488] to-[#F59E0B]'
-                    }`}>
-                      {msg.role === 'user' ? (
-                        <User className="w-4 h-4 text-[#0D9488]" />
-                      ) : (
-                        <Bot className="w-4 h-4 text-white" />
-                      )}
-                    </div>
-
-                    {/* Message Bubble */}
-                    <div className="group relative">
-                      <div className={`rounded-2xl p-4 ${
+                <div key={msg.id}>
+                  <div
+                    className={`flex animate-slide-up ${
+                      msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div className={`flex gap-3 max-w-[85%] md:max-w-[75%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                      
+                      {/* Avatar */}
+                      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
                         msg.role === 'user'
-                          ? 'bg-gradient-to-r from-[#0D9488] to-[#0f766e] text-white'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                          ? 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20'
+                          : 'bg-gradient-to-r from-[#0D9488] to-[#F59E0B]'
                       }`}>
-                        <div className="text-sm font-medium mb-1 opacity-70 flex items-center gap-2">
-                          {msg.role === 'user' ? (
-                            language === 'en' ? 'You' : language === 'fr' ? 'Vous' : language === 'rw' ? 'Wewe' : 'Wewe'
-                          ) : (
-                            'AI Tour'
-                          )}
-                          {msg.isFollowUp && (
-                            <span className="text-[8px] opacity-50 bg-gray-500/20 px-1.5 py-0.5 rounded-full">
-                              follow-up
-                            </span>
-                          )}
-                        </div>
-                        
-                        {/* Display uploaded images */}
-                        {msg.images && msg.images.length > 0 && (
-                          <div className="flex gap-2 mb-3 flex-wrap">
-                            {msg.images.map((img, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => setSelectedImage(img)}
-                                className="relative group/img"
-                              >
-                                <img
-                                  src={img}
-                                  alt={`Uploaded ${idx + 1}`}
-                                  className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-90 transition"
-                                />
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 rounded-lg flex items-center justify-center transition">
-                                  <ZoomIn className="w-5 h-5 text-white" />
-                                </div>
-                              </button>
-                            ))}
-                          </div>
+                        {msg.role === 'user' ? (
+                          <User className="w-4 h-4 text-[#0D9488]" />
+                        ) : (
+                          <Bot className="w-4 h-4 text-white" />
                         )}
-                        
-                        <div 
-                          className="whitespace-pre-wrap leading-relaxed text-sm md:text-base"
-                          dangerouslySetInnerHTML={{ __html: formatMessageText(msg.text) }}
-                        />
-                        <div className="text-xs opacity-50 mt-2">
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
                       </div>
 
-                      {/* Message Actions */}
-                      <div className="absolute -bottom-8 right-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
-                        <button
-                          onClick={() => copyToClipboard(msg.text, msg.id)}
-                          className="p-1.5 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition"
-                          title="Copy message"
-                        >
-                          {copiedId === msg.id ? (
-                            <Check className="w-3 h-3 text-green-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
+                      {/* Message Bubble */}
+                      <div className="group relative">
+                        <div className={`rounded-2xl p-4 ${
+                          msg.role === 'user'
+                            ? 'bg-gradient-to-r from-[#0D9488] to-[#0f766e] text-white'
+                            : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                        }`}>
+                          <div className="text-sm font-medium mb-1 opacity-70 flex items-center gap-2">
+                            {msg.role === 'user' ? (
+                              language === 'en' ? 'You' : language === 'fr' ? 'Vous' : language === 'rw' ? 'Wewe' : 'Wewe'
+                            ) : (
+                              'AI Tour'
+                            )}
+                            {msg.isFollowUp && (
+                              <span className="text-[8px] opacity-50 bg-gray-500/20 px-1.5 py-0.5 rounded-full">
+                                follow-up
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Display uploaded images */}
+                          {msg.images && msg.images.length > 0 && (
+                            <div className="flex gap-2 mb-3 flex-wrap">
+                              {msg.images.map((img, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => setSelectedImage(img)}
+                                  className="relative group/img"
+                                >
+                                  <img
+                                    src={img}
+                                    alt={`Uploaded ${idx + 1}`}
+                                    className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-90 transition"
+                                  />
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/img:opacity-100 rounded-lg flex items-center justify-center transition">
+                                    <ZoomIn className="w-5 h-5 text-white" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
                           )}
-                        </button>
-                        {msg.role === 'assistant' && (
+                          
+                          <div 
+                            className="whitespace-pre-wrap leading-relaxed text-sm md:text-base"
+                            dangerouslySetInnerHTML={{ __html: formatMessageText(msg.text) }}
+                          />
+                          <div className="text-xs opacity-50 mt-2">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+
+                        {/* Message Actions */}
+                        <div className="absolute -bottom-8 right-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
                           <button
-                            onClick={() => speakText(msg.text)}
+                            onClick={() => copyToClipboard(msg.text, msg.id)}
                             className="p-1.5 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition"
-                            title="Read aloud"
+                            title="Copy message"
                           >
-                            <Volume2 className="w-3 h-3" />
+                            {copiedId === msg.id ? (
+                              <Check className="w-3 h-3 text-green-600" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
                           </button>
-                        )}
+                          {msg.role === 'assistant' && (
+                            <button
+                              onClick={() => speakText(msg.text)}
+                              className="p-1.5 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition"
+                              title="Read aloud"
+                            >
+                              <Volume2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
+
+                  {/* ✅ Render experiences if present */}
+                  {msg.experiences && msg.experiences.length > 0 && (
+                    <div className="mt-2 ml-12">
+                      <ExperienceList experiences={msg.experiences} />
+                    </div>
+                  )}
                 </div>
               );
             })}
