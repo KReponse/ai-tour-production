@@ -1,5 +1,8 @@
 // backend/src/ai/providers/gemini.provider.js
-// ✅ PRODUCTION-READY - Fixed timeout issues, reduced to 15s, proper fallback
+// ✅ PRODUCTION-READY - Fixed system instruction format for @google/genai SDK
+// ✅ FIXED: GenerateContentRequest.system_instruction.parts[0].data error
+// ✅ ADDED: Defensive system prompt validation
+// ✅ ADDED: Proper message format conversion
 
 import { GoogleGenAI } from '@google/genai';
 
@@ -29,7 +32,7 @@ export class GeminiProvider {
     this.maxConsecutiveFailures = 2;
     
     // ── Retry Configuration ─────────────────────────────────────
-    this.maxRetries = 1; // ✅ Reduced to 1 for faster fallback
+    this.maxRetries = 1;
     this.baseDelay = 500;
     this.maxDelay = 2000;
     
@@ -39,17 +42,22 @@ export class GeminiProvider {
     this.useFallbackModel = false;
     this.modelNotFound = false;
     
+    // ✅ Production fallback system prompt
+    this.FALLBACK_SYSTEM_PROMPT = `You are AI Tour, a helpful travel assistant for Rwanda. 
+Help travelers discover amazing experiences in Rwanda including gorilla trekking, safaris, cultural tours, and nature adventures.
+Provide accurate, helpful information about travel in Rwanda.`;
+    
     console.log('🔍 Gemini Provider instance created');
     console.log(`📌 API Key configured: ${!!this.apiKey}`);
     console.log(`📌 User specified model: ${this.userModel || 'none (using default)'}`);
   }
 
   // =========================
-  // ✅ INITIALIZATION - NO API CALLS
+  // ✅ INITIALIZATION
   // =========================
 
   async initialize() {
-    console.log('🚀 Initializing Gemini (no API calls)...');
+    console.log('🚀 Initializing Gemini...');
     
     if (this.initialized) {
       return this.available;
@@ -70,7 +78,6 @@ export class GeminiProvider {
       this.consecutiveFailures = 0;
       
       console.log(`✅ Gemini client created (model: ${this.modelName})`);
-      console.log('📌 Model validation will happen on first request (lazy)');
       return true;
       
     } catch (error) {
@@ -149,6 +156,21 @@ export class GeminiProvider {
       };
     }
     
+    // ── INVALID_ARGUMENT (400) - NO RETRY, switch provider ────
+    if (message.includes('400') || 
+        message.includes('INVALID_ARGUMENT') ||
+        message.includes('required oneof field') ||
+        message.includes('system_instruction.parts[0].data')) {
+      
+      console.error('⛔ Gemini invalid argument - NO RETRY, switch provider');
+      return {
+        code: 'INVALID_ARGUMENT',
+        retryable: false,
+        switchProvider: true,
+        dailyQuota: false,
+      };
+    }
+    
     // ── Network/Timeout Error - 1 retry max ──────────────────
     if (errorName === 'TypeError' && message.includes('fetch') ||
         message.includes('fetch failed') || 
@@ -210,7 +232,7 @@ export class GeminiProvider {
   }
 
   // =========================
-  // ✅ EXECUTE WITH RETRY (MAX 1 RETRY)
+  // ✅ EXECUTE WITH RETRY
   // =========================
 
   async executeWithRetry(fn, context, attempt = 1) {
@@ -221,7 +243,6 @@ export class GeminiProvider {
         return { fallback: true, reason: 'quota_exceeded', code: 'QUOTA_EXHAUSTED' };
       }
       
-      // ── Reset quota after timeout ────────────────────────────
       this.quotaExceeded = false;
       this.quotaResetAt = null;
       this.quotaError = null;
@@ -245,6 +266,15 @@ export class GeminiProvider {
         this.lastErrorTime = new Date();
         this.consecutiveFailures = 0;
         return { fallback: true, reason: 'quota_exhausted', code: 'QUOTA_EXHAUSTED' };
+      }
+      
+      // ── INVALID_ARGUMENT - No retry, switch provider ────────
+      if (classification.code === 'INVALID_ARGUMENT') {
+        console.error('⛔ Gemini invalid argument - switching to fallback');
+        this.lastError = error.message || error;
+        this.lastErrorCode = 'INVALID_ARGUMENT';
+        this.lastErrorTime = new Date();
+        return { fallback: true, reason: 'invalid_argument', code: 'INVALID_ARGUMENT' };
       }
       
       // ── NETWORK_ERROR - 1 retry max ──────────────────────────
@@ -305,6 +335,64 @@ export class GeminiProvider {
   }
 
   // =========================
+  // ✅ VALIDATE SYSTEM PROMPT
+  // =========================
+
+  validateSystemPrompt(prompt) {
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      console.warn('⚠️ System prompt is empty or invalid, using fallback');
+      return this.FALLBACK_SYSTEM_PROMPT;
+    }
+    
+    // Ensure prompt is not too long (Gemini has limits)
+    if (prompt.length > 10000) {
+      console.warn('⚠️ System prompt too long, truncating to 10000 chars');
+      return prompt.substring(0, 10000);
+    }
+    
+    return prompt;
+  }
+
+  // =========================
+  // ✅ CONVERT MESSAGES TO GEMINI FORMAT
+  // =========================
+
+  convertMessagesToGeminiFormat(messages) {
+    const contents = [];
+    let systemInstruction = null;
+    
+    for (const msg of messages) {
+      // Handle system message
+      if (msg.role === 'system') {
+        systemInstruction = this.validateSystemPrompt(msg.content);
+        continue;
+      }
+      
+      // Convert user/assistant messages
+      let role = msg.role === 'assistant' ? 'model' : 'user';
+      
+      // ✅ Ensure content is a valid string
+      const content = msg.content || '';
+      if (typeof content !== 'string') {
+        console.warn(`⚠️ Message content is not a string, converting: ${typeof content}`);
+        continue;
+      }
+      
+      if (content.trim().length === 0) {
+        console.warn('⚠️ Empty message content, skipping');
+        continue;
+      }
+      
+      contents.push({
+        role: role,
+        parts: [{ text: content }]
+      });
+    }
+    
+    return { contents, systemInstruction };
+  }
+
+  // =========================
   // ✅ CHAT - 15 second timeout
   // =========================
 
@@ -326,33 +414,46 @@ export class GeminiProvider {
     }
 
     try {
-      const formattedMessages = [];
-      let systemInstruction = null;
+      // ✅ Convert messages to Gemini format
+      const { contents, systemInstruction } = this.convertMessagesToGeminiFormat(messages);
       
-      for (const msg of messages || []) {
-        if (msg.role === 'system') {
-          systemInstruction = msg.content;
-          continue;
-        }
-        formattedMessages.push({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: msg.content }]
-        });
+      // ✅ Log request details (without secrets)
+      console.log(`📌 systemInstruction: ${systemInstruction ? 'present' : 'absent'}`);
+      console.log(`📌 systemInstructionLength: ${systemInstruction ? systemInstruction.length : 0}`);
+      console.log(`📌 contentsCount: ${contents.length}`);
+      console.log(`📌 model: ${this.modelName}`);
+      
+      // ✅ Validate we have content to send
+      if (contents.length === 0) {
+        console.error('❌ No valid content to send to Gemini');
+        return {
+          success: true,
+          content: "I couldn't process your request. Please try again.",
+          fallback: true,
+          provider: 'gemini',
+          reason: 'no_content',
+          timestamp: new Date().toISOString(),
+        };
       }
 
       const config = {
         temperature: options.temperature ?? 0.7,
-        maxOutputTokens: options.maxTokens ?? 300,
+        maxOutputTokens: options.maxTokens ?? 500,
         topP: options.topP ?? 0.95,
         topK: options.topK ?? 40,
-        timeout: 15000, // ✅ 15 seconds hard timeout
+        timeout: 15000,
       };
 
-      if (systemInstruction) {
+      // ✅ Only add systemInstruction if present and valid
+      if (systemInstruction && systemInstruction.trim().length > 0) {
         config.systemInstruction = systemInstruction;
+        console.log('📌 systemInstruction added to config');
+      } else {
+        console.warn('⚠️ No valid system instruction, using fallback');
+        config.systemInstruction = this.FALLBACK_SYSTEM_PROMPT;
+        console.log('📌 Fallback system instruction added');
       }
 
-      // ✅ Create abort controller for timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
@@ -363,8 +464,8 @@ export class GeminiProvider {
         const result = await this.executeWithRetry(async () => {
           const response = await this.ai.models.generateContent({
             model: this.modelName,
-            contents: formattedMessages,
-            config,
+            contents: contents,
+            config: config,
             signal: controller.signal,
           });
           
@@ -466,6 +567,25 @@ Return ONLY valid JSON (no markdown, no code fences):
   "weather": "Weather information"
 }`;
 
+      // ✅ Convert single prompt to Gemini format
+      const { contents, systemInstruction } = this.convertMessagesToGeminiFormat([
+        { role: 'user', content: prompt }
+      ]);
+      
+      console.log(`📌 systemInstruction: ${systemInstruction ? 'present' : 'absent'}`);
+      console.log(`📌 contentsCount: ${contents.length}`);
+      console.log(`📌 model: ${this.modelName}`);
+
+      const config = {
+        temperature: 0.7,
+        maxOutputTokens: 800,
+        timeout: 20000,
+      };
+
+      if (systemInstruction && systemInstruction.trim().length > 0) {
+        config.systemInstruction = systemInstruction;
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
@@ -476,12 +596,8 @@ Return ONLY valid JSON (no markdown, no code fences):
         const result = await this.executeWithRetry(async () => {
           const response = await this.ai.models.generateContent({
             model: this.modelName,
-            contents: prompt,
-            config: {
-              temperature: 0.7,
-              maxOutputTokens: 800,
-              timeout: 20000,
-            },
+            contents: contents,
+            config: config,
             signal: controller.signal,
           });
           
@@ -533,6 +649,7 @@ Return ONLY valid JSON (no markdown, no code fences):
   async recommend(params) {
     console.log(`📤 Gemini recommend() called`);
     console.log(`📌 Model: ${this.modelName}${this.useFallbackModel ? ' (fallback)' : ''}`);
+    console.log(`📌 Query: ${params?.query || 'Popular experiences'}`);
     
     if (!this.isReady()) {
       console.warn('⚠️ Gemini not ready');
@@ -540,31 +657,41 @@ Return ONLY valid JSON (no markdown, no code fences):
     }
 
     try {
-      const { query = '', userContext, limit = 10 } = params || {};
+      const { query = '', userContext, limit = 10, existingListings = [] } = params || {};
       
-      let prompt = `Recommend ${limit} experiences in Rwanda based on: "${query || 'Popular experiences in Rwanda'}"`;
+      // ✅ Build prompt with real listing context
+      let prompt = `You are an AI travel assistant for Rwanda. Based on the user's query, recommend the most relevant experiences from the available listings.
 
-      if (userContext) {
-        prompt += `\nUser Context: Past bookings: ${userContext.pastBookings?.length || 0}`;
+User Query: "${query || 'Popular experiences in Rwanda'}"
+
+Available Listings (Real data from our database):
+${existingListings.map((listing, i) => 
+  `${i + 1}. ${listing.title} - ${listing.location} - $${listing.price} - ${listing.rating || 'New'}⭐ - ${listing.category || 'General'}`
+).join('\n')}
+
+Return ONLY a JSON array of recommended listing IDs in order of relevance (most relevant first):
+["listing_id_1", "listing_id_2", "listing_id_3"]
+
+Important: Only recommend listings from the provided list. Never invent listings.`;
+
+      // ✅ Convert to Gemini format
+      const { contents, systemInstruction } = this.convertMessagesToGeminiFormat([
+        { role: 'user', content: prompt }
+      ]);
+      
+      console.log(`📌 systemInstruction: ${systemInstruction ? 'present' : 'absent'}`);
+      console.log(`📌 contentsCount: ${contents.length}`);
+      console.log(`📌 model: ${this.modelName}`);
+
+      const config = {
+        temperature: 0.3,
+        maxOutputTokens: 500,
+        timeout: 15000,
+      };
+
+      if (systemInstruction && systemInstruction.trim().length > 0) {
+        config.systemInstruction = systemInstruction;
       }
-
-      prompt += `
-
-Return ONLY valid JSON array (no markdown, no code fences):
-[
-  {
-    "title": "Experience name",
-    "location": "Location, Rwanda",
-    "price": 0,
-    "duration": "2 days",
-    "description": "Brief description",
-    "whyRecommended": "Why this experience is recommended",
-    "activities": ["Activity 1", "Activity 2"],
-    "bestTime": "Best time to visit",
-    "rating": 4.5,
-    "category": "Adventure|Cultural|Nature|Luxury|Food"
-  }
-]`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
@@ -576,12 +703,8 @@ Return ONLY valid JSON array (no markdown, no code fences):
         const result = await this.executeWithRetry(async () => {
           const response = await this.ai.models.generateContent({
             model: this.modelName,
-            contents: prompt,
-            config: {
-              temperature: 0.7,
-              maxOutputTokens: 800,
-              timeout: 15000,
-            },
+            contents: contents,
+            config: config,
             signal: controller.signal,
           });
           
@@ -600,12 +723,16 @@ Return ONLY valid JSON array (no markdown, no code fences):
           return this.createFallbackRecommendations(params, result.reason);
         }
 
-        const recommendations = this.parseRecommendations(result.text);
+        const recommendedIds = this.parseRecommendedIds(result.text);
         
+        const recommendations = existingListings
+          .filter(listing => recommendedIds.includes(listing._id))
+          .slice(0, limit);
+
         return {
           success: true,
-          recommendations: recommendations.length > 0 ? recommendations : [],
-          raw: result.text,
+          recommendations: recommendations.length > 0 ? recommendations : existingListings.slice(0, limit),
+          recommendedIds: recommendedIds,
           provider: 'gemini',
           model: this.modelName,
           timestamp: new Date().toISOString(),
@@ -658,7 +785,7 @@ Return ONLY valid JSON array (no markdown, no code fences):
     }
   }
 
-  parseRecommendations(text) {
+  parseRecommendedIds(text) {
     try {
       let jsonString = text;
       jsonString = jsonString.replace(/```json\s*/g, '');
@@ -720,46 +847,11 @@ Return ONLY valid JSON array (no markdown, no code fences):
   }
 
   createFallbackRecommendations(params, reason, error = null) {
+    const recommendations = params?.existingListings?.slice(0, 10) || [];
+    
     return {
       success: true,
-      recommendations: [
-        {
-          title: "Kigali City Experience",
-          location: "Kigali, Rwanda",
-          price: 150,
-          duration: "2 days",
-          description: "Explore the cleanest city in Africa",
-          whyRecommended: "Perfect introduction to Rwanda",
-          activities: ["City Tour", "Genocide Memorial", "Local Markets"],
-          bestTime: "All year round",
-          rating: 4.8,
-          category: "Cultural"
-        },
-        {
-          title: "Gorilla Trekking Adventure",
-          location: "Volcanoes National Park",
-          price: 750,
-          duration: "3 days",
-          description: "Experience mountain gorillas in their natural habitat",
-          whyRecommended: "Once-in-a-lifetime experience",
-          activities: ["Gorilla Trekking", "Community Visit"],
-          bestTime: "June-September",
-          rating: 4.9,
-          category: "Adventure"
-        },
-        {
-          title: "Lake Kivu Serenity",
-          location: "Lake Kivu",
-          price: 300,
-          duration: "2 days",
-          description: "Relax by the beautiful Lake Kivu",
-          whyRecommended: "Perfect for relaxation",
-          activities: ["Boat Cruise", "Kayaking", "Swimming"],
-          bestTime: "All year round",
-          rating: 4.7,
-          category: "Nature"
-        },
-      ],
+      recommendations: recommendations,
       fallback: true,
       provider: 'gemini',
       reason: reason || 'fallback',

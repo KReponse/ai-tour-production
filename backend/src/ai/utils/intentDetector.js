@@ -1,8 +1,7 @@
 // backend/src/ai/utils/intentDetector.js
-// ✅ COMPLETE - Intent detection with context awareness
-// ✅ ADDED: Listing-specific intent detection
-// ✅ ADDED: Follow-up context tracking
-// ✅ ADDED: Booking intent detection
+// ✅ COMPLETE FIXED - Intent detection with context awareness
+// ✅ FIXED: Defensive message handling - prevents undefined/null .trim() errors
+// ✅ FIXED: Safe entity extraction with proper input validation
 
 // Intent patterns with priority
 const intentPatterns = {
@@ -204,13 +203,46 @@ const experienceTypes = [
 ];
 
 /**
+ * ✅ SAFELY get message string
+ */
+function getSafeMessage(message) {
+  if (!message || typeof message !== 'string') {
+    return '';
+  }
+  return message;
+}
+
+/**
+ * ✅ SAFELY get message lowercased
+ */
+function getSafeMessageLower(message) {
+  const safe = getSafeMessage(message);
+  return safe.toLowerCase();
+}
+
+/**
  * Detect intent with context awareness
  */
 export function detectIntent(message, history = []) {
-  const messageLower = message.toLowerCase().trim();
+  // ✅ Defensive: Ensure message is a string
+  const safeMessage = getSafeMessage(message);
+  const messageLower = getSafeMessageLower(message);
+  
+  // ✅ If message is empty, return general intent
+  if (!safeMessage || safeMessage.trim().length === 0) {
+    console.log('📌 Empty message, returning general intent');
+    return {
+      intent: 'general',
+      confidence: 0.5,
+      isFollowUp: false,
+      entities: {},
+      context: {},
+      matchedPatterns: []
+    };
+  }
   
   // ✅ If message is very short, use previous context
-  if (message.length < 10 && history && history.length > 0) {
+  if (safeMessage.length < 10 && history && history.length > 0) {
     const lastIntent = history[history.length - 1]?.metadata?.intent || null;
     if (lastIntent) {
       console.log(`📌 Using previous intent from context: ${lastIntent}`);
@@ -218,7 +250,7 @@ export function detectIntent(message, history = []) {
         intent: lastIntent,
         confidence: 0.8,
         isFollowUp: true,
-        entities: extractEntities(message, lastIntent),
+        entities: extractEntities(safeMessage, lastIntent),
         context: history[history.length - 1]?.metadata?.context || {}
       };
     }
@@ -287,17 +319,17 @@ export function detectIntent(message, history = []) {
         intent: lastIntent,
         confidence: 0.5,
         isFollowUp: true,
-        entities: extractEntities(message, lastIntent),
+        entities: extractEntities(safeMessage, lastIntent),
         context: history[history.length - 1]?.metadata?.context || {}
       };
     }
   }
 
   // Extract entities
-  const entities = extractEntities(message, bestIntent);
+  const entities = extractEntities(safeMessage, bestIntent);
 
   // Check if this is a follow-up
-  const isFollowUp = determineFollowUp(message, history);
+  const isFollowUp = determineFollowUp(safeMessage, history);
 
   // ✅ Build context
   const context = {
@@ -318,11 +350,19 @@ export function detectIntent(message, history = []) {
 }
 
 /**
- * Extract entities from message
+ * ✅ Extract entities from message - DEFENSIVE FIX
  */
 export function extractEntities(message, intent = 'general') {
+  // ✅ Defensive: Ensure message is a string
+  const safeMessage = getSafeMessage(message);
+  const messageLower = getSafeMessageLower(safeMessage);
+  
+  // ✅ If message is empty, return empty entities
+  if (!safeMessage || safeMessage.trim().length === 0) {
+    return {};
+  }
+  
   const entities = {};
-  const messageLower = message.toLowerCase();
   
   // Extract location from known locations
   for (const location of knownLocations) {
@@ -334,9 +374,10 @@ export function extractEntities(message, intent = 'general') {
   
   // Try regex patterns
   for (const [key, pattern] of Object.entries(entityPatterns)) {
-    const match = message.match(pattern);
+    const match = safeMessage.match(pattern);
     if (match) {
-      entities[key] = match[1].trim();
+      const value = match[1];
+      entities[key] = typeof value === 'string' ? value.trim() : value;
     }
   }
 
@@ -377,6 +418,15 @@ export function extractEntities(message, intent = 'general') {
 export function determineFollowUp(message, history) {
   if (!history || history.length === 0) return false;
 
+  // ✅ Defensive: Ensure message is a string
+  const safeMessage = getSafeMessage(message);
+  const messageLower = getSafeMessageLower(safeMessage);
+  
+  // ✅ If message is empty, it's not a follow-up
+  if (!safeMessage || safeMessage.trim().length === 0) {
+    return false;
+  }
+
   const followUpPatterns = [
     /^(yes|no|okay|ok|sure|yeah|yep|nope|nah|maybe|perhaps)$/i,
     /^(where|when|who|what|which|how|why)\s*(is|are|was|were|do|does|did|can|could|will|would)?\s*$/i,
@@ -393,8 +443,6 @@ export function determineFollowUp(message, history) {
     /^(the|that|this)\s*(one|thing|place|tour|experience|listing)/i
   ];
 
-  const messageLower = message.toLowerCase().trim();
-  
   // Check if message matches any follow-up pattern
   for (const pattern of followUpPatterns) {
     if (pattern.test(messageLower)) {
@@ -403,7 +451,7 @@ export function determineFollowUp(message, history) {
   }
 
   // Check if message is very short (likely a follow-up)
-  if (message.length < 15 && message.split(' ').length < 4) {
+  if (safeMessage.length < 15 && safeMessage.split(' ').length < 4) {
     // But not if it's a clear new topic
     const newTopicPatterns = [
       /^(hi|hello|hey|muraho|good morning|good afternoon|good evening)$/i,

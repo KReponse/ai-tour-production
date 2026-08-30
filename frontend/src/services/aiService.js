@@ -687,8 +687,53 @@ export const continueConversation = async (message, sessionId, language = 'Engli
 };
 
 // ===============================
-// ✅ EXPORT ALL
+// ✅ GET DESTINATIONS (Dynamic from listings)
 // ===============================
+export const getDestinations = async () => {
+  try {
+    const token = localStorage.getItem('token');
+    
+    console.log('📤 [getDestinations] Fetching destinations from AI service...');
+    
+    const response = await axios.get(
+      `${API_URL}/ai/destinations`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        timeout: 10000
+      }
+    );
+    
+    console.log('✅ [getDestinations] Response:', response.data);
+    
+    if (response.data && response.data.success) {
+      return {
+        success: true,
+        destinations: response.data.destinations || [],
+        total: response.data.total || 0,
+        source: response.data.source || 'listings'
+      };
+    }
+    
+    return {
+      success: false,
+      destinations: [],
+      total: 0,
+      error: response.data?.message || 'Failed to load destinations'
+    };
+  } catch (error) {
+    console.error('❌ [getDestinations] Error:', error);
+    
+    // Return a user-friendly error
+    return {
+      success: false,
+      destinations: [],
+      total: 0,
+      error: error.response?.data?.message || 'Failed to load destinations. Please try again.',
+      fallback: true
+    };
+  }
+};
+
 export default {
   getAIChat,
   getAIChatWithSession,
@@ -708,6 +753,7 @@ export default {
   getRecommendationsByInterests,
   getActiveSessions,
   continueConversation,
+  getDestinations, // ✅ NEW
   // Helpers
   normalizeAIResponse,
   handleAPIError

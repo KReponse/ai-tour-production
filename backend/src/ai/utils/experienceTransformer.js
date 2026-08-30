@@ -1,4 +1,8 @@
 // backend/src/ai/utils/experienceTransformer.js
+// ✅ ENHANCED - Added user preference integration
+// ✅ ADDED: Personalized experience ranking
+// ✅ ADDED: Preference-based filtering
+// ✅ ADDED: Score calculation with user context
 
 /**
  * ✅ Experience Transformer
@@ -13,13 +17,22 @@
  */
 
 /**
- * ✅ Transform a single Listing to Experience
+ * ✅ Transform a single Listing to Experience with user context
  */
-export const transformToListingExperience = (listing) => {
+export const transformToListingExperience = (listing, userContext = null) => {
   if (!listing) return null;
 
-  // ✅ Extract provider info
   const provider = listing.provider || {};
+  
+  // ✅ Calculate personalization score if user context provided
+  let personalizationScore = 0;
+  let matchReasons = [];
+  
+  if (userContext) {
+    const result = calculatePersonalizationScore(listing, userContext);
+    personalizationScore = result.score;
+    matchReasons = result.reasons;
+  }
   
   return {
     // Core Experience fields
@@ -36,6 +49,8 @@ export const transformToListingExperience = (listing) => {
     // Visuals
     coverImage: listing.coverImage || null,
     galleryImages: listing.galleryImages || [],
+    coverMedia: listing.coverMedia || null,
+    coverMediaType: listing.coverMediaType || 'image',
     
     // Ratings
     rating: listing.averageRating || 0,
@@ -49,6 +64,7 @@ export const transformToListingExperience = (listing) => {
       avatar: provider.avatar || provider.profileImage || null,
       verified: provider.verificationStatus === 'approved' || false,
       totalListings: provider.totalListings || 0,
+      rating: provider.averageRating || 0,
     },
     
     // Listing Details
@@ -60,6 +76,7 @@ export const transformToListingExperience = (listing) => {
     tags: listing.tags || [],
     interests: listing.interests || [],
     highlights: listing.highlights || [],
+    amenities: listing.amenities || [],
     
     // Availability
     availability: listing.availability || {},
@@ -81,37 +98,187 @@ export const transformToListingExperience = (listing) => {
     // SEO
     slug: listing.slug || listing.title?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || '',
     metaDescription: listing.metaDescription || listing.description?.substring(0, 160) || '',
+    
+    // ✅ Personalization fields
+    personalizationScore: personalizationScore,
+    matchReasons: matchReasons,
+    isPersonalized: !!userContext && personalizationScore > 0,
   };
 };
 
 /**
- * ✅ Transform multiple Listings to Experiences
+ * ✅ Calculate personalization score for a listing
  */
-export const transformToExperiences = (listings) => {
+export const calculatePersonalizationScore = (listing, userContext) => {
+  let score = 0;
+  const reasons = [];
+  
+  if (!userContext || !listing) {
+    return { score: 0, reasons: [] };
+  }
+  
+  const {
+    interests = [],
+    favoriteLocations = [],
+    favoriteCategories = [],
+    preferredDestinations = [],
+    visitedDestinations = [],
+    travelStyle = 'balanced',
+    budget = 'mid-range',
+    travelPace = 'moderate'
+  } = userContext;
+  
+  // ✅ Interest match (max 30 points)
+  if (interests.length > 0) {
+    const listingTags = listing.tags || [];
+    const listingInterests = listing.interests || [];
+    const allListingKeywords = [...listingTags, ...listingInterests];
+    
+    const matches = interests.filter(interest =>
+      allListingKeywords.some(keyword =>
+        keyword.toLowerCase().includes(interest.toLowerCase())
+      )
+    );
+    
+    if (matches.length > 0) {
+      const matchScore = Math.min(matches.length * 5, 30);
+      score += matchScore;
+      reasons.push(`Matches your interest in ${matches.slice(0, 3).join(', ')}`);
+    }
+  }
+  
+  // ✅ Location match (max 20 points)
+  if (favoriteLocations.length > 0 || preferredDestinations.length > 0) {
+    const allLocations = [...favoriteLocations, ...preferredDestinations];
+    const listingLocation = listing.location?.toLowerCase() || '';
+    
+    const locationMatches = allLocations.filter(loc =>
+      listingLocation.includes(loc.toLowerCase())
+    );
+    
+    if (locationMatches.length > 0) {
+      const matchScore = Math.min(locationMatches.length * 5, 20);
+      score += matchScore;
+      reasons.push(`Located in ${locationMatches.slice(0, 2).join(', ')}`);
+    }
+  }
+  
+  // ✅ Travel style match (max 15 points)
+  const styleKeywords = {
+    adventure: ['adventure', 'trekking', 'hiking', 'wildlife', 'safari', 'explore', 'thrill'],
+    cultural: ['culture', 'history', 'museum', 'heritage', 'local', 'traditional', 'art'],
+    relaxation: ['relax', 'spa', 'wellness', 'peaceful', 'scenic', 'beach', 'calm'],
+    luxury: ['luxury', 'premium', 'exclusive', '5-star', 'vip', 'private', 'fine'],
+    budget: ['budget', 'affordable', 'cheap', 'value', 'economical', 'cost-effective'],
+    family: ['family', 'kids', 'children', 'family-friendly', 'group', 'all-ages'],
+    romantic: ['romantic', 'couples', 'honeymoon', 'intimate', 'sunset']
+  };
+  
+  const styleWords = styleKeywords[travelStyle] || [];
+  const listingKeywords = [
+    ...(listing.tags || []),
+    ...(listing.interests || []),
+    listing.title || '',
+    listing.description || '',
+    listing.businessType || ''
+  ].join(' ').toLowerCase();
+  
+  const styleMatches = styleWords.filter(word =>
+    listingKeywords.includes(word)
+  );
+  
+  if (styleMatches.length > 0) {
+    const matchScore = Math.min(styleMatches.length * 3, 15);
+    score += matchScore;
+    reasons.push(`Matches your ${travelStyle} travel style`);
+  }
+  
+  // ✅ Budget compatibility (max 15 points)
+  const budgetRanges = {
+    budget: [0, 100],
+    'mid-range': [50, 300],
+    premium: [200, 600],
+    luxury: [400, 9999]
+  };
+  
+  const range = budgetRanges[budget] || budgetRanges['mid-range'];
+  const price = listing.price || 0;
+  
+  if (price >= range[0] && price <= range[1]) {
+    score += 15;
+    reasons.push(`Within your budget range ($${price})`);
+  } else if (price < range[0]) {
+    score += 8;
+    reasons.push(`Under budget ($${price})`);
+  } else if (price > range[1]) {
+    score += 3;
+    reasons.push(`Above budget but premium ($${price})`);
+  }
+  
+  // ✅ Rating bonus (max 10 points)
+  const rating = listing.averageRating || 0;
+  if (rating >= 4.5) {
+    score += 10;
+    reasons.push(`Highly rated (${rating}⭐)`);
+  } else if (rating >= 4.0) {
+    score += 7;
+    reasons.push(`Well rated (${rating}⭐)`);
+  } else if (rating >= 3.5) {
+    score += 4;
+  }
+  
+  // ✅ Booking popularity (max 10 points)
+  const bookingCount = listing.bookingCount || 0;
+  if (bookingCount > 100) {
+    score += 10;
+    reasons.push('Very popular with travelers');
+  } else if (bookingCount > 50) {
+    score += 7;
+  } else if (bookingCount > 20) {
+    score += 4;
+  }
+  
+  // ✅ Cap at 100
+  score = Math.min(score, 100);
+  
+  // ✅ Deduplicate reasons
+  const uniqueReasons = [...new Set(reasons)];
+  
+  return {
+    score: Math.round(score),
+    reasons: uniqueReasons.slice(0, 5) // Max 5 reasons
+  };
+};
+
+/**
+ * ✅ Transform multiple Listings to Experiences with personalization
+ */
+export const transformToExperiences = (listings, userContext = null) => {
   if (!listings || !Array.isArray(listings)) return [];
   
   return listings
-    .filter(listing => listing && listing._id) // Filter out invalid entries
-    .map(listing => transformToListingExperience(listing))
-    .filter(experience => experience !== null);
+    .filter(listing => listing && listing._id)
+    .map(listing => transformToListingExperience(listing, userContext))
+    .filter(experience => experience !== null)
+    .sort((a, b) => (b.personalizationScore || 0) - (a.personalizationScore || 0));
 };
 
 /**
  * ✅ Transform with additional scoring/ranking
  */
-export const transformWithScores = (listings, scores = {}) => {
+export const transformWithScores = (listings, scores = {}, userContext = null) => {
   if (!listings || !Array.isArray(listings)) return [];
   
   return listings
     .filter(listing => listing && listing._id)
     .map(listing => {
-      const experience = transformToListingExperience(listing);
-      const score = scores[listing._id] || listing.score || 0;
+      const experience = transformToListingExperience(listing, userContext);
+      const score = scores[listing._id] || listing.score || experience.personalizationScore || 0;
       
       return {
         ...experience,
         score: Math.round(score * 100) / 100,
-        matchReason: listing.matchReason || null,
+        matchReason: listing.matchReason || experience.matchReasons?.join(' • ') || null,
       };
     })
     .filter(experience => experience !== null)
@@ -127,7 +294,7 @@ export const groupExperiencesByCategory = (experiences) => {
   const grouped = {};
   
   experiences.forEach(experience => {
-    const category = experience.businessType || 'other';
+    const category = experience.businessType || experience.category || 'other';
     if (!grouped[category]) {
       grouped[category] = [];
     }
@@ -156,18 +323,19 @@ export const filterExperiencesByPreferences = (experiences, preferences = {}) =>
   
   // ✅ Filter by interests
   if (preferences.interests && preferences.interests.length > 0) {
-    filtered = filtered.filter(exp => 
-      exp.interests?.some(interest => 
-        preferences.interests.some(pref => 
-          interest.toLowerCase().includes(pref.toLowerCase())
-        )
-      ) ||
-      exp.tags?.some(tag => 
-        preferences.interests.some(pref => 
-          tag.toLowerCase().includes(pref.toLowerCase())
-        )
-      )
-    );
+    filtered = filtered.filter(exp => {
+      const expKeywords = [
+        ...(exp.interests || []),
+        ...(exp.tags || []),
+        exp.title || '',
+        exp.description || '',
+        exp.category || ''
+      ].join(' ').toLowerCase();
+      
+      return preferences.interests.some(interest =>
+        expKeywords.includes(interest.toLowerCase())
+      );
+    });
   }
   
   // ✅ Filter by location
@@ -184,13 +352,23 @@ export const filterExperiencesByPreferences = (experiences, preferences = {}) =>
     );
   }
   
+  // ✅ Filter by rating
+  if (preferences.minRating) {
+    filtered = filtered.filter(exp => exp.rating >= preferences.minRating);
+  }
+  
+  // ✅ Filter by availability
+  if (preferences.availableOnly) {
+    filtered = filtered.filter(exp => exp.isAvailable);
+  }
+  
   return filtered;
 };
 
 /**
- * ✅ Sort Experiences by relevance
+ * ✅ Sort Experiences by relevance with personalization
  */
-export const sortExperiencesByRelevance = (experiences, sortBy = 'rating') => {
+export const sortExperiencesByRelevance = (experiences, sortBy = 'relevance', userContext = null) => {
   if (!experiences || !Array.isArray(experiences)) return [];
   
   const sorted = [...experiences];
@@ -212,7 +390,15 @@ export const sortExperiencesByRelevance = (experiences, sortBy = 'rating') => {
       sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       break;
     case 'relevance':
-      sorted.sort((a, b) => (b.score || 0) - (a.score || 0));
+      // If user context provided, use personalization score
+      if (userContext) {
+        sorted.sort((a, b) => (b.personalizationScore || 0) - (a.personalizationScore || 0));
+      } else {
+        sorted.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      }
+      break;
+    case 'personalized':
+      sorted.sort((a, b) => (b.personalizationScore || 0) - (a.personalizationScore || 0));
       break;
     default:
       sorted.sort((a, b) => b.rating - a.rating);
@@ -222,23 +408,38 @@ export const sortExperiencesByRelevance = (experiences, sortBy = 'rating') => {
 };
 
 /**
- * ✅ Create Experience summary for AI prompts
+ * ✅ Create Experience summary for AI prompts with personalization
  */
-export const createExperienceSummary = (experiences, limit = 5) => {
+export const createExperienceSummary = (experiences, limit = 5, userContext = null) => {
   if (!experiences || !Array.isArray(experiences) || experiences.length === 0) {
     return "No experiences available.";
   }
   
-  const topExperiences = experiences.slice(0, limit);
+  // ✅ Sort by personalization score if context provided
+  let sorted = [...experiences];
+  if (userContext) {
+    sorted.sort((a, b) => (b.personalizationScore || 0) - (a.personalizationScore || 0));
+  }
+  
+  const topExperiences = sorted.slice(0, limit);
   
   return topExperiences.map((exp, index) => {
-    return `${index + 1}. **${exp.title}**\n` +
-           `   📍 Location: ${exp.location}\n` +
-           `   💰 Price: $${exp.price} / ${exp.duration}\n` +
-           `   ⭐ Rating: ${exp.rating} (${exp.totalReviews} reviews)\n` +
-           `   🏷️ Tags: ${exp.tags?.join(', ') || 'None'}\n` +
-           `   📝 Description: ${exp.description?.substring(0, 150) || 'No description'}\n`;
-  }).join('\n');
+    let summary = `${index + 1}. **${exp.title}**\n`;
+    summary += `   📍 Location: ${exp.location}\n`;
+    summary += `   💰 Price: $${exp.price} / ${exp.duration}\n`;
+    summary += `   ⭐ Rating: ${exp.rating} (${exp.totalReviews} reviews)\n`;
+    summary += `   🏷️ Tags: ${exp.tags?.join(', ') || 'None'}\n`;
+    summary += `   📝 Description: ${exp.description?.substring(0, 150) || 'No description'}`;
+    
+    if (exp.personalizationScore) {
+      summary += `\n   🎯 Match Score: ${exp.personalizationScore}%`;
+    }
+    if (exp.matchReasons?.length > 0) {
+      summary += `\n   ✅ Why: ${exp.matchReasons.join(' • ')}`;
+    }
+    
+    return summary;
+  }).join('\n\n');
 };
 
 /**
@@ -263,6 +464,8 @@ export const createExperienceCard = (experience) => {
     providerName: experience.provider?.name || 'Provider',
     providerId: experience.provider?.id || null,
     slug: experience.slug || '',
+    personalizationScore: experience.personalizationScore || 0,
+    matchReasons: experience.matchReasons || [],
   };
 };
 
@@ -309,7 +512,6 @@ export const createRecommendedExperiences = (experiences, limit = 6) => {
 export const createNearbyExperiences = (experiences, location, limit = 6) => {
   if (!experiences || !Array.isArray(experiences) || !location) return [];
   
-  // Simple location matching (can be enhanced with geospatial)
   const nearby = experiences.filter(exp =>
     exp.location?.toLowerCase().includes(location.toLowerCase())
   );
@@ -320,51 +522,26 @@ export const createNearbyExperiences = (experiences, location, limit = 6) => {
 };
 
 /**
- * ✅ Create AI-recommended experiences
+ * ✅ Create AI-recommended experiences with personalization
  */
 export const createAIRecommendedExperiences = (experiences, userContext, limit = 6) => {
   if (!experiences || !Array.isArray(experiences)) return [];
   
-  let scored = experiences.map(exp => {
-    let score = 0;
+  // ✅ Use the personalization scoring
+  const scored = experiences.map(exp => {
+    const result = calculatePersonalizationScore(
+      { ...exp, _id: exp.id || exp._id, tags: exp.tags || [], interests: exp.interests || [] },
+      userContext
+    );
     
-    // ✅ User interest match
-    if (userContext?.interests) {
-      const interestMatches = userContext.interests.filter(interest =>
-        exp.tags?.some(tag => tag.toLowerCase().includes(interest.toLowerCase())) ||
-        exp.interests?.some(i => i.toLowerCase().includes(interest.toLowerCase()))
-      );
-      score += interestMatches.length * 2;
-    }
-    
-    // ✅ Past booking match
-    if (userContext?.favoriteTypes) {
-      const typeMatch = userContext.favoriteTypes.some(type =>
-        exp.businessType?.toLowerCase().includes(type.toLowerCase())
-      );
-      if (typeMatch) score += 3;
-    }
-    
-    // ✅ Location match
-    if (userContext?.favoriteLocations) {
-      const locationMatch = userContext.favoriteLocations.some(loc =>
-        exp.location?.toLowerCase().includes(loc.toLowerCase())
-      );
-      if (locationMatch) score += 2;
-    }
-    
-    // ✅ Rating bonus
-    if (exp.rating >= 4.5) score += 2;
-    else if (exp.rating >= 4.0) score += 1;
-    
-    // ✅ Booking count bonus
-    if (exp.bookingCount > 50) score += 2;
-    else if (exp.bookingCount > 20) score += 1;
-    
-    return { ...exp, score };
+    return {
+      ...exp,
+      personalizationScore: result.score,
+      matchReasons: result.reasons
+    };
   });
   
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.personalizationScore - a.personalizationScore);
   
   return scored
     .slice(0, limit)
@@ -398,20 +575,20 @@ export const createExperienceCategories = (experiences) => {
       categories.adventure.push(exp);
     } else if (['restaurant', 'cafe'].includes(type)) {
       categories.food.push(exp);
-    } else if (['hotel', 'lodge'].includes(type)) {
+    } else if (['hotel', 'lodge', 'resort'].includes(type)) {
       categories.luxury.push(exp);
     } else if (['events', 'shop'].includes(type)) {
       categories.urban.push(exp);
     }
     
     // ✅ Categorize by tags
-    if (tags.some(t => ['nature', 'wildlife', 'scenic', 'lake', 'forest'].includes(t))) {
+    if (tags.some(t => ['nature', 'wildlife', 'scenic', 'lake', 'forest', 'mountain', 'gorilla'].includes(t))) {
       categories.nature.push(exp);
     }
-    if (tags.some(t => ['culture', 'history', 'heritage', 'traditional'].includes(t))) {
+    if (tags.some(t => ['culture', 'history', 'heritage', 'traditional', 'museum', 'memorial'].includes(t))) {
       categories.cultural.push(exp);
     }
-    if (tags.some(t => ['relaxation', 'wellness', 'spa', 'peaceful'].includes(t))) {
+    if (tags.some(t => ['relaxation', 'wellness', 'spa', 'peaceful', 'sunset', 'beach'].includes(t))) {
       categories.relaxation.push(exp);
     }
     if (exp.price < 100) {
@@ -425,6 +602,30 @@ export const createExperienceCategories = (experiences) => {
   });
   
   return categories;
+};
+
+/**
+ * ✅ Get top matches for a user
+ */
+export const getTopMatches = (experiences, userContext, limit = 5) => {
+  if (!experiences || !Array.isArray(experiences)) return [];
+  
+  const scored = experiences.map(exp => {
+    const result = calculatePersonalizationScore(
+      { ...exp, _id: exp.id || exp._id, tags: exp.tags || [], interests: exp.interests || [] },
+      userContext
+    );
+    
+    return {
+      ...exp,
+      personalizationScore: result.score,
+      matchReasons: result.reasons
+    };
+  });
+  
+  scored.sort((a, b) => b.personalizationScore - a.personalizationScore);
+  
+  return scored.slice(0, limit);
 };
 
 /**
@@ -445,4 +646,6 @@ export default {
   createNearbyExperiences,
   createAIRecommendedExperiences,
   createExperienceCategories,
-};
+  calculatePersonalizationScore,
+  getTopMatches,
+}; 

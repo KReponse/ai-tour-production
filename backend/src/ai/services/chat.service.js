@@ -1,15 +1,15 @@
 // backend/src/ai/services/chat.service.js
-// ✅ COMPLETE FIXED - Full conversation memory with session persistence
-// ✅ FIXED - Limited history to 2 messages for faster responses
-// ✅ FIXED - ES Module imports
-// ✅ ENHANCED - Real MongoDB listing integration
-// ✅ ENHANCED - Proper fallback when AI fails
-// ✅ ENHANCED - Response formatting with real listing data
+// ✅ COMPLETE FIXED - Enhanced with Traveler Profile integration
+// ✅ ADDED: User preference loading for personalization
+// ✅ ADDED: Behavioral context for better recommendations
+// ✅ ADDED: Personalized response generation
+// ✅ FIXED: Enhanced fallback responses with real listing data
 
 import aiProvider from '../providers/providerInterface.js';
 import systemPrompt from '../prompts/system.prompt.js';
 import Listing from '../../models/Listing.js';
 import ChatSession from '../../models/ChatSession.js';
+import User from '../../models/User.js';
 import { transformToExperiences } from '../utils/experienceTransformer.js';
 import aiCache from '../utils/aiCache.js';
 import { detectIntent, determineFollowUp, extractEntities } from '../utils/intentDetector.js';
@@ -27,10 +27,8 @@ import responseFormatter from '../utils/responseFormatter.js';
 
 class ChatService {
   constructor() {
-    // In-memory cache for active sessions (for performance)
     this.sessionCache = new Map();
     this.sessionTimeout = 30 * 60 * 1000; // 30 minutes
-    // ✅ FIXED: Reduced from 10 to 2 messages for faster responses
     this.MAX_HISTORY = 2;
     this.cacheEnabled = process.env.AI_CACHE_ENABLED !== 'false';
     this.maxResults = 10;
@@ -48,18 +46,15 @@ class ChatService {
     // Check in-memory cache first
     if (sessionId && this.sessionCache.has(sessionId)) {
       const cached = this.sessionCache.get(sessionId);
-      // Check if session is still valid
       if (Date.now() - cached.lastActivity < this.sessionTimeout) {
         cached.lastActivity = Date.now();
         console.log(`📌 Using cached session: ${sessionId}`);
         return cached;
       } else {
-        // Session expired, remove from cache
         this.sessionCache.delete(sessionId);
       }
     }
 
-    // Try to find existing session in MongoDB
     let session = null;
     if (sessionId) {
       try {
@@ -76,7 +71,6 @@ class ChatService {
       }
     }
 
-    // If no session found, create new one
     if (!session) {
       const newSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       
@@ -89,7 +83,8 @@ class ChatService {
           location: userLocation || 'Rwanda',
           lastIntent: null,
           lastSearch: null,
-          lastResults: []
+          lastResults: [],
+          userPreferences: null // ✅ Store user preferences here
         },
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -100,19 +95,16 @@ class ChatService {
       };
 
       try {
-        // Save to MongoDB
         const newSession = new ChatSession(sessionData);
         await newSession.save();
         session = sessionData;
         console.log(`✅ New session created: ${newSessionId}`);
       } catch (error) {
         console.error('❌ Error creating session in DB:', error);
-        // Fallback to in-memory only
         session = sessionData;
       }
     }
 
-    // Cache in memory
     this.sessionCache.set(session.id, {
       ...session,
       lastActivity: Date.now()
@@ -126,14 +118,12 @@ class ChatService {
    */
   async addMessageToSession(sessionId, message) {
     try {
-      // Update cache
       if (this.sessionCache.has(sessionId)) {
         const cached = this.sessionCache.get(sessionId);
         cached.messages.push({
           ...message,
           timestamp: message.timestamp || new Date()
         });
-        // ✅ Keep only last MAX_HISTORY messages
         if (cached.messages.length > this.MAX_HISTORY * 2) {
           cached.messages = cached.messages.slice(-this.MAX_HISTORY * 2);
         }
@@ -146,7 +136,6 @@ class ChatService {
         this.sessionCache.set(sessionId, cached);
       }
 
-      // Update MongoDB
       await ChatSession.findOneAndUpdate(
         { id: sessionId },
         {
@@ -168,7 +157,6 @@ class ChatService {
       console.log(`✅ Message added to session: ${sessionId}`);
     } catch (error) {
       console.error('❌ Error adding message to session:', error);
-      // Don't throw, just log
     }
   }
 
@@ -177,14 +165,12 @@ class ChatService {
    */
   async getConversationHistory(sessionId, limit = 2) {
     try {
-      // Check cache first
       if (this.sessionCache.has(sessionId)) {
         const cached = this.sessionCache.get(sessionId);
         const messages = cached.messages || [];
         return messages.slice(-limit);
       }
 
-      // Get from MongoDB
       const session = await ChatSession.findOne({ id: sessionId });
       if (!session) {
         return [];
@@ -203,7 +189,6 @@ class ChatService {
    */
   async updateSessionContext(sessionId, context) {
     try {
-      // Update cache
       if (this.sessionCache.has(sessionId)) {
         const cached = this.sessionCache.get(sessionId);
         cached.context = { ...cached.context, ...context };
@@ -211,7 +196,6 @@ class ChatService {
         this.sessionCache.set(sessionId, cached);
       }
 
-      // Update MongoDB
       await ChatSession.findOneAndUpdate(
         { id: sessionId },
         {
@@ -229,10 +213,55 @@ class ChatService {
   }
 
   /**
+   * ✅ Load user preferences from database
+   */
+  async loadUserPreferences(userId) {
+    if (!userId || userId === 'guest') {
+      return null;
+    }
+
+    try {
+      const user = await User.findById(userId)
+        .select('preferences behavior name email')
+        .lean();
+
+      if (!user) {
+        return null;
+      }
+
+      return {
+        name: user.name,
+        email: user.email,
+        preferences: user.preferences || {},
+        behavior: user.behavior || {},
+        // ✅ Build personalization context
+        personalization: {
+          travelStyle: user.preferences?.travelStyle || 'balanced',
+          budget: user.preferences?.budget || 'mid-range',
+          interests: user.preferences?.interests || [],
+          preferredDestinations: user.preferences?.preferredDestinations || [],
+          visitedDestinations: user.preferences?.visitedDestinations || [],
+          accommodation: user.preferences?.accommodation || 'mid-range',
+          travelPace: user.preferences?.travelPace || 'moderate',
+          favoriteCategories: user.behavior?.favoriteCategories || [],
+          favoriteLocations: user.behavior?.favoriteLocations || [],
+          engagementScore: user.behavior?.engagementScore || 50,
+          totalBookings: user.behavior?.totalBookings || 0,
+          averageRatingGiven: user.behavior?.averageRatingGiven || 0
+        }
+      };
+    } catch (error) {
+      console.error('❌ Error loading user preferences:', error);
+      return null;
+    }
+  }
+
+  /**
    * ✅ Main sendMessage method with full conversation memory
    */
   async sendMessage(params) {
     const startTime = Date.now();
+    let activeSessionId = null;
     
     try {
       const {
@@ -247,32 +276,45 @@ class ChatService {
 
       console.log('📤 Chat Service: Processing message...');
       console.log(`📌 Session: ${sessionId || 'new'}, User: ${userId || 'guest'}`);
-      console.log(`📌 Message: ${message.substring(0, 50)}...`);
+      console.log(`📌 Message: ${message ? message.substring(0, 50) : '...'}`);
 
-      // ✅ Get or create session with persistence
+      // ✅ Get or create session
       const session = await this.getOrCreateSession(sessionId, userId, userLocation);
+      activeSessionId = session.id;
+      
       console.log(`📌 Session ID: ${session.id}, Messages: ${session.messages?.length || 0}`);
+
+      // ✅ Load user preferences if not already in session
+      let userPrefs = session.context?.userPreferences;
+      if (!userPrefs && userId && userId !== 'guest') {
+        userPrefs = await this.loadUserPreferences(userId);
+        if (userPrefs) {
+          await this.updateSessionContext(session.id, {
+            ...session.context,
+            userPreferences: userPrefs
+          });
+        }
+      }
 
       // ✅ Add user message to history
       await this.addMessageToSession(session.id, {
         role: 'user',
-        content: message,
+        content: message || '',
         timestamp: new Date()
       });
 
-      // ✅ Get conversation history (limited to 2 messages)
       const history = await this.getConversationHistory(session.id, this.MAX_HISTORY);
       console.log(`📌 Retrieved ${history.length} messages from history`);
 
       // ✅ Detect intent with context
-      const intentResult = detectIntent(message, history);
+      const intentResult = detectIntent(message || '', history);
       const intent = intentResult.intent;
-      const isFollowUp = intentResult.isFollowUp || determineFollowUp(message, history);
-      const entities = intentResult.entities || extractEntities(message, intent);
+      const isFollowUp = intentResult.isFollowUp || determineFollowUp(message || '', history);
+      const entities = intentResult.entities || extractEntities(message || '', intent);
 
       console.log(`📌 Intent detected: ${intent} (follow-up: ${isFollowUp})`);
 
-      // ✅ Check cache (only for non-follow-up queries)
+      // ✅ Check cache
       let cachedResponse = null;
       if (this.cacheEnabled && !isFollowUp) {
         try {
@@ -305,14 +347,11 @@ class ChatService {
       if (isFollowUp && history.length > 0) {
         console.log('📌 Processing as follow-up question');
         
-        // Use context from previous messages
         const previousResults = session.context?.lastResults || [];
         const previousIntent = session.context?.lastIntent || intent;
 
-        // If it's a follow-up about specific results, filter/refine
         if (previousResults.length > 0) {
-          // Check if user is asking about a specific one
-          const indexMatch = message.match(/(\d+)/);
+          const indexMatch = message ? message.match(/(\d+)/) : null;
           if (indexMatch) {
             const idx = parseInt(indexMatch[1]) - 1;
             if (idx >= 0 && idx < previousResults.length) {
@@ -320,10 +359,10 @@ class ChatService {
               experiences = [specific];
               searchResults = [specific];
               
-              // Build specific response
               const aiResponse = await this.getAIResponse(
                 `The user is asking about "${specific.title}". Provide details about this experience. Include price, location, duration, and key highlights.`,
-                history
+                history,
+                userPrefs // ✅ Pass user preferences
               );
               
               response = {
@@ -339,7 +378,6 @@ class ChatService {
             }
           }
 
-          // Check if user is asking about "first", "second", etc.
           const ordinalMap = {
             'first': 0,
             'second': 1,
@@ -348,15 +386,17 @@ class ChatService {
             'fifth': 4,
             'last': previousResults.length - 1
           };
+          const msgLower = message ? message.toLowerCase() : '';
           for (const [key, idx] of Object.entries(ordinalMap)) {
-            if (message.toLowerCase().includes(key) && idx < previousResults.length) {
+            if (msgLower.includes(key) && idx < previousResults.length) {
               const specific = previousResults[idx];
               experiences = [specific];
               searchResults = [specific];
               
               const aiResponse = await this.getAIResponse(
                 `The user is asking about "${specific.title}". Provide a detailed overview of this experience.`,
-                history
+                history,
+                userPrefs
               );
               
               response = {
@@ -373,17 +413,16 @@ class ChatService {
           }
         }
 
-        // Build follow-up prompt with context
         const followUpPrompt = buildFollowUpPrompt({
-          message,
+          message: message || '',
           history,
           context: session.context || {},
           lastIntent: previousIntent,
-          lastResults: previousResults.slice(0, 5)
+          lastResults: previousResults.slice(0, 5),
+          userPreferences: userPrefs // ✅ Pass user preferences
         });
 
-        // Get AI response with context
-        const aiResponse = await this.getAIResponse(followUpPrompt, history);
+        const aiResponse = await this.getAIResponse(followUpPrompt, history, userPrefs);
         
         response = {
           reply: aiResponse.content,
@@ -399,34 +438,45 @@ class ChatService {
       } else {
         console.log('📌 Processing as new topic');
 
-        // ✅ Search Listings
-        searchResults = await this.searchListingsByIntent(message, intent, userContext);
+        // ✅ Enhanced search with user preferences
+        const enhancedUserContext = {
+          ...userContext,
+          preferences: userPrefs?.personalization || {},
+          favoriteLocations: userPrefs?.personalization?.favoriteLocations || [],
+          interests: userPrefs?.personalization?.interests || []
+        };
+
+        searchResults = await this.searchListingsByIntent(message || '', intent, enhancedUserContext);
         console.log(`📌 Found ${searchResults.length} relevant listings`);
 
-        // ✅ Transform Listings to Experiences
         experiences = transformToExperiences(searchResults);
         console.log(`📌 Transformed ${experiences.length} listings to experiences`);
 
-        // ✅ Get user context from database
         const enrichedContext = await this.enrichUserContext(userId, userContext);
 
-        // ✅ Build enhanced prompt with real experiences
+        // ✅ Build enhanced prompt with user preferences
         const userPrompt = buildChatPrompt({
-          message,
+          message: message || '',
           intent,
           entities,
           experiences: experiences.slice(0, 5),
           history: history.slice(-2),
           userLocation: session.context?.location || userLocation,
-          isFollowUp: false
+          isFollowUp: false,
+          userPreferences: userPrefs?.personalization || null // ✅ Pass user preferences
         });
 
-        // ✅ Get AI response
-        const aiResponse = await this.getAIResponse(userPrompt, history);
+        // ✅ Get AI response with user context
+        const aiResponse = await this.getAIResponse(userPrompt, history, userPrefs);
         
-        // ✅ If AI response is fallback but we have experiences, use them
+        // ✅ If AI response is fallback but we have experiences, use enhanced fallback
         if (aiResponse.fallback && experiences.length > 0) {
-          const fallbackMessage = this.buildFallbackMessage(message, experiences);
+          const fallbackMessage = this.buildEnhancedFallbackMessage(
+            message || '', 
+            experiences, 
+            intent,
+            userPrefs // ✅ Pass user preferences for personalization
+          );
           response = {
             reply: fallbackMessage,
             fallback: true,
@@ -437,7 +487,12 @@ class ChatService {
           };
         } else {
           response = {
-            reply: aiResponse.content,
+            reply: aiResponse.content || this.buildEnhancedFallbackMessage(
+              message || '', 
+              experiences, 
+              intent,
+              userPrefs
+            ),
             fallback: aiResponse.fallback || false,
             experiences: experiences.slice(0, 5),
             totalResults: searchResults.length,
@@ -447,10 +502,9 @@ class ChatService {
         }
       }
 
-      // ✅ Format final response
       const formattedResponse = this.formatFinalResponse(response, session, startTime);
 
-      // ✅ Add AI response to history
+      // ✅ Add AI response to history with metadata
       await this.addMessageToSession(session.id, {
         role: 'assistant',
         content: formattedResponse.reply,
@@ -458,18 +512,20 @@ class ChatService {
         metadata: {
           intent: formattedResponse.intent,
           isFollowUp: isFollowUp,
-          experiences: formattedResponse.experiences.slice(0, 3)
+          experiences: formattedResponse.experiences.slice(0, 3),
+          userPreferencesApplied: !!userPrefs
         }
       });
 
-      // ✅ Update session context
+      // ✅ Update session context with user preferences
       const newContext = {
         ...session.context,
         lastIntent: intent,
         lastSearch: message,
         lastResults: searchResults.length > 0 ? searchResults.slice(0, 5) : (session.context?.lastResults || []),
         location: entities.location || session.context?.location || userLocation,
-        isFollowUp: isFollowUp
+        isFollowUp: isFollowUp,
+        userPreferences: userPrefs || session.context?.userPreferences
       };
       await this.updateSessionContext(session.id, newContext);
 
@@ -489,13 +545,156 @@ class ChatService {
 
     } catch (error) {
       console.error('❌ Chat Service Error:', error);
+      const finalSessionId = activeSessionId || params?.sessionId || null;
+      
       return {
         success: false,
-        reply: this.getFallbackResponse(params.message, params.language),
+        reply: this.getFallbackResponse(params?.message, params?.language || 'en'),
         fallback: true,
         error: error.message,
-        sessionId: sessionId || null,
+        sessionId: finalSessionId,
         responseTime: Date.now() - startTime
+      };
+    }
+  }
+
+  /**
+   * ✅ Build ENHANCED fallback message with real listing data and personalization
+   */
+  buildEnhancedFallbackMessage(message, experiences, intent, userPrefs = null) {
+    const count = experiences.length;
+    let msg = "";
+    
+    // ✅ Personalize the introduction
+    const userName = userPrefs?.name || 'Traveler';
+    const travelStyle = userPrefs?.personalization?.travelStyle || 'balanced';
+    
+    // ✅ Intent-specific fallback messages with real data
+    if (intent === 'price') {
+      msg = `Hi ${userName}! Here are the prices for experiences in Rwanda that match your ${travelStyle} travel style:\n\n`;
+      experiences.slice(0, 5).forEach((exp, i) => {
+        msg += `${i + 1}. **${exp.title}**\n`;
+        msg += `   💰 Price: $${exp.price} ${exp.currency || 'USD'}\n`;
+        msg += `   📍 ${exp.location}\n`;
+        if (exp.duration) {
+          msg += `   ⏱️ Duration: ${exp.duration}\n`;
+        }
+        if (exp.rating > 0) {
+          msg += `   ⭐ Rating: ${exp.rating}\n`;
+        }
+        msg += `   🔗 View: /listing/${exp.id}\n\n`;
+      });
+      msg += "Would you like me to help you book any of these experiences?";
+    } else if (intent === 'plan') {
+      msg = `Hi ${userName}! I found these experiences for your trip planning based on your ${travelStyle} preferences:\n\n`;
+      experiences.slice(0, 5).forEach((exp, i) => {
+        msg += `${i + 1}. **${exp.title}**\n`;
+        msg += `   📍 ${exp.location}\n`;
+        msg += `   💰 $${exp.price} ${exp.currency || 'USD'}\n`;
+        if (exp.duration) {
+          msg += `   ⏱️ ${exp.duration}\n`;
+        }
+        msg += `   🔗 View: /listing/${exp.id}\n\n`;
+      });
+      msg += "Tell me which experience interests you, and I'll help you plan!";
+    } else if (intent === 'location') {
+      msg = `Hi ${userName}! Here are experiences in beautiful Rwanda that match your interests:\n\n`;
+      experiences.slice(0, 5).forEach((exp, i) => {
+        msg += `${i + 1}. **${exp.title}**\n`;
+        msg += `   📍 ${exp.location}\n`;
+        msg += `   💰 $${exp.price} ${exp.currency || 'USD'}\n`;
+        if (exp.duration) {
+          msg += `   ⏱️ ${exp.duration}\n`;
+        }
+        msg += `   🔗 View: /listing/${exp.id}\n\n`;
+      });
+      msg += "Would you like more details about any of these places?";
+    } else if (intent === 'experience' || intent === 'recommend') {
+      msg = `Hi ${userName}! Based on your ${travelStyle} travel style, I found these amazing experiences in Rwanda:\n\n`;
+      experiences.slice(0, 5).forEach((exp, i) => {
+        msg += `${i + 1}. **${exp.title}**\n`;
+        msg += `   📍 ${exp.location}\n`;
+        msg += `   💰 $${exp.price} ${exp.currency || 'USD'}\n`;
+        if (exp.duration) {
+          msg += `   ⏱️ ${exp.duration}\n`;
+        }
+        if (exp.rating > 0) {
+          msg += `   ⭐ ${exp.rating}\n`;
+        }
+        msg += `   🔗 View: /listing/${exp.id}\n\n`;
+      });
+      msg += "Which experience catches your eye?";
+    } else {
+      msg = `Hi ${userName}! I found some great experiences in Rwanda that align with your ${travelStyle} preferences:\n\n`;
+      experiences.slice(0, 5).forEach((exp, i) => {
+        msg += `${i + 1}. **${exp.title}**\n`;
+        msg += `   📍 ${exp.location}\n`;
+        msg += `   💰 $${exp.price} ${exp.currency || 'USD'}\n`;
+        msg += `   🔗 View: /listing/${exp.id}\n\n`;
+      });
+      msg += "Let me know if you'd like more information about any of these!";
+    }
+    
+    return msg;
+  }
+
+  /**
+   * ✅ Get AI response with provider and user context
+   */
+  async getAIResponse(prompt, history, userPrefs = null) {
+    try {
+      let systemPromptText = systemPrompt.base || systemPrompt;
+
+      // ✅ Inject user preferences into system prompt if available
+      if (userPrefs?.personalization) {
+        const prefs = userPrefs.personalization;
+        const contextBlock = `
+User Context:
+- Name: ${userPrefs.name || 'Traveler'}
+- Travel Style: ${prefs.travelStyle || 'balanced'}
+- Budget: ${prefs.budget || 'mid-range'}
+- Interests: ${(prefs.interests || []).join(', ') || 'General'}
+- Preferred Destinations: ${(prefs.preferredDestinations || []).join(', ') || 'Rwanda'}
+- Travel Pace: ${prefs.travelPace || 'moderate'}
+- Total Bookings: ${prefs.totalBookings || 0}
+- Engagement Score: ${prefs.engagementScore || 50}/100
+
+Use this context to personalize your responses.`;
+        
+        systemPromptText = `${systemPromptText}\n\n${contextBlock}`;
+      }
+
+      const messages = [
+        { role: 'system', content: systemPromptText }
+      ];
+
+      if (history && history.length > 0) {
+        const recentHistory = history.slice(-2);
+        for (const msg of recentHistory) {
+          messages.push({
+            role: msg.role,
+            content: msg.content
+          });
+        }
+      }
+
+      messages.push({ role: 'user', content: prompt });
+
+      const response = await aiProvider.chat(messages, {
+        temperature: 0.7,
+        maxTokens: 500
+      });
+
+      return {
+        content: response.content || response,
+        fallback: false
+      };
+
+    } catch (error) {
+      console.error('❌ AI Provider error:', error);
+      return {
+        content: null,
+        fallback: true
       };
     }
   }
@@ -520,74 +719,6 @@ class ChatService {
       responseTime: Date.now() - startTime,
       provider: aiProvider.getProviderInfo ? aiProvider.getProviderInfo() : 'gemini'
     };
-  }
-
-  /**
-   * ✅ Build fallback message when AI fails but listings exist
-   */
-  buildFallbackMessage(message, experiences) {
-    const count = experiences.length;
-    let msg = "I found some great experiences that match your interest! 🌍\n\n";
-
-    experiences.slice(0, 5).forEach((exp, i) => {
-      msg += `${i + 1}. **${exp.title}** - ${exp.location}\n`;
-      msg += `   💰 $${exp.price} ${exp.currency || 'USD'} • ⭐ ${exp.rating || 'New'}\n`;
-      msg += `   📍 ${exp.duration || 'Flexible duration'}\n\n`;
-    });
-
-    if (count > 5) {
-      msg += `... and ${count - 5} more experiences.\n\n`;
-    }
-
-    msg += "Would you like more details about any of these?";
-    return msg;
-  }
-
-  /**
-   * ✅ Get AI response with provider
-   */
-  async getAIResponse(prompt, history) {
-    try {
-      // Build system prompt
-      const systemPromptText = systemPrompt.base || systemPrompt;
-
-      // Build messages with history - ✅ Only last 2 messages
-      const messages = [
-        { role: 'system', content: systemPromptText }
-      ];
-
-      // ✅ Only add last 2 messages from history (reduced from 5)
-      if (history && history.length > 0) {
-        const recentHistory = history.slice(-2);
-        for (const msg of recentHistory) {
-          messages.push({
-            role: msg.role,
-            content: msg.content
-          });
-        }
-      }
-
-      // Add current prompt
-      messages.push({ role: 'user', content: prompt });
-
-      // Get AI response
-      const response = await aiProvider.chat(messages, {
-        temperature: 0.7,
-        maxTokens: 500 // ✅ Reduced from 800 to 500 for faster responses
-      });
-
-      return {
-        content: response.content || response,
-        fallback: false
-      };
-
-    } catch (error) {
-      console.error('❌ AI Provider error:', error);
-      return {
-        content: null,
-        fallback: true
-      };
-    }
   }
 
   /**
@@ -652,7 +783,6 @@ class ChatService {
       ]
     };
 
-    // If follow-up, show continuation suggestions
     if (isFollowUp) {
       return [
         'Tell me more',
@@ -671,20 +801,31 @@ class ChatService {
   async searchListingsByIntent(message, intent, userContext) {
     const keywords = this.extractKeywords(message);
     
-    // If no keywords, return featured listings
+    // ✅ Incorporate user preferences into search
+    const userInterests = userContext?.interests || userContext?.preferences?.interests || [];
+    const favoriteLocations = userContext?.favoriteLocations || userContext?.preferences?.favoriteLocations || [];
+    
     if (keywords.length === 0) {
-      const defaultListings = await Listing.find({ 
+      // ✅ If no keywords, use featured listings + user preferences
+      let query = { 
         status: 'approved',
         isFeatured: true
-      })
-      .populate('provider', 'name businessName avatar')
-      .limit(5)
-      .lean();
+      };
+      
+      // Add user preference filters
+      if (favoriteLocations.length > 0) {
+        query.location = { $in: favoriteLocations.map(l => new RegExp(l, 'i')) };
+      }
+      
+      const defaultListings = await Listing.find(query)
+        .populate('provider', 'name businessName avatar')
+        .limit(5)
+        .lean();
       
       return defaultListings;
     }
     
-    // Build search query with broader matching
+    // ✅ Build search query with keywords and user preferences
     let searchQuery = {
       status: 'approved',
       $or: [
@@ -697,7 +838,13 @@ class ChatService {
       ]
     };
 
-    // Apply intent-specific filters
+    // ✅ Add user preference filters
+    if (favoriteLocations.length > 0) {
+      // Boost location match
+      searchQuery.$or.push({ location: { $in: favoriteLocations.map(l => new RegExp(l, 'i')) } });
+    }
+
+    // ✅ Apply intent-specific filters
     if (intent === 'booking' || intent === 'plan') {
       searchQuery.status = 'approved';
     }
@@ -706,7 +853,6 @@ class ChatService {
       searchQuery.$or.push({ averageRating: { $gte: 3.5 } });
     }
 
-    // If intent is 'location', boost location search
     if (intent === 'location') {
       searchQuery.$or = [
         { location: { $regex: keywords.join('|'), $options: 'i' } },
@@ -715,12 +861,11 @@ class ChatService {
       ];
     }
 
-    // Fetch listings from database
     let listings = await Listing.find(searchQuery)
       .populate('provider', 'name businessName avatar')
       .lean();
 
-    // If no results found, try broader search
+    // ✅ If no results, try broader search
     if (listings.length === 0 && keywords.length > 0) {
       console.log('🔍 No exact matches, trying broader search...');
       
@@ -741,44 +886,39 @@ class ChatService {
         .lean();
     }
 
-    // If STILL no results, return featured listings
+    // ✅ If STILL no results, return featured listings with personalization
     if (listings.length === 0) {
-      console.log('🔍 No results found, returning featured listings...');
-      listings = await Listing.find({ 
+      console.log('🔍 No results found, returning personalized featured listings...');
+      const fallbackQuery = { 
         status: 'approved',
         isFeatured: true
-      })
-      .populate('provider', 'name businessName avatar')
-      .limit(5)
-      .lean();
+      };
+      
+      if (favoriteLocations.length > 0) {
+        fallbackQuery.location = { $in: favoriteLocations.map(l => new RegExp(l, 'i')) };
+      }
+      
+      listings = await Listing.find(fallbackQuery)
+        .populate('provider', 'name businessName avatar')
+        .limit(5)
+        .lean();
     }
 
-    // Score and rank listings
+    // ✅ Score and rank listings with user preferences
     listings = this.scoreAndRankListings(listings, message, userContext);
 
-    // Apply limit
     return listings.slice(0, this.maxResults);
   }
 
   /**
-   * ✅ Extract keywords from message
-   */
-  extractKeywords(message) {
-    const stopWords = ['the', 'a', 'an', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'of', 'from', 'up', 'down', 'off', 'over', 'under', 'so', 'very', 'too', 'much', 'more', 'most', 'some', 'any', 'such', 'my', 'your', 'our', 'their', 'please', 'want', 'need', 'looking', 'find', 'help', 'can', 'will', 'would', 'could', 'should', 'yes', 'no', 'okay', 'ok', 'sure', 'yeah', 'yep', 'nope', 'nah', 'maybe', 'perhaps'];
-    
-    const words = message.toLowerCase()
-      .replace(/[^a-zA-Z\s]/g, '')
-      .split(' ')
-      .filter(w => w.length > 2 && !stopWords.includes(w));
-    
-    return [...new Set(words)];
-  }
-
-  /**
-   * ✅ Score and rank listings
+   * ✅ Score and rank listings with user preferences
    */
   scoreAndRankListings(listings, message, userContext) {
     const keywords = this.extractKeywords(message);
+    const userInterests = userContext?.interests || userContext?.preferences?.interests || [];
+    const favoriteLocations = userContext?.favoriteLocations || userContext?.preferences?.favoriteLocations || [];
+    const travelStyle = userContext?.preferences?.travelStyle || 'balanced';
+    const budget = userContext?.preferences?.budget || 'mid-range';
     
     return listings.map(listing => {
       let score = 0;
@@ -792,6 +932,11 @@ class ChatService {
       const locationWords = listing.location?.toLowerCase().split(' ') || [];
       const locationMatches = keywords.filter(k => locationWords.some(w => w.includes(k)));
       score += locationMatches.length * 5;
+      
+      // ✅ User favorite location bonus
+      if (favoriteLocations.some(loc => listing.location?.toLowerCase().includes(loc.toLowerCase()))) {
+        score += 8;
+      }
       
       // Business Type match
       const businessType = listing.businessType?.toLowerCase() || '';
@@ -808,6 +953,52 @@ class ChatService {
         score += Math.min(listing.totalReviews / 100, 5);
       }
       
+      // ✅ User interest bonus
+      if (userInterests.length > 0) {
+        const interestMatches = userInterests.filter(interest =>
+          listing.tags?.some(tag => tag.toLowerCase().includes(interest.toLowerCase())) ||
+          listing.category?.toLowerCase().includes(interest.toLowerCase()) ||
+          listing.title?.toLowerCase().includes(interest.toLowerCase())
+        );
+        score += interestMatches.length * 4;
+      }
+      
+      // ✅ Travel style match
+      const styleKeywords = {
+        adventure: ['adventure', 'trekking', 'hiking', 'wildlife', 'safari', 'explore'],
+        cultural: ['culture', 'history', 'museum', 'heritage', 'local', 'traditional'],
+        relaxation: ['relax', 'spa', 'wellness', 'peaceful', 'scenic', 'beach'],
+        luxury: ['luxury', 'premium', 'exclusive', '5-star', 'vip', 'private'],
+        budget: ['budget', 'affordable', 'cheap', 'value', 'economical'],
+        family: ['family', 'kids', 'children', 'family-friendly', 'group'],
+        romantic: ['romantic', 'couples', 'honeymoon', 'intimate']
+      };
+      
+      const styleWords = styleKeywords[travelStyle] || [];
+      const styleMatches = styleWords.filter(word =>
+        listing.title?.toLowerCase().includes(word) ||
+        listing.description?.toLowerCase().includes(word) ||
+        listing.tags?.some(tag => tag.toLowerCase().includes(word))
+      );
+      score += styleMatches.length * 3;
+      
+      // ✅ Budget compatibility
+      const price = listing.price || 0;
+      const budgetRanges = {
+        budget: [0, 100],
+        'mid-range': [50, 300],
+        premium: [200, 600],
+        luxury: [400, 9999]
+      };
+      const range = budgetRanges[budget] || budgetRanges['mid-range'];
+      if (price >= range[0] && price <= range[1]) {
+        score += 10;
+      } else if (price < range[0]) {
+        score += 3; // Too cheap but might be good
+      } else if (price > range[1]) {
+        score += 1; // Too expensive but might be worth it
+      }
+      
       // Price relevance
       if (keywords.some(k => ['budget', 'cheap', 'affordable', 'cost', 'price', 'expensive', 'luxury'].includes(k))) {
         const isBudget = ['budget', 'cheap', 'affordable'].some(k => keywords.includes(k));
@@ -815,22 +1006,6 @@ class ChatService {
         
         if (isBudget && listing.price < 100) score += 5;
         if (isLuxury && listing.price > 300) score += 5;
-      }
-      
-      // User preference bonus
-      if (userContext?.interests) {
-        const interestMatches = userContext.interests.filter(interest =>
-          listing.tags?.some(tag => tag.toLowerCase().includes(interest.toLowerCase()))
-        );
-        score += interestMatches.length * 2;
-      }
-      
-      // Location preference bonus
-      if (userContext?.favoriteLocations) {
-        const locationMatch = userContext.favoriteLocations.some(loc =>
-          listing.location?.toLowerCase().includes(loc.toLowerCase())
-        );
-        if (locationMatch) score += 3;
       }
       
       return { ...listing, score };
@@ -844,11 +1019,10 @@ class ChatService {
     if (!userId) return context;
 
     try {
-      // Dynamic imports to avoid circular dependencies
       const User = await import('../../models/User.js');
       const Booking = await import('../../models/Booking.js');
 
-      const user = await User.default.findById(userId).select('name preferences');
+      const user = await User.default.findById(userId).select('name preferences behavior');
       const bookings = await Booking.default.find({ user: userId, status: 'completed' })
         .populate('listing', 'title location businessType')
         .limit(10)
@@ -870,7 +1044,8 @@ class ChatService {
         pastBookings,
         favoriteLocations,
         favoriteTypes,
-        preferences: user?.preferences || context.interests || []
+        preferences: user?.preferences || context.interests || [],
+        behavior: user?.behavior || {}
       };
     } catch (error) {
       console.warn('⚠️ Error enriching user context:', error.message);
@@ -902,7 +1077,6 @@ class ChatService {
 
     const langResponses = responses[language] || responses.en;
     
-    // Check for specific keywords
     const lower = message?.toLowerCase() || '';
     if (lower.includes('kigali')) {
       return "Kigali is beautiful! 🌆 Don't miss the Genocide Memorial, local markets, and vibrant nightlife. Check out our Kigali experiences!";
@@ -930,7 +1104,6 @@ class ChatService {
     const now = Date.now();
     let cleaned = 0;
 
-    // Clean in-memory cache
     for (const [id, session] of this.sessionCache) {
       if (now - session.lastActivity > this.sessionTimeout) {
         this.sessionCache.delete(id);
@@ -938,7 +1111,6 @@ class ChatService {
       }
     }
 
-    // Clean MongoDB sessions
     try {
       const expiryDate = new Date(now - this.sessionTimeout);
       const result = await ChatSession.updateMany(
@@ -987,7 +1159,6 @@ class ChatService {
    */
   async clearSessionHistory(sessionId) {
     try {
-      // Clear cache
       if (this.sessionCache.has(sessionId)) {
         const cached = this.sessionCache.get(sessionId);
         cached.messages = [];
@@ -998,7 +1169,6 @@ class ChatService {
         this.sessionCache.set(sessionId, cached);
       }
 
-      // Clear MongoDB
       await ChatSession.findOneAndUpdate(
         { id: sessionId },
         {
@@ -1016,6 +1186,21 @@ class ChatService {
       console.error('❌ Error clearing session history:', error);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * ✅ Extract keywords from message
+   */
+  extractKeywords(message) {
+    const safeMessage = typeof message === 'string' ? message : '';
+    const stopWords = ['the', 'a', 'an', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'of', 'from', 'up', 'down', 'off', 'over', 'under', 'so', 'very', 'too', 'much', 'more', 'most', 'some', 'any', 'such', 'my', 'your', 'our', 'their', 'please', 'want', 'need', 'looking', 'find', 'help', 'can', 'will', 'would', 'could', 'should', 'yes', 'no', 'okay', 'ok', 'sure', 'yeah', 'yep', 'nope', 'nah', 'maybe', 'perhaps'];
+    
+    const words = safeMessage.toLowerCase()
+      .replace(/[^a-zA-Z\s]/g, '')
+      .split(' ')
+      .filter(w => w.length > 2 && !stopWords.includes(w));
+    
+    return [...new Set(words)];
   }
 }
 

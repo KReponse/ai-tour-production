@@ -2,7 +2,7 @@
 // ✅ COMPLETE FIXED - All exports properly defined
 // ✅ ADDED: Response data extraction helper
 // ✅ ADDED: Retry logic for critical mutations
-// ✅ FIXED: Provider endpoints to match backend routes
+// ✅ FIXED: Provider endpoints to match backend routes (/provider/reviews)
 // ✅ FIXED: getPublicReviews now supports providerId filtering
 // ✅ Better error handling, auth, and debugging
 
@@ -394,12 +394,12 @@ export const reportReview = async (id, reason) => {
 };
 
 // ============================================================
-// ✅ PROVIDER ENDPOINTS
+// ✅ PROVIDER ENDPOINTS - FIXED ENDPOINTS
 // ============================================================
 
 /**
  * Get provider reviews
- * ✅ CORRECT ENDPOINT: /reviews/provider
+ * ✅ CORRECT ENDPOINT: /provider/reviews (matches backend route)
  */
 export const getProviderReviews = async (params = {}) => {
   try {
@@ -409,9 +409,10 @@ export const getProviderReviews = async (params = {}) => {
     }
 
     console.log('📤 [getProviderReviews] Fetching with params:', params);
-    console.log('📤 [getProviderReviews] Endpoint: /reviews/provider');
+    console.log('📤 [getProviderReviews] Endpoint: /provider/reviews');
 
-    const response = await API.get('/reviews/provider', { params });
+    // ✅ FIXED: Changed from '/reviews/provider' to '/provider/reviews'
+    const response = await API.get('/provider/reviews', { params });
     
     console.log('✅ [getProviderReviews] Response:', response.data);
     console.log(`✅ [getProviderReviews] Found ${response.data?.reviews?.length || 0} reviews`);
@@ -426,7 +427,7 @@ export const getProviderReviews = async (params = {}) => {
 
 /**
  * Get provider review stats
- * ✅ CORRECT ENDPOINT: /reviews/provider/stats
+ * ✅ CORRECT ENDPOINT: /provider/reviews/stats (matches backend route)
  */
 export const getProviderReviewStats = async () => {
   try {
@@ -436,9 +437,10 @@ export const getProviderReviewStats = async () => {
     }
 
     console.log('📤 [getProviderReviewStats] Fetching stats');
-    console.log('📤 [getProviderReviewStats] Endpoint: /reviews/provider/stats');
+    console.log('📤 [getProviderReviewStats] Endpoint: /provider/reviews/stats');
 
-    const response = await API.get('/reviews/provider/stats');
+    // ✅ FIXED: Changed from '/reviews/provider/stats' to '/provider/reviews/stats'
+    const response = await API.get('/provider/reviews/stats');
     
     console.log('✅ [getProviderReviewStats] Response:', response.data);
     
@@ -452,7 +454,7 @@ export const getProviderReviewStats = async () => {
 
 /**
  * Add provider reply to a review - WITH RETRY
- * ✅ CORRECT ENDPOINT: /reviews/:id/reply
+ * ✅ CORRECT ENDPOINT: /provider/reviews/:id/respond (matches backend route)
  */
 export const respondToReview = async (id, comment, token) => {
   return withRetry(async () => {
@@ -466,8 +468,9 @@ export const respondToReview = async (id, comment, token) => {
 
     console.log('📤 Responding to review:', id);
 
+    // ✅ FIXED: Changed from '/reviews/${id}/reply' to '/provider/reviews/${id}/respond'
     const response = await API.post(
-      `/reviews/${id}/reply`,
+      `/provider/reviews/${id}/respond`,
       { reply: comment.trim() },
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -480,7 +483,7 @@ export const respondToReview = async (id, comment, token) => {
 
 /**
  * Edit provider reply - WITH RETRY
- * ✅ CORRECT ENDPOINT: /reviews/:id/reply (PUT)
+ * ✅ CORRECT ENDPOINT: /provider/reviews/:id/respond (PUT)
  */
 export const editProviderReply = async (id, comment, token) => {
   return withRetry(async () => {
@@ -494,8 +497,9 @@ export const editProviderReply = async (id, comment, token) => {
 
     console.log('📤 Editing response for review:', id);
 
+    // ✅ FIXED: Changed from '/reviews/${id}/reply' to '/provider/reviews/${id}/respond'
     const response = await API.put(
-      `/reviews/${id}/reply`,
+      `/provider/reviews/${id}/respond`,
       { reply: comment.trim() },
       { headers: { Authorization: `Bearer ${token}` } }
     );

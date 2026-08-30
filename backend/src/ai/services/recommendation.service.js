@@ -3,6 +3,11 @@
 // ✅ ENHANCED - Real MongoDB integration with proper scoring
 // ✅ ENHANCED - AI fallback with real listing data
 // ✅ ENHANCED - Personalized recommendations based on user history
+// ✅ PHASE 2 - SMART RECOMMENDATION ENGINE
+// ✅ ADDED: Hard budget filtering (prevents $1,186 listings for $200 budget)
+// ✅ ADDED: Budget tolerance (within 20% of budget as near-budget)
+// ✅ ADDED: Candidate filtering before scoring
+// ✅ ADDED: Better match reasons with budget context
 
 import aiProvider from '../providers/providerInterface.js';
 import Listing from '../../models/Listing.js';
@@ -19,6 +24,10 @@ import responseFormatter from '../utils/responseFormatter.js';
 // White : #FFFFFF
 // ===============================
 
+// ✅ Budget tolerance constants
+const BUDGET_TOLERANCE = 0.20; // 20% above budget is "near budget"
+const MAX_BUDGET_MULTIPLIER = 1.5; // Absolute max: 50% above budget
+
 class RecommendationService {
   constructor() {
     this.cache = new Map();
@@ -27,10 +36,11 @@ class RecommendationService {
     
     console.log('🤖 Recommendation Service initialized');
     console.log(`📋 Max results: ${this.maxResults}`);
+    console.log(`💰 Budget tolerance: ${BUDGET_TOLERANCE * 100}%`);
   }
 
   /**
-   * ✅ Main recommendation method
+   * ✅ Main recommendation method - ENHANCED with hard budget filtering
    */
   async getRecommendations(params) {
     try {
@@ -41,15 +51,26 @@ class RecommendationService {
         limit = 10,
         filters = {},
         useAI = true,
-        sessionId = null
+        sessionId = null,
+        // ✅ New fields from AIPlanner
+        budget = null,
+        destination = null,
+        interests = [],
+        travelStyle = 'balanced',
+        mood = null,
+        travelers = 1,
+        days = null,
       } = params;
 
       console.log('📤 Recommendation Service: Getting recommendations...');
       console.log(`📌 Query: ${query || 'Popular'}, Limit: ${limit}`);
       console.log(`📌 User: ${userId || 'guest'}`);
+      console.log(`💰 Budget: $${budget || 'Not specified'}`);
+      console.log(`📍 Destination: ${destination || 'Not specified'}`);
+      console.log(`🎯 Travel Style: ${travelStyle}`);
 
       // ✅ Check cache first
-      const cacheKey = this.getCacheKey(query, userId, filters);
+      const cacheKey = this.getCacheKey(query, userId, filters, budget, destination);
       const cached = this.getCached(cacheKey);
       if (cached) {
         console.log('📦 Using cached recommendations');
@@ -59,25 +80,93 @@ class RecommendationService {
       // ✅ Get user's booking history for personalization
       const userHistory = await this.getUserHistory(userId);
 
-      // ✅ Get database recommendations first (LISTINGS ONLY)
-      const dbRecommendations = await this.getDatabaseRecommendations(
-        query, 
-        { ...filters, limit: this.maxResults },
+      // ✅ Get user preferences from context
+      const userPreferences = {
+        budget: budget || userContext.budget || userHistory.avgPrice || 500,
+        destination: destination || userContext.destination || null,
+        interests: interests || userContext.interests || userHistory.interests || [],
+        travelStyle: travelStyle || userContext.travelStyle || 'balanced',
+        mood: mood || userContext.mood || null,
+        travelers: travelers || userContext.travelers || 1,
+        days: days || userContext.days || null,
+      };
+
+      // ✅ Get database recommendations with HARD FILTERS
+      const dbRecommendations = await this.getDatabaseRecommendations({
+        query,
+        filters: {
+          ...filters,
+          location: destination || filters.location,
+          maxPrice: budget ? budget * MAX_BUDGET_MULTIPLIER : filters.maxPrice,
+        },
         userHistory,
-        userContext
-      );
+        userContext,
+        userPreferences,
+      });
 
       console.log(`📌 Found ${dbRecommendations.length} database recommendations`);
 
+      // ✅ Filter by budget (HARD CONSTRAINT) - prevents $1,186 listings for $200 budget
+      let eligibleRecommendations = dbRecommendations;
+      if (budget) {
+        // ✅ Hard budget filter: Only include listings within budget or near-budget
+        const nearBudgetLimit = budget * (1 + BUDGET_TOLERANCE);
+        const withinBudget = dbRecommendations.filter(r => r.price <= budget);
+        const nearBudget = dbRecommendations.filter(r => r.price > budget && r.price <= nearBudgetLimit);
+        
+        // ✅ Primary: within budget, Secondary: near budget
+        eligibleRecommendations = [...withinBudget, ...nearBudget];
+        
+        console.log(`💰 Budget: $${budget}, Within: ${withinBudget.length}, Near: ${nearBudget.length}`);
+        
+        // ✅ If we have enough within-budget recommendations, return them
+        if (withinBudget.length >= limit) {
+          console.log(`✅ Found ${withinBudget.length} within-budget recommendations`);
+          // Re-rank within-budget recommendations
+          const scored = this.scoreRecommendations(withinBudget, userHistory, userPreferences);
+          const sorted = scored.sort((a, b) => (b.score || 0) - (a.score || 0));
+          const formatted = this.formatRecommendations(sorted.slice(0, limit), userHistory, userPreferences);
+          
+          const result = {
+            success: true,
+            recommendations: formatted,
+            total: sorted.length,
+            source: 'database',
+            personalized: userHistory.bookings.length > 0,
+            sessionId: sessionId,
+            budgetInfo: {
+              budget: budget,
+              withinBudget: withinBudget.length,
+              nearBudget: nearBudget.length,
+              totalEligible: eligibleRecommendations.length
+            },
+            timestamp: new Date().toISOString()
+          };
+          
+          this.setCached(cacheKey, result);
+          return result;
+        }
+      }
+
       // ✅ If we have enough good recommendations, return them
-      if (dbRecommendations.length >= limit && !useAI) {
+      if (eligibleRecommendations.length >= limit && !useAI) {
+        const scored = this.scoreRecommendations(eligibleRecommendations, userHistory, userPreferences);
+        const sorted = scored.sort((a, b) => (b.score || 0) - (a.score || 0));
+        const formatted = this.formatRecommendations(sorted.slice(0, limit), userHistory, userPreferences);
+        
         const result = {
           success: true,
-          recommendations: dbRecommendations.slice(0, limit),
+          recommendations: formatted,
+          total: sorted.length,
           source: 'database',
-          total: dbRecommendations.length,
           personalized: userHistory.bookings.length > 0,
           sessionId: sessionId,
+          budgetInfo: budget ? {
+            budget: budget,
+            withinBudget: eligibleRecommendations.filter(r => r.price <= budget).length,
+            nearBudget: eligibleRecommendations.filter(r => r.price > budget && r.price <= budget * (1 + BUDGET_TOLERANCE)).length,
+            totalEligible: eligibleRecommendations.length
+          } : null,
           timestamp: new Date().toISOString()
         };
         
@@ -85,30 +174,24 @@ class RecommendationService {
         return result;
       }
 
-      // ✅ Get AI recommendations for more personalized results
+      // ✅ Get AI recommendations if needed
       let aiRecommendations = [];
       let aiFallback = false;
       
-      if (useAI) {
+      if (useAI && eligibleRecommendations.length > 0) {
         try {
-          const prompt = this.buildRecommendationPrompt({
+          const response = await aiProvider.recommend({
             query: query || 'Popular experiences in Rwanda',
             userContext: {
               ...userContext,
               pastBookings: userHistory.bookings,
               favoriteLocations: userHistory.favoriteLocations,
               interests: userHistory.interests || userContext.interests,
-              travelStyle: userContext.travelStyle || 'balanced'
+              travelStyle: travelStyle || 'balanced',
+              budget: budget,
+              destination: destination
             },
-            limit: limit,
-            filters,
-            existingListings: dbRecommendations.slice(0, 10)
-          });
-
-          const response = await aiProvider.recommend({
-            query: query || 'Popular experiences in Rwanda',
-            userContext: userContext,
-            existingListings: dbRecommendations.slice(0, 15),
+            existingListings: eligibleRecommendations.slice(0, 15),
             limit: limit
           });
 
@@ -124,11 +207,9 @@ class RecommendationService {
       }
 
       // ✅ Combine and score recommendations
-      let combined = [...dbRecommendations];
+      let combined = [...eligibleRecommendations];
       
-      // If AI provided valid recommendations, add them
       if (aiRecommendations.length > 0) {
-        // Map AI recommendations to match our format
         const mappedAI = aiRecommendations.map(rec => ({
           ...rec,
           source: 'ai',
@@ -138,11 +219,7 @@ class RecommendationService {
       }
 
       // ✅ Score and rank all recommendations
-      const scored = this.scoreRecommendations(
-        combined,
-        userHistory,
-        userContext
-      );
+      const scored = this.scoreRecommendations(combined, userHistory, userPreferences);
 
       // ✅ Remove duplicates and sort
       const unique = this.removeDuplicates(scored);
@@ -151,7 +228,8 @@ class RecommendationService {
       // ✅ Format final response
       const formattedRecommendations = this.formatRecommendations(
         sorted.slice(0, limit),
-        userHistory
+        userHistory,
+        userPreferences
       );
 
       const result = {
@@ -162,6 +240,12 @@ class RecommendationService {
         personalized: userHistory.bookings.length > 0,
         fallback: aiFallback,
         sessionId: sessionId,
+        budgetInfo: budget ? {
+          budget: budget,
+          withinBudget: eligibleRecommendations.filter(r => r.price <= budget).length,
+          nearBudget: eligibleRecommendations.filter(r => r.price > budget && r.price <= budget * (1 + BUDGET_TOLERANCE)).length,
+          totalEligible: eligibleRecommendations.length
+        } : null,
         timestamp: new Date().toISOString()
       };
 
@@ -198,6 +282,9 @@ ${existingListings.map((listing, i) =>
 ).join('\n')}
 
 User Context:
+- Budget: $${userContext.budget || 'Not specified'}
+- Destination: ${userContext.destination || 'Not specified'}
+- Travel Style: ${userContext.travelStyle || 'Balanced'}
 - Past Bookings: ${userContext.pastBookings?.length || 0} experiences
 - Favorite Locations: ${userContext.favoriteLocations?.join(', ') || 'None'}
 - Interests: ${userContext.interests?.join(', ') || 'General'}
@@ -261,9 +348,9 @@ Important: Only recommend from the provided listings. Never invent listings.`;
   }
 
   /**
-   * ✅ Get database recommendations (LISTINGS ONLY)
+   * ✅ Get database recommendations with HARD FILTERS
    */
-  async getDatabaseRecommendations(query, filters, userHistory, userContext) {
+  async getDatabaseRecommendations({ query, filters, userHistory, userContext, userPreferences }) {
     try {
       const searchQuery = { 
         status: 'approved'
@@ -284,16 +371,22 @@ Important: Only recommend from the provided listings. Never invent listings.`;
         }
       }
 
-      // ✅ Filters
-      if (filters.minPrice) {
-        searchQuery.price = { $gte: filters.minPrice };
-      }
-      if (filters.maxPrice) {
-        searchQuery.price = { ...searchQuery.price, $lte: filters.maxPrice };
-      }
+      // ✅ Location filter (HARD)
       if (filters.location) {
         searchQuery.location = { $regex: filters.location, $options: 'i' };
       }
+
+      // ✅ Budget filter (HARD) - prevents expensive listings from entering candidate pool
+      if (filters.maxPrice) {
+        searchQuery.price = { $lte: filters.maxPrice };
+        console.log(`💰 Hard budget filter: price ≤ $${filters.maxPrice}`);
+      }
+
+      if (filters.minPrice) {
+        searchQuery.price = { ...searchQuery.price, $gte: filters.minPrice };
+      }
+
+      // ✅ Other filters
       if (filters.businessType) {
         searchQuery.businessType = filters.businessType;
       }
@@ -303,46 +396,42 @@ Important: Only recommend from the provided listings. Never invent listings.`;
       if (filters.minRating) {
         searchQuery.averageRating = { $gte: filters.minRating };
       }
-      if (filters.maxDuration) {
-        // Handle duration as string "2 days" etc.
-        searchQuery.duration = { $regex: `^${filters.maxDuration}`, $options: 'i' };
+
+      // ✅ Capacity filter (if travelers specified)
+      if (userPreferences?.travelers && userPreferences.travelers > 1) {
+        // Only apply capacity filter if the listing has capacity field
+        // and it's greater than or equal to the number of travelers
+        searchQuery.$or = [
+          { capacity: { $gte: userPreferences.travelers } },
+          { capacity: { $exists: false } } // Include listings without capacity specified
+        ];
+        console.log(`👥 Capacity filter: ≥ ${userPreferences.travelers} travelers`);
       }
 
-      // ✅ Recommended listings
+      // ✅ Fetch listings with hard filters
       let listings = await Listing.find(searchQuery)
         .populate('provider', 'businessName name avatar email phone')
-        .limit(filters.limit || this.maxResults)
+        .limit(filters.limit || this.maxResults * 2) // Get extra for filtering
         .lean();
 
-      // ✅ If no results, try broader search
-      if (listings.length === 0 && query) {
-        const keywords = query.toLowerCase().split(' ').filter(w => w.length > 2);
-        if (keywords.length > 0) {
-          const broadQuery = {
-            status: 'approved',
-            $or: keywords.map(k => ({
-              $or: [
-                { title: { $regex: k, $options: 'i' } },
-                { location: { $regex: k, $options: 'i' } },
-                { description: { $regex: k, $options: 'i' } },
-                { businessType: { $regex: k, $options: 'i' } },
-                { tags: { $in: [new RegExp(k, 'i')] } }
-              ]
-            }))
-          };
-          
-          listings = await Listing.find(broadQuery)
-            .populate('provider', 'businessName name avatar email phone')
-            .limit(filters.limit || this.maxResults)
-            .lean();
-        }
+      console.log(`📊 Database returned ${listings.length} listings after hard filters`);
+
+      // ✅ If no results and location is specified, try broader search
+      if (listings.length === 0 && filters.location) {
+        console.log('🔍 No results with location filter, trying broader search...');
+        delete searchQuery.location;
+        listings = await Listing.find(searchQuery)
+          .populate('provider', 'businessName name avatar email phone')
+          .limit(filters.limit || this.maxResults * 2)
+          .lean();
       }
 
       // ✅ If STILL no results, return popular listings
       if (listings.length === 0) {
+        console.log('🔍 No results found, returning popular listings...');
         listings = await Listing.find({ 
           status: 'approved',
-          isFeatured: true
+          averageRating: { $gte: 4 }
         })
         .populate('provider', 'businessName name avatar email phone')
         .limit(5)
@@ -350,7 +439,7 @@ Important: Only recommend from the provided listings. Never invent listings.`;
       }
 
       // ✅ Format and score listings
-      const formatted = listings.map(item => this.formatListing(item, userHistory));
+      const formatted = listings.map(item => this.formatListing(item, userHistory, userPreferences));
 
       return formatted;
     } catch (error) {
@@ -362,7 +451,11 @@ Important: Only recommend from the provided listings. Never invent listings.`;
   /**
    * ✅ Format a single listing
    */
-  formatListing(listing, userHistory) {
+  formatListing(listing, userHistory, userPreferences = {}) {
+    const budget = userPreferences?.budget || 0;
+    const isWithinBudget = budget > 0 && listing.price <= budget;
+    const isNearBudget = budget > 0 && listing.price > budget && listing.price <= budget * (1 + BUDGET_TOLERANCE);
+    
     return {
       id: listing._id,
       title: listing.title || 'Untitled',
@@ -382,8 +475,15 @@ Important: Only recommend from the provided listings. Never invent listings.`;
       businessType: listing.businessType || 'General',
       category: this.mapBusinessTypeToCategory(listing.businessType),
       isFeatured: listing.isFeatured || false,
-      score: this.calculateInitialScore(listing, userHistory),
+      capacity: listing.capacity || 1,
+      totalBookings: listing.totalBookings || 0,
+      score: this.calculateInitialScore(listing, userHistory, userPreferences),
       url: `/listing/${listing._id}`,
+      budgetStatus: budget > 0 ? (
+        isWithinBudget ? 'within_budget' :
+        isNearBudget ? 'near_budget' :
+        'over_budget'
+      ) : 'unknown',
       _original: listing // Keep for reference
     };
   }
@@ -418,10 +518,11 @@ Important: Only recommend from the provided listings. Never invent listings.`;
   }
 
   /**
-   * ✅ Calculate initial score for database items
+   * ✅ Calculate initial score with budget awareness
    */
-  calculateInitialScore(listing, userHistory) {
+  calculateInitialScore(listing, userHistory, userPreferences = {}) {
     let score = 0;
+    const budget = userPreferences?.budget || 0;
 
     // Base score from ratings (max 50)
     const rating = listing.averageRating || 0;
@@ -435,19 +536,28 @@ Important: Only recommend from the provided listings. Never invent listings.`;
     const reviews = listing.totalReviews || 0;
     score += Math.min(reviews / 5, 20);
 
-    // Bonus for featured (15)
-    if (listing.isFeatured) {
-      score += 15;
-    }
-
     // Bonus for approved status (10)
     if (listing.status === 'approved') {
       score += 10;
     }
 
-    // Bonus for popularity (bookings)
-    const bookings = listing.bookingCount || 0;
-    score += Math.min(bookings / 2, 15);
+    // ✅ Budget compatibility (HARD WEIGHT - max 30)
+    if (budget > 0) {
+      const price = listing.price || 0;
+      if (price <= budget) {
+        // Within budget: max score
+        const budgetRatio = price / budget; // 0-1
+        score += 30 * (1 - budgetRatio * 0.3); // 30 to 21 points
+      } else if (price <= budget * (1 + BUDGET_TOLERANCE)) {
+        // Near budget: moderate score
+        const overRatio = (price - budget) / budget;
+        score += 20 * (1 - overRatio / BUDGET_TOLERANCE); // 20 to 0 points
+      } else {
+        // Over budget: penalty
+        const overRatio = (price - budget) / budget;
+        score -= Math.min(overRatio * 10, 30); // -10 to -30 penalty
+      }
+    }
 
     // Personalization bonus (max 30)
     if (userHistory.favoriteLocations?.includes(listing.location)) {
@@ -469,19 +579,34 @@ Important: Only recommend from the provided listings. Never invent listings.`;
       score += Math.min(valueScore * 2, 20);
     }
 
-    return Math.round(score);
+    return Math.round(Math.max(score, 0));
   }
 
   /**
    * ✅ Score and rank recommendations
    */
-  scoreRecommendations(recommendations, userHistory, userContext) {
+  scoreRecommendations(recommendations, userHistory, userPreferences = {}) {
+    const budget = userPreferences?.budget || 0;
+    
     return recommendations.map(rec => {
       let score = rec.score || 0;
 
+      // ✅ Budget preference scoring (additional boost)
+      if (budget > 0) {
+        const price = rec.price || 0;
+        if (price <= budget) {
+          const budgetRatio = price / budget;
+          score += (1 - budgetRatio) * 15; // Cheaper within budget gets more boost
+        } else if (price <= budget * (1 + BUDGET_TOLERANCE)) {
+          score += 5; // Near budget small boost
+        } else {
+          score -= 10; // Over budget penalty
+        }
+      }
+
       // Personalization scoring
-      if (userContext.interests) {
-        const matchCount = userContext.interests.filter(interest =>
+      if (userPreferences.interests) {
+        const matchCount = userPreferences.interests.filter(interest =>
           rec.tags?.some(tag => 
             tag.toLowerCase().includes(interest.toLowerCase())
           )
@@ -494,17 +619,24 @@ Important: Only recommend from the provided listings. Never invent listings.`;
         score += 15;
       }
 
-      // Price preference
-      if (userHistory.avgPrice > 0) {
-        const priceDiff = Math.abs(rec.price - userHistory.avgPrice);
-        if (priceDiff < 50) {
-          score += 10;
-        } else if (priceDiff < 100) {
-          score += 5;
-        }
-      }
+      // Travel style match
+      const travelStyle = userPreferences.travelStyle || 'balanced';
+      const styleKeywords = {
+        adventure: ['adventure', 'trekking', 'hiking', 'wildlife', 'safari', 'explore'],
+        cultural: ['culture', 'history', 'museum', 'heritage', 'local', 'traditional'],
+        relaxation: ['relax', 'spa', 'wellness', 'peaceful', 'scenic'],
+        luxury: ['luxury', 'premium', 'exclusive', '5-star', 'vip'],
+        budget: ['budget', 'affordable', 'cheap', 'value', 'economical'],
+        family: ['family', 'kids', 'children', 'family-friendly'],
+        romantic: ['romantic', 'couples', 'honeymoon', 'intimate']
+      };
+      
+      const styleWords = styleKeywords[travelStyle] || [];
+      const recText = [rec.title, rec.description, ...(rec.tags || [])].join(' ').toLowerCase();
+      const styleMatches = styleWords.filter(word => recText.includes(word));
+      score += styleMatches.length * 3;
 
-      // Season match (max 10)
+      // Season match
       const currentMonth = new Date().getMonth();
       const drySeason = [5, 6, 7, 8]; // June-September
       if (drySeason.includes(currentMonth) && 
@@ -519,7 +651,7 @@ Important: Only recommend from the provided listings. Never invent listings.`;
 
       return {
         ...rec,
-        score: Math.round(score)
+        score: Math.round(Math.max(score, 0))
       };
     });
   }
@@ -532,7 +664,6 @@ Important: Only recommend from the provided listings. Never invent listings.`;
     const result = [];
     
     for (const item of items) {
-      // Use ID if available, otherwise title+location
       const key = item.id || `${item.title}-${item.location}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -543,9 +674,11 @@ Important: Only recommend from the provided listings. Never invent listings.`;
   }
 
   /**
-   * ✅ Format recommendations for frontend
+   * ✅ Format recommendations for frontend with enhanced match reasons
    */
-  formatRecommendations(recommendations, userHistory) {
+  formatRecommendations(recommendations, userHistory, userPreferences = {}) {
+    const budget = userPreferences?.budget || 0;
+    
     return recommendations.map(rec => ({
       id: rec.id,
       title: rec.title,
@@ -566,30 +699,55 @@ Important: Only recommend from the provided listings. Never invent listings.`;
       isFeatured: rec.isFeatured || false,
       url: rec.url || `/listing/${rec.id}`,
       score: rec.score || 0,
-      matchReason: this.getMatchReason(rec, userHistory)
+      matchReason: this.getMatchReason(rec, userHistory, userPreferences),
+      budgetStatus: budget > 0 ? (
+        rec.price <= budget ? 'within_budget' :
+        rec.price <= budget * (1 + BUDGET_TOLERANCE) ? 'near_budget' :
+        'over_budget'
+      ) : 'unknown'
     }));
   }
 
   /**
-   * ✅ Get match reason for recommendation
+   * ✅ Get match reason for recommendation - ENHANCED with budget context
    */
-  getMatchReason(rec, userHistory) {
+  getMatchReason(rec, userHistory, userPreferences = {}) {
     const reasons = [];
+    const budget = userPreferences?.budget || 0;
     
+    // ✅ Budget reason (most important)
+    if (budget > 0) {
+      if (rec.price <= budget) {
+        reasons.push(`Within your $${budget} budget`);
+      } else if (rec.price <= budget * (1 + BUDGET_TOLERANCE)) {
+        reasons.push(`Slightly above your $${budget} budget`);
+      } else {
+        reasons.push(`Premium option ($${rec.price})`);
+      }
+    }
+    
+    // Destination match
+    if (userPreferences?.destination && rec.location) {
+      if (rec.location.toLowerCase().includes(userPreferences.destination.toLowerCase())) {
+        reasons.push(`Located in ${userPreferences.destination}`);
+      }
+    }
+    
+    // Location preference
     if (userHistory.favoriteLocations?.includes(rec.location)) {
       reasons.push('Matches your favorite destinations');
     }
     
+    // Rating
     if (rec.rating >= 4.5) {
       reasons.push('Highly rated by travelers');
+    } else if (rec.rating >= 4.0) {
+      reasons.push('Well rated by travelers');
     }
     
-    if (rec.isFeatured) {
-      reasons.push('Featured experience');
-    }
-    
-    if (userHistory.interests) {
-      const matches = userHistory.interests.filter(interest =>
+    // Interest match
+    if (userPreferences.interests && userPreferences.interests.length > 0) {
+      const matches = userPreferences.interests.filter(interest =>
         rec.tags?.some(tag => tag.toLowerCase().includes(interest.toLowerCase()))
       );
       if (matches.length > 0) {
@@ -597,18 +755,67 @@ Important: Only recommend from the provided listings. Never invent listings.`;
       }
     }
     
+    // Travel style match
+    const travelStyle = userPreferences.travelStyle || 'balanced';
+    const styleLabels = {
+      adventure: 'Adventure style',
+      cultural: 'Cultural style',
+      relaxation: 'Relaxation style',
+      luxury: 'Luxury style',
+      budget: 'Budget style',
+      family: 'Family friendly',
+      romantic: 'Romantic style'
+    };
+    
+    const styleKeywords = {
+      adventure: ['adventure', 'trekking', 'hiking', 'wildlife', 'safari'],
+      cultural: ['culture', 'history', 'museum', 'heritage', 'local'],
+      relaxation: ['relax', 'spa', 'wellness', 'peaceful', 'scenic'],
+      luxury: ['luxury', 'premium', 'exclusive', '5-star'],
+      budget: ['budget', 'affordable', 'cheap', 'value'],
+      family: ['family', 'kids', 'children', 'family-friendly'],
+      romantic: ['romantic', 'couples', 'honeymoon', 'intimate']
+    };
+    
+    const styleWords = styleKeywords[travelStyle] || [];
+    const recText = [rec.title, rec.description, ...(rec.tags || [])].join(' ').toLowerCase();
+    if (styleWords.some(word => recText.includes(word))) {
+      reasons.push(`Matches your ${styleLabels[travelStyle] || travelStyle}`);
+    }
+    
+    // Popularity
+    if (rec.totalBookings && rec.totalBookings > 50) {
+      reasons.push('Popular choice');
+    }
+    
+    // Featured
+    if (rec.isFeatured) {
+      reasons.push('Featured experience');
+    }
+    
+    // Capacity
+    if (rec.capacity && userPreferences?.travelers && rec.capacity >= userPreferences.travelers) {
+      reasons.push(`Supports ${userPreferences.travelers} travelers`);
+    }
+    
     if (reasons.length === 0) {
       reasons.push('Popular choice');
     }
     
-    return reasons.slice(0, 2).join(' • ');
+    return reasons.slice(0, 4).join(' • ');
   }
 
   /**
-   * ✅ Get cache key
+   * ✅ Get cache key - ENHANCED with budget and destination
    */
-  getCacheKey(query, userId, filters) {
-    return JSON.stringify({ query, userId, filters });
+  getCacheKey(query, userId, filters, budget, destination) {
+    return JSON.stringify({ 
+      query, 
+      userId, 
+      filters, 
+      budget: budget || 0,
+      destination: destination || null
+    });
   }
 
   /**

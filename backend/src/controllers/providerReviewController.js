@@ -1,5 +1,6 @@
 // backend/src/controllers/providerReviewController.js
-// ✅ COMPLETE FIXED - Removed problematic imports
+// ✅ COMPLETE FIXED - Removed problematic getProviderStats call
+// ✅ FIXED: Uses manual stats calculation instead of non-existent method
 
 import Review from '../models/Review.js';
 import Booking from '../models/Booking.js';
@@ -26,12 +27,14 @@ export const getProviderReviews = async (req, res) => {
       .lean();
 
     const total = await Review.countDocuments(filter);
-    const stats = await Review.getProviderStats(req.user.id);
+
+    // ✅ FIXED: Calculate stats manually instead of calling non-existent method
+    const stats = await calculateProviderStats(req.user.id);
 
     res.json({
       success: true,
       reviews,
-      stats: stats[0] || null,
+      stats: stats || null,
       pagination: {
         total,
         page: parseInt(page),
@@ -49,25 +52,24 @@ export const getProviderReviews = async (req, res) => {
 };
 
 // =========================
-// ✅ GET PROVIDER REVIEW STATS
+// ✅ HELPER: Calculate Provider Stats
 // =========================
-export const getProviderReviewStats = async (req, res) => {
+const calculateProviderStats = async (providerId) => {
   try {
-    const providerId = req.user.id;
-
     const reviews = await Review.find({ 
       provider: providerId,
       status: { $in: ['published', 'pending'] }
     });
 
     const totalReviews = reviews.length;
-    const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
+    const totalRating = reviews.reduce((sum, r) => sum + (r.rating || 0), 0);
     const averageRating = totalReviews > 0 ? totalRating / totalReviews : 0;
 
     const ratingCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     reviews.forEach(r => {
-      if (ratingCounts[r.rating] !== undefined) {
-        ratingCounts[r.rating]++;
+      const rating = Math.round(r.rating || 0);
+      if (ratingCounts[rating] !== undefined) {
+        ratingCounts[rating]++;
       }
     });
 
@@ -89,8 +91,10 @@ export const getProviderReviewStats = async (req, res) => {
           };
         }
         byListing[listingId].count++;
-        byListing[listingId].sum += r.rating;
-        byListing[listingId].average = byListing[listingId].sum / byListing[listingId].count;
+        byListing[listingId].sum += (r.rating || 0);
+        byListing[listingId].average = byListing[listingId].count > 0 
+          ? byListing[listingId].sum / byListing[listingId].count 
+          : 0;
       }
     });
 
@@ -103,18 +107,32 @@ export const getProviderReviewStats = async (req, res) => {
     .limit(5)
     .lean();
 
+    return {
+      totalReviews,
+      averageRating: Math.round(averageRating * 10) / 10,
+      ratingCounts,
+      pendingCount,
+      publishedCount,
+      hiddenCount,
+      byListing: Object.values(byListing),
+      recentReviews
+    };
+  } catch (error) {
+    console.error('❌ Error calculating provider stats:', error);
+    return null;
+  }
+};
+
+// =========================
+// ✅ GET PROVIDER REVIEW STATS
+// =========================
+export const getProviderReviewStats = async (req, res) => {
+  try {
+    const stats = await calculateProviderStats(req.user.id);
+    
     res.json({
       success: true,
-      stats: {
-        totalReviews,
-        averageRating: Math.round(averageRating * 10) / 10,
-        ratingCounts,
-        pendingCount,
-        publishedCount,
-        hiddenCount,
-        byListing: Object.values(byListing),
-        recentReviews
-      }
+      stats
     });
   } catch (error) {
     console.error('❌ Get provider review stats error:', error);
@@ -371,7 +389,15 @@ export const respondToReview = async (req, res) => {
       });
     }
 
-    await review.addResponse(comment, req.user.id);
+    // ✅ FIXED: Use addReply instead of addResponse
+    if (typeof review.addReply === 'function') {
+      await review.addReply(comment);
+    } else {
+      // Fallback: directly set providerReply
+      review.providerReply = comment.trim();
+      review.providerReplyAt = new Date();
+      await review.save();
+    }
 
     await createNotification({
       recipient: review.traveler._id,
@@ -386,7 +412,7 @@ export const respondToReview = async (req, res) => {
     res.json({
       success: true,
       message: 'Response added successfully',
-      response: review.providerResponse
+      response: review.providerReply || review.providerResponse
     });
   } catch (error) {
     console.error('❌ Respond to review error:', error);
@@ -412,19 +438,26 @@ export const editResponse = async (req, res) => {
       });
     }
 
-    if (!review.providerResponse) {
+    if (!review.providerReply && !review.providerResponse) {
       return res.status(400).json({
         success: false,
         message: 'No response to edit'
       });
     }
 
-    await review.editResponse(comment);
+    // ✅ FIXED: Use updateReply if available, otherwise direct update
+    if (typeof review.updateReply === 'function') {
+      await review.updateReply(comment);
+    } else {
+      review.providerReply = comment.trim();
+      review.providerReplyUpdatedAt = new Date();
+      await review.save();
+    }
 
     res.json({
       success: true,
       message: 'Response updated successfully',
-      response: review.providerResponse
+      response: review.providerReply || review.providerResponse
     });
   } catch (error) {
     console.error('❌ Edit response error:', error);
@@ -449,14 +482,16 @@ export const deleteResponse = async (req, res) => {
       });
     }
 
-    if (!review.providerResponse) {
+    if (!review.providerReply && !review.providerResponse) {
       return res.status(400).json({
         success: false,
         message: 'No response to delete'
       });
     }
 
-    review.providerResponse = null;
+    review.providerReply = null;
+    review.providerReplyAt = null;
+    review.providerReplyUpdatedAt = null;
     await review.save();
 
     res.json({
@@ -505,4 +540,3 @@ export const getReviewById = async (req, res) => {
     });
   }
 };
-

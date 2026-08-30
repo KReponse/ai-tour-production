@@ -4,6 +4,10 @@
 // ✅ ADDED: Real listing recommendations in results
 // ✅ ADDED: Experience cards with "View Details" links
 // ✅ ADDED: Session persistence for conversation continuity
+// ✅ ✅ PHASE 1: User ID integration for personalization
+// ✅ ✅ PHASE 1: Personalized recommendations display
+// ✅ ✅ PHASE 1: User preference display with match reasons
+// ✅ ✅ PHASE 2: Dynamic destinations from MongoDB (no hardcoded list)
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -44,12 +48,17 @@ import {
   Share2,
   MessageCircle,
   Eye,
+  User,
+  Target,
+  BadgeCheck,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Card from '../components/ui/Card';
-import { generateTripPlan, getAIRecommendations, getAIChat } from '../services/aiService';
+import { generateTripPlan, getAIRecommendations, getAIChat, getDestinations } from '../services/aiService';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -62,8 +71,8 @@ import toast from 'react-hot-toast';
 // White : #FFFFFF
 // ===============================
 
-// ✅ Experience Card Component
-const ExperienceCard = ({ experience }) => {
+// ✅ Experience Card Component with personalization
+const ExperienceCard = ({ experience, showMatchReason = false }) => {
   if (!experience) return null;
 
   return (
@@ -85,6 +94,13 @@ const ExperienceCard = ({ experience }) => {
             <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
               <Star className="w-3 h-3 text-[#F59E0B] fill-[#F59E0B]" />
               {experience.rating}
+            </div>
+          )}
+          {/* ✅ Personalized match badge */}
+          {showMatchReason && experience.personalizationScore > 70 && (
+            <div className="absolute bottom-2 left-2 bg-[#0D9488]/90 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1">
+              <Target className="w-2.5 h-2.5" />
+              {experience.personalizationScore}% Match
             </div>
           )}
         </div>
@@ -119,13 +135,23 @@ const ExperienceCard = ({ experience }) => {
             View Details
           </Link>
         </div>
+
+        {/* ✅ Match reasons */}
+        {showMatchReason && experience.matchReasons && experience.matchReasons.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+            <p className="text-[10px] text-gray-400 flex items-center gap-1">
+              <Sparkles className="w-2.5 h-2.5 text-[#F59E0B]" />
+              {experience.matchReasons.slice(0, 2).join(' • ')}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-// ✅ Experience List Component
-const ExperienceList = ({ experiences, title = "Recommended Experiences" }) => {
+// ✅ Experience List Component with personalization
+const ExperienceList = ({ experiences, title = "Recommended Experiences", showMatchReason = false }) => {
   if (!experiences || experiences.length === 0) return null;
 
   return (
@@ -136,8 +162,60 @@ const ExperienceList = ({ experiences, title = "Recommended Experiences" }) => {
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {experiences.map((exp, index) => (
-          <ExperienceCard key={exp.id || index} experience={exp} />
+          <ExperienceCard key={exp.id || index} experience={exp} showMatchReason={showMatchReason} />
         ))}
+      </div>
+    </div>
+  );
+};
+
+// ✅ Personalized Profile Banner
+const PersonalizedBanner = ({ user, preferences }) => {
+  if (!user || !preferences) return null;
+
+  const travelStyleLabels = {
+    adventure: 'Adventure Seeker',
+    cultural: 'Culture Enthusiast',
+    relaxation: 'Relaxation Lover',
+    luxury: 'Luxury Traveler',
+    budget: 'Budget Explorer',
+    balanced: 'Balanced Traveler',
+    family: 'Family Traveler',
+    romantic: 'Romantic Traveler'
+  };
+
+  return (
+    <div className="bg-gradient-to-r from-[#0D9488]/10 to-[#F59E0B]/10 rounded-2xl p-4 border border-[#0D9488]/20 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-[#0D9488]/20 flex items-center justify-center">
+          <User className="w-5 h-5 text-[#0D9488]" />
+        </div>
+        <div>
+          <p className="font-semibold text-[#374151] dark:text-white text-sm">
+            {user.name || 'Traveler'}
+          </p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span className="flex items-center gap-0.5">
+              <BadgeCheck className="w-3 h-3 text-[#0D9488]" />
+              {travelStyleLabels[preferences.travelStyle] || 'Traveler'}
+            </span>
+            {preferences.interests?.length > 0 && (
+              <span className="flex items-center gap-0.5">
+                <span className="text-gray-300">•</span>
+                {preferences.interests.slice(0, 2).join(', ')}
+                {preferences.interests.length > 2 && ` +${preferences.interests.length - 2}`}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="px-2 py-0.5 rounded-full bg-[#0D9488]/10 text-[#0D9488]">
+          {preferences.travelStyle || 'Balanced'}
+        </span>
+        <span className="px-2 py-0.5 rounded-full bg-[#F59E0B]/10 text-[#F59E0B]">
+          ${preferences.budget || 'Mid-range'}
+        </span>
       </div>
     </div>
   );
@@ -160,6 +238,13 @@ const AIPlanner = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [isPersonalized, setIsPersonalized] = useState(false);
+  const [userPreferences, setUserPreferences] = useState(null);
+
+  // ✅ NEW: Dynamic destinations state
+  const [destinations, setDestinations] = useState([]);
+  const [destinationsLoading, setDestinationsLoading] = useState(false);
+  const [destinationsError, setDestinationsError] = useState(null);
 
   const aiMessages = [
     'Analyzing your travel style...',
@@ -181,17 +266,6 @@ const AIPlanner = () => {
     travelStyle: 'balanced',
     language: 'English',
   });
-
-  const destinations = [
-    { value: 'Kigali City', label: 'Kigali City', emoji: '🏙️' },
-    { value: 'Volcanoes National Park', label: 'Volcanoes National Park', emoji: '🌋' },
-    { value: 'Akagera National Park', label: 'Akagera National Park', emoji: '🦁' },
-    { value: 'Nyungwe Forest', label: 'Nyungwe Forest', emoji: '🌿' },
-    { value: 'Lake Kivu', label: 'Lake Kivu', emoji: '🏖️' },
-    { value: 'Musanze', label: 'Musanze', emoji: '⛰️' },
-    { value: 'Gisenyi', label: 'Gisenyi', emoji: '🌊' },
-    { value: 'Rwanda (Multi-city)', label: 'Rwanda (Multi-city)', emoji: '🇷🇼' },
-  ];
 
   const moods = [
     {
@@ -252,6 +326,46 @@ const AIPlanner = () => {
     { value: 'budget', label: 'Budget' },
   ];
 
+  // ✅ Load destinations from API
+  const loadDestinations = useCallback(async () => {
+    try {
+      setDestinationsLoading(true);
+      setDestinationsError(null);
+      
+      console.log('📤 [AIPlanner] Loading destinations from API...');
+      
+      const response = await getDestinations();
+      
+      console.log('📥 [AIPlanner] Destinations response:', response);
+      
+      if (response.success && response.destinations.length > 0) {
+        setDestinations(response.destinations);
+        console.log(`✅ [AIPlanner] Loaded ${response.destinations.length} destinations`);
+        
+        // ✅ If there's a previously selected destination, try to find it
+        if (formData.destination) {
+          const found = response.destinations.find(d => d.value === formData.destination);
+          if (found) {
+            setFormData(prev => ({
+              ...prev,
+              destination: found.value,
+              destinationId: found.id
+            }));
+          }
+        }
+      } else {
+        console.warn('⚠️ [AIPlanner] No destinations found');
+        setDestinationsError('No destinations available. Please check back later.');
+      }
+    } catch (error) {
+      console.error('❌ [AIPlanner] Error loading destinations:', error);
+      setDestinationsError('Failed to load destinations. Please refresh the page.');
+      toast.error('Failed to load destinations');
+    } finally {
+      setDestinationsLoading(false);
+    }
+  }, []);
+
   // ✅ Restore sessionId from localStorage
   useEffect(() => {
     const savedSessionId = localStorage.getItem('aiPlannerSessionId');
@@ -267,6 +381,25 @@ const AIPlanner = () => {
     }
   }, [sessionId]);
 
+  // ✅ Load user preferences from localStorage
+  useEffect(() => {
+    const savedPrefs = localStorage.getItem('userPreferences');
+    if (savedPrefs && user) {
+      try {
+        const prefs = JSON.parse(savedPrefs);
+        setUserPreferences(prefs);
+        setIsPersonalized(true);
+      } catch (e) {
+        console.error('Error loading user preferences:', e);
+      }
+    }
+  }, [user]);
+
+  // ✅ Load destinations on mount
+  useEffect(() => {
+    loadDestinations();
+  }, [loadDestinations]);
+
   const calculateDays = useCallback(() => {
     if (formData.startDate && formData.endDate) {
       const start = new Date(formData.startDate);
@@ -278,7 +411,19 @@ const AIPlanner = () => {
     return 3;
   }, [formData.startDate, formData.endDate]);
 
-  // ✅ Generate AI Trip with recommendations
+  // ✅ Handle destination change with ID
+  const handleDestinationChange = useCallback((e) => {
+    const selectedValue = e.target.value;
+    const selected = destinations.find(d => d.value === selectedValue);
+    
+    setFormData(prev => ({
+      ...prev,
+      destination: selected?.value || '',
+      destinationId: selected?.id || null
+    }));
+  }, [destinations]);
+
+  // ✅ Generate AI Trip with recommendations and personalization
   const generateAITrip = async () => {
     if (!formData.destination) {
       toast.error('Please select a destination');
@@ -296,6 +441,7 @@ const AIPlanner = () => {
     const days = calculateDays();
     const requestData = {
       destination: formData.destination,
+      destinationId: formData.destinationId, // ✅ Include destinationId
       mood: formData.mood,
       budget: formData.budget,
       travelers: formData.travelers,
@@ -306,6 +452,7 @@ const AIPlanner = () => {
       startDate: formData.startDate,
       language: formData.language,
       sessionId: sessionId,
+      userId: user?._id || null, // ✅ Send user ID for personalization
     };
 
     try {
@@ -324,6 +471,12 @@ const AIPlanner = () => {
           setSessionId(response.sessionId);
         }
 
+        // ✅ Check if response is personalized
+        if (response.personalized) {
+          setIsPersonalized(true);
+          toast.success('🎯 Personalized plan created just for you!');
+        }
+
         setTripPlan({
           ...response.plan,
           raw: response.plan,
@@ -333,7 +486,7 @@ const AIPlanner = () => {
           travelers: formData.travelers,
         });
 
-        // ✅ Fetch recommendations based on destination and interests
+        // ✅ Fetch recommendations with user context
         await fetchRecommendations(formData.destination, formData.interests);
 
         setIsSaved(false);
@@ -351,7 +504,7 @@ const AIPlanner = () => {
     }
   };
 
-  // ✅ Fetch recommendations
+  // ✅ Fetch recommendations with user context
   const fetchRecommendations = async (destination, interests) => {
     try {
       const query = `${destination} ${interests.join(' ')} experiences in Rwanda`;
@@ -360,10 +513,17 @@ const AIPlanner = () => {
         limit: 6,
         location: destination,
         sessionId: sessionId,
+        userId: user?._id || null, // ✅ Send user ID for personalization
       });
 
       if (response.success && response.experiences) {
         setRecommendations(response.experiences);
+        
+        // ✅ Save user preferences if response includes them
+        if (response.userPreferences) {
+          setUserPreferences(response.userPreferences);
+          localStorage.setItem('userPreferences', JSON.stringify(response.userPreferences));
+        }
       }
     } catch (error) {
       console.error('❌ Error fetching recommendations:', error);
@@ -378,6 +538,7 @@ const AIPlanner = () => {
       const savedTrip = {
         id: Date.now(),
         destination: formData.destination,
+        destinationId: formData.destinationId,
         date: new Date().toISOString(),
         plan: tripPlan,
         recommendations: recommendations,
@@ -385,6 +546,8 @@ const AIPlanner = () => {
         budget: formData.budget,
         mood: formData.mood,
         sessionId: sessionId,
+        userId: user?._id || null,
+        personalized: isPersonalized,
       };
 
       const updatedTrips = [...savedTrips, savedTrip];
@@ -422,6 +585,7 @@ const AIPlanner = () => {
           role: m.role,
           content: m.content,
         })),
+        userId: user?._id || null, // ✅ Send user ID for personalization
       });
 
       if (response.sessionId) {
@@ -467,10 +631,15 @@ const AIPlanner = () => {
     }
   }, []);
 
-  // ✅ Get destination emoji
+  // ✅ Get destination emoji (fallback for display)
   const getDestinationEmoji = (destination) => {
     const found = destinations.find(d => d.value === destination);
     return found?.emoji || '📍';
+  };
+
+  // ✅ Retry loading destinations
+  const handleRetryDestinations = () => {
+    loadDestinations();
   };
 
   // ✅ Render day itinerary
@@ -509,6 +678,13 @@ const AIPlanner = () => {
                 {activity.cost && (
                   <p className="text-xs text-[#0D9488] font-medium">${activity.cost}</p>
                 )}
+                {/* ✅ Show personalized match score */}
+                {activity.matchScore > 70 && (
+                  <span className="text-[10px] text-[#0D9488] flex items-center gap-0.5">
+                    <Target className="w-2.5 h-2.5" />
+                    {activity.matchScore}% match
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -542,7 +718,7 @@ const AIPlanner = () => {
     );
   };
 
-  // ✅ Render results step
+  // ✅ Render results step with personalization
   const renderResults = () => {
     if (!tripPlan) return null;
 
@@ -580,9 +756,20 @@ const AIPlanner = () => {
                   Session active
                 </span>
               )}
+              {isPersonalized && (
+                <span className="flex items-center gap-1 bg-white/20 px-3 py-1 rounded-full text-xs">
+                  <Target className="w-3 h-3" />
+                  Personalized for you
+                </span>
+              )}
             </div>
           </div>
         </div>
+
+        {/* ✅ Personalized Banner */}
+        {isPersonalized && userPreferences && (
+          <PersonalizedBanner user={user} preferences={userPreferences} />
+        )}
 
         {/* Budget Summary */}
         {tripPlan.summary && (
@@ -645,14 +832,14 @@ const AIPlanner = () => {
           {renderDayItinerary(activeDay)}
         </Card>
 
-        {/* ✅ Recommendations Section */}
+        {/* ✅ Recommendations Section - Personalized */}
         {recommendations.length > 0 && (
           <Card className="p-6 rounded-[32px] shadow-xl border border-gray-100 dark:border-gray-800">
             <h3 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-[#F59E0B]" />
-              Recommended Experiences
+              {isPersonalized ? 'Personalized Recommendations' : 'Recommended Experiences'}
             </h3>
-            <ExperienceList experiences={recommendations} />
+            <ExperienceList experiences={recommendations} showMatchReason={isPersonalized} />
           </Card>
         )}
 
@@ -688,7 +875,7 @@ const AIPlanner = () => {
           </Card>
         )}
 
-        {/* ✅ AI Chat Assistant - Contextual Help */}
+        {/* AI Chat Assistant */}
         <Card className="p-6 rounded-[32px] shadow-xl border border-gray-100 dark:border-gray-800">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-bold dark:text-white flex items-center gap-2">
@@ -705,7 +892,6 @@ const AIPlanner = () => {
 
           {showChat && (
             <div className="space-y-4">
-              {/* Chat Messages */}
               <div className="max-h-48 overflow-y-auto space-y-2 p-2 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
                 {chatMessages.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">
@@ -742,7 +928,6 @@ const AIPlanner = () => {
                 )}
               </div>
 
-              {/* Chat Input */}
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -880,6 +1065,12 @@ const AIPlanner = () => {
               Session active
             </div>
           )}
+          {isPersonalized && (
+            <div className="mt-2 inline-flex items-center gap-2 px-4 py-1 rounded-full bg-[#F59E0B]/30 text-xs">
+              <Target className="w-3 h-3" />
+              Personalized for you
+            </div>
+          )}
         </div>
       </section>
 
@@ -910,23 +1101,61 @@ const AIPlanner = () => {
               </h2>
 
               <form onSubmit={(e) => { e.preventDefault(); generateAITrip(); }} className="space-y-8">
-                {/* Destination */}
+                {/* ✅ Destination - Dynamic from API */}
                 <div>
                   <label className="block text-sm font-semibold mb-3 dark:text-white">
                     Where do you want to go?
                   </label>
                   <select
                     value={formData.destination}
-                    onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
-                    className="w-full h-14 rounded-2xl border border-gray-200 dark:border-gray-700 px-4 bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none"
+                    onChange={handleDestinationChange}
+                    disabled={destinationsLoading}
+                    className="w-full h-14 rounded-2xl border border-gray-200 dark:border-gray-700 px-4 bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="">Select a destination</option>
+                    <option value="">
+                      {destinationsLoading 
+                        ? 'Loading destinations...' 
+                        : destinationsError 
+                          ? 'Error loading destinations' 
+                          : 'Select a destination'}
+                    </option>
                     {destinations.map((dest) => (
-                      <option key={dest.value} value={dest.value}>
-                        {dest.emoji} {dest.label}
+                      <option key={dest.id} value={dest.value}>
+                        {dest.name} {dest.listingCount ? `(${dest.listingCount} experiences)` : ''}
                       </option>
                     ))}
                   </select>
+                  
+                  {/* ✅ Loading indicator */}
+                  {destinationsLoading && (
+                    <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin text-[#0D9488]" />
+                      Loading destinations...
+                    </div>
+                  )}
+                  
+                  {/* ✅ Error state */}
+                  {destinationsError && (
+                    <div className="mt-2 flex items-center gap-2 text-sm text-red-500">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>{destinationsError}</span>
+                      <button
+                        type="button"
+                        onClick={handleRetryDestinations}
+                        className="ml-2 text-[#0D9488] hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* ✅ Success indicator */}
+                  {!destinationsLoading && !destinationsError && destinations.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-400">
+                      {destinations.length} destinations available
+                    </p>
+                  )}
                 </div>
 
                 {/* Travel Mood */}
@@ -1136,6 +1365,25 @@ const AIPlanner = () => {
                   <div>
                     <p className="text-sm font-medium dark:text-white">Session Active</p>
                     <p className="text-xs text-gray-400 truncate max-w-[200px]">{sessionId}</p>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {/* ✅ Personalization Status */}
+            {user && (
+              <Card className="p-6 rounded-[32px] shadow-xl border border-gray-100 dark:border-gray-800 bg-[#F59E0B]/5">
+                <div className="flex items-center gap-3">
+                  <Target className="w-5 h-5 text-[#F59E0B]" />
+                  <div>
+                    <p className="text-sm font-medium dark:text-white">
+                      {isPersonalized ? 'Personalized Experience' : 'Sign in for Personalization'}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {isPersonalized 
+                        ? 'Your preferences are being used' 
+                        : 'Login to get personalized recommendations'}
+                    </p>
                   </div>
                 </div>
               </Card>

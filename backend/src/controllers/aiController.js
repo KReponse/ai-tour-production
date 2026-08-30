@@ -3,6 +3,7 @@
 // ✅ Uses ONLY Listing, no Tour references
 // ✅ Added session persistence
 // ✅ Added conversation history endpoints
+// ✅ ADDED: getDestinations endpoint for dynamic destination loading
 
 import plannerService from '../ai/services/planner.service.js';
 import chatService from '../ai/services/chat.service.js';
@@ -507,6 +508,84 @@ export const getAIProviderInfo = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
+
+/* ================= ✅ GET DESTINATIONS ================= */
+
+export const getDestinations = async (req, res) => {
+  try {
+    console.log('📤 [getDestinations] Fetching unique destinations from listings...');
+
+    // ✅ Aggregate unique locations from approved listings
+    const destinations = await Listing.aggregate([
+      {
+        $match: {
+          status: 'approved',
+          location: {
+            $exists: true,
+            $ne: ''
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $trim: { input: '$location' } },
+          listingCount: { $sum: 1 },
+          coverImage: { $first: '$coverImage' },
+          avgRating: { $avg: '$averageRating' }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          name: '$_id',
+          listingCount: 1,
+          coverImage: 1,
+          avgRating: { $round: ['$avgRating', 1] }
+        }
+      },
+      {
+        $sort: { name: 1 }
+      }
+    ]);
+
+    console.log(`✅ [getDestinations] Found ${destinations.length} unique destinations`);
+
+    // ✅ Format response with stable IDs
+    const formattedDestinations = destinations.map(dest => {
+      // Create a stable slug from the name
+      const slug = dest.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+
+      return {
+        id: slug,
+        name: dest.name,
+        label: dest.name,
+        value: dest.name,
+        listingCount: dest.listingCount || 0,
+        coverImage: dest.coverImage || null,
+        averageRating: dest.avgRating || 0
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      destinations: formattedDestinations,
+      total: formattedDestinations.length,
+      source: 'listings',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ [getDestinations] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load destinations',
+      error: error.message
     });
   }
 };

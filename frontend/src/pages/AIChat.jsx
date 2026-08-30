@@ -1,12 +1,14 @@
 // frontend/src/pages/AIChat.jsx
-// ✅ COMPLETE FIXED - Full session management with conversation memory
-// ✅ Updated "Tours" → "Experiences" for user-facing text
-// ✅ Added sessionId persistence for conversation continuity
-// ✅ ADDED: Real listing card rendering from AI responses
-// ✅ ADDED: Experience cards with "View Details" links
-// ✅ ADDED: Quick replies and follow-up detection
+// ✅ COMPLETE FIXED - Integrated with AI Travel Intelligence Engine
+// ✅ Uses the same recommendation logic as AI Planner
+// ✅ Hard budget filtering (prevents $1,186 listings for $200 budget)
+// ✅ Full session management with conversation memory
+// ✅ Real listing card rendering from AI responses
+// ✅ Experience cards with "View Details" links
+// ✅ Quick replies and follow-up detection
+// ✅ Context tracking across messages
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Send, 
   Bot, 
@@ -41,12 +43,15 @@ import {
   ZoomIn,
   Eye,
   Star,
+  Target,
+  CheckCircle,
 } from 'lucide-react';
 
-// ✅ Import AI service
-import { getAIChat } from '../services/aiService';
+// ✅ Import AI services
+import { getAIChat, getAIRecommendations } from '../services/aiService';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 // ===============================
 // AI TOUR COLORS
@@ -57,8 +62,8 @@ import { Link } from 'react-router-dom';
 // White : #FFFFFF
 // ===============================
 
-// ✅ Experience Card Component
-const ExperienceCard = ({ experience }) => {
+// ✅ Experience Card Component with Match Score
+const ExperienceCard = ({ experience, showMatchScore = false }) => {
   if (!experience) return null;
 
   return (
@@ -80,6 +85,25 @@ const ExperienceCard = ({ experience }) => {
             <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-xs flex items-center gap-1">
               <Star className="w-3 h-3 text-[#F59E0B] fill-[#F59E0B]" />
               {experience.rating}
+            </div>
+          )}
+          {/* Match Score badge */}
+          {showMatchScore && experience.matchScore > 70 && (
+            <div className="absolute bottom-2 left-2 bg-[#0D9488]/90 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1">
+              <Target className="w-2.5 h-2.5" />
+              {experience.matchScore}% Match
+            </div>
+          )}
+          {/* Budget Status badge */}
+          {experience.budgetStatus === 'within_budget' && (
+            <div className="absolute bottom-2 right-2 bg-green-600/90 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1">
+              <CheckCircle className="w-2.5 h-2.5" />
+              Within Budget
+            </div>
+          )}
+          {experience.budgetStatus === 'near_budget' && (
+            <div className="absolute bottom-2 right-2 bg-[#F59E0B]/90 backdrop-blur-sm text-white px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1">
+              Near Budget
             </div>
           )}
         </div>
@@ -114,13 +138,26 @@ const ExperienceCard = ({ experience }) => {
             View Details
           </Link>
         </div>
+
+        {/* Match Reasons */}
+        {showMatchScore && experience.matchReasons && experience.matchReasons.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+            <div className="flex flex-wrap gap-1">
+              {experience.matchReasons.slice(0, 3).map((reason, idx) => (
+                <span key={idx} className="text-[9px] sm:text-[10px] text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-full">
+                  ✓ {reason}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 // ✅ Experience List Component
-const ExperienceList = ({ experiences }) => {
+const ExperienceList = ({ experiences, showMatchScore = false }) => {
   if (!experiences || experiences.length === 0) return null;
 
   return (
@@ -128,14 +165,99 @@ const ExperienceList = ({ experiences }) => {
       <p className="text-xs font-semibold text-[#0D9488] flex items-center gap-1.5">
         <Sparkles className="w-3.5 h-3.5" />
         Recommended Experiences
+        {experiences.length > 0 && (
+          <span className="text-[10px] text-gray-400 font-normal">
+            ({experiences.length} matches)
+          </span>
+        )}
       </p>
       <div className="grid grid-cols-1 gap-3">
         {experiences.map((exp, index) => (
-          <ExperienceCard key={exp.id || index} experience={exp} />
+          <ExperienceCard key={exp.id || index} experience={exp} showMatchScore={showMatchScore} />
         ))}
       </div>
     </div>
   );
+};
+
+// ✅ Intent Extraction Helper
+const extractIntentFromMessage = (message) => {
+  const intent = {
+    destination: null,
+    budget: null,
+    interests: [],
+    travelers: null,
+    travelStyle: null,
+    mood: null,
+  };
+
+  const lower = message.toLowerCase();
+
+  // Destination detection
+  const destinations = ['kigali', 'musanze', 'volcanoes', 'akagera', 'nyungwe', 'lake kivu', 'gisenyi', 'rubavu'];
+  for (const dest of destinations) {
+    if (lower.includes(dest)) {
+      intent.destination = dest;
+      break;
+    }
+  }
+
+  // Budget detection
+  const budgetMatch = lower.match(/\$?(\d+)/);
+  if (budgetMatch && parseInt(budgetMatch[1]) > 10) {
+    intent.budget = parseInt(budgetMatch[1]);
+  }
+
+  // Interest detection
+  const interestKeywords = {
+    hiking: ['hiking', 'trekking', 'mountain', 'trail'],
+    wildlife: ['wildlife', 'safari', 'animal', 'nature'],
+    photography: ['photography', 'photo', 'camera', 'picture'],
+    culture: ['culture', 'cultural', 'history', 'museum', 'heritage'],
+    food: ['food', 'cuisine', 'dining', 'restaurant'],
+    adventure: ['adventure', 'thrill', 'exciting', 'extreme'],
+    relaxation: ['relax', 'spa', 'wellness', 'peaceful', 'calm'],
+  };
+
+  for (const [key, keywords] of Object.entries(interestKeywords)) {
+    if (keywords.some(k => lower.includes(k))) {
+      intent.interests.push(key);
+    }
+  }
+
+  // Travel style detection
+  if (lower.includes('luxury') || lower.includes('premium') || lower.includes('5-star')) {
+    intent.travelStyle = 'luxury';
+  } else if (lower.includes('budget') || lower.includes('cheap') || lower.includes('affordable')) {
+    intent.travelStyle = 'budget';
+  } else if (lower.includes('adventure') || lower.includes('thrill')) {
+    intent.travelStyle = 'adventure';
+  } else if (lower.includes('cultural') || lower.includes('history')) {
+    intent.travelStyle = 'cultural';
+  } else if (lower.includes('relax') || lower.includes('peaceful')) {
+    intent.travelStyle = 'relaxation';
+  }
+
+  // Mood detection
+  if (lower.includes('adventure') || lower.includes('excitement')) {
+    intent.mood = 'Adventure';
+  } else if (lower.includes('relax') || lower.includes('calm') || lower.includes('peaceful')) {
+    intent.mood = 'Relaxation';
+  } else if (lower.includes('romantic') || lower.includes('couple')) {
+    intent.mood = 'Romantic';
+  } else if (lower.includes('nature') || lower.includes('wildlife')) {
+    intent.mood = 'Nature';
+  } else if (lower.includes('cultural') || lower.includes('heritage')) {
+    intent.mood = 'Cultural';
+  }
+
+  // Travelers detection
+  const travelerMatch = lower.match(/(\d+)\s*(?:people|person|pax|travelers|traveler)/);
+  if (travelerMatch) {
+    intent.travelers = parseInt(travelerMatch[1]);
+  }
+
+  return intent;
 };
 
 // Language configurations
@@ -187,6 +309,17 @@ const AIChat = () => {
   const [language, setLanguage] = useState('en');
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  const [showMatchScore, setShowMatchScore] = useState(true);
+  
+  // ✅ Track extracted context from conversation
+  const [extractedContext, setExtractedContext] = useState({
+    destination: null,
+    budget: null,
+    interests: [],
+    travelers: null,
+    travelStyle: null,
+    mood: null,
+  });
   
   // Voice input states
   const [isListening, setIsListening] = useState(false);
@@ -221,6 +354,143 @@ const AIChat = () => {
       localStorage.setItem('aiChatSessionId', sessionId);
     }
   }, [sessionId]);
+
+  // ✅ Restore context from localStorage
+  useEffect(() => {
+    const savedContext = localStorage.getItem('aiChatContext');
+    if (savedContext) {
+      try {
+        setExtractedContext(JSON.parse(savedContext));
+      } catch (e) {
+        console.error('Error loading context:', e);
+      }
+    }
+  }, []);
+
+  // ✅ Save context to localStorage
+  useEffect(() => {
+    if (Object.values(extractedContext).some(v => v !== null && v !== 0 && v.length > 0)) {
+      localStorage.setItem('aiChatContext', JSON.stringify(extractedContext));
+    }
+  }, [extractedContext]);
+
+  // ✅ Fetch recommendations using the recommendation engine
+  const fetchRecommendations = useCallback(async (context) => {
+    try {
+      const params = {
+        query: context.destination ? `Experiences in ${context.destination}` : 'Popular experiences in Rwanda',
+        limit: 5,
+        location: context.destination || undefined,
+        sessionId: sessionId,
+        userId: user?._id || null,
+        budget: context.budget || undefined,
+        interests: context.interests || [],
+        travelers: context.travelers || undefined,
+        travelStyle: context.travelStyle || 'balanced',
+      };
+
+      console.log('📤 [AIChat] Fetching recommendations with context:', params);
+
+      const response = await getAIRecommendations(params);
+      
+      if (response.success && response.experiences) {
+        console.log(`✅ [AIChat] Got ${response.experiences.length} recommendations`);
+        return response.experiences;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ [AIChat] Error fetching recommendations:', error);
+      return [];
+    }
+  }, [sessionId, user?._id]);
+
+  // ✅ Handle recommendation requests
+  const handleRecommendationRequest = useCallback(async (message, context) => {
+    setLoading(true);
+    setTyping(true);
+
+    try {
+      // Extract intent from message
+      const intent = extractIntentFromMessage(message);
+      
+      // Merge with existing context
+      const mergedContext = {
+        ...context,
+        destination: intent.destination || context.destination,
+        budget: intent.budget || context.budget,
+        interests: [...new Set([...context.interests, ...intent.interests])],
+        travelers: intent.travelers || context.travelers,
+        travelStyle: intent.travelStyle || context.travelStyle,
+        mood: intent.mood || context.mood,
+      };
+
+      // Update context
+      setExtractedContext(mergedContext);
+
+      // Get recommendations
+      const experiences = await fetchRecommendations(mergedContext);
+
+      setTyping(false);
+
+      // Build response based on results
+      let responseText = '';
+      if (experiences.length === 0) {
+        responseText = `I couldn't find any experiences matching your criteria. Try adjusting your budget or interests, or ask me about other destinations.`;
+      } else {
+        const count = experiences.length;
+        const destText = mergedContext.destination ? ` in ${mergedContext.destination}` : '';
+        const budgetText = mergedContext.budget ? ` within your $${mergedContext.budget} budget` : '';
+        responseText = `I found ${count} great experiences${destText}${budgetText}!\n\nHere are the top recommendations:`;
+      }
+
+      const aiMessage = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        text: responseText,
+        timestamp: new Date().toISOString(),
+        experiences: experiences,
+        isFollowUp: true,
+        intent: 'recommendation',
+        totalResults: experiences.length,
+      };
+
+      setChat(prev => [...prev, aiMessage]);
+
+      // Add quick replies if results found
+      if (experiences.length > 0) {
+        const suggestions = [
+          'Tell me more about the first one',
+          'Which one is cheapest?',
+          'Show me more options',
+        ];
+        
+        const suggestionMessage = {
+          id: Date.now() + 2,
+          role: 'suggestion',
+          text: 'You might want to ask:',
+          suggestions: suggestions,
+          timestamp: new Date().toISOString(),
+        };
+        setChat(prev => [...prev, suggestionMessage]);
+      }
+
+    } catch (error) {
+      console.error('❌ [AIChat] Recommendation error:', error);
+      setTyping(false);
+      
+      const errorMsg = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        text: "⚠️ Sorry, I encountered an error finding recommendations. Please try again.",
+        timestamp: new Date().toISOString(),
+        experiences: [],
+      };
+      setChat(prev => [...prev, errorMsg]);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchRecommendations]);
 
   // Get placeholders based on language
   const getPlaceholder = () => {
@@ -448,7 +718,7 @@ const AIChat = () => {
     setUploadedImages(prev => prev.filter(img => img.id !== imageId));
   };
 
-  // ✅ Send to Backend API with Session Management
+  // ✅ Send message with context-aware recommendations
   const sendMessage = async () => {
     if ((!message.trim() && uploadedImages.length === 0) || loading) return;
 
@@ -475,8 +745,43 @@ const AIChat = () => {
       textareaRef.current.style.height = 'auto';
     }
 
+    // ✅ Check if this is a recommendation request
+    const isRecommendationRequest = 
+      currentMessage.toLowerCase().includes('recommend') ||
+      currentMessage.toLowerCase().includes('find') ||
+      currentMessage.toLowerCase().includes('show me') ||
+      currentMessage.toLowerCase().includes('what') ||
+      currentMessage.toLowerCase().includes('where') ||
+      currentMessage.toLowerCase().includes('experience') ||
+      currentMessage.toLowerCase().includes('suggest') ||
+      currentMessage.toLowerCase().includes('looking for');
+
+    // Extract intent from message
+    const intent = extractIntentFromMessage(currentMessage);
+    
+    // Merge with existing context
+    const mergedContext = {
+      ...extractedContext,
+      destination: intent.destination || extractedContext.destination,
+      budget: intent.budget || extractedContext.budget,
+      interests: [...new Set([...extractedContext.interests, ...intent.interests])],
+      travelers: intent.travelers || extractedContext.travelers,
+      travelStyle: intent.travelStyle || extractedContext.travelStyle,
+      mood: intent.mood || extractedContext.mood,
+    };
+
+    // Update context
+    setExtractedContext(mergedContext);
+
+    // ✅ If recommendation request, use the recommendation engine
+    if (isRecommendationRequest || mergedContext.destination || mergedContext.budget) {
+      await handleRecommendationRequest(currentMessage, mergedContext);
+      setLoading(false);
+      return;
+    }
+
     try {
-      // ✅ Call backend API with sessionId for conversation memory
+      // ✅ Otherwise, use the chat service
       const response = await getAIChat({
         message: currentMessage,
         sessionId: sessionId,
@@ -486,6 +791,8 @@ const AIChat = () => {
           role: msg.role,
           content: msg.text,
         })),
+        userId: user?._id || null,
+        context: mergedContext,
       });
 
       // ✅ Store sessionId for future messages
@@ -590,7 +897,16 @@ const AIChat = () => {
       experiences: [],
     }]);
     setSessionId(null);
+    setExtractedContext({
+      destination: null,
+      budget: null,
+      interests: [],
+      travelers: null,
+      travelStyle: null,
+      mood: null,
+    });
     localStorage.removeItem('aiChatSessionId');
+    localStorage.removeItem('aiChatContext');
     setShowClearConfirm(false);
   };
 
@@ -657,6 +973,16 @@ const AIChat = () => {
                         <span className="opacity-50">•</span>
                         <span className="text-[10px] opacity-70">Session active</span>
                       </>
+                    )}
+                    {extractedContext.destination && (
+                      <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full">
+                        📍 {extractedContext.destination}
+                      </span>
+                    )}
+                    {extractedContext.budget && (
+                      <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full">
+                        💰 ${extractedContext.budget}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -898,7 +1224,7 @@ const AIChat = () => {
                   {/* ✅ Render experiences if present */}
                   {msg.experiences && msg.experiences.length > 0 && (
                     <div className="mt-2 ml-12">
-                      <ExperienceList experiences={msg.experiences} />
+                      <ExperienceList experiences={msg.experiences} showMatchScore={showMatchScore} />
                     </div>
                   )}
                 </div>
