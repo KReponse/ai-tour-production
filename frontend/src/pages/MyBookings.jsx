@@ -1,11 +1,20 @@
 // frontend/src/pages/MyBookings.jsx
-// ✅ COMPLETE FIXED - Server-Side Pagination (Strategy B)
-// ✅ Added: usePagination hook for pagination controls
-// ✅ Added: Pagination component, search, filters, sorting
-// ✅ Improved video detection and entity handling with mediaHelpers
-// ✅ FIXED: Better video rendering with error logging and fallbacks
+// ============================================================
+// AI TOUR — MY BOOKINGS
+// ============================================================
+// ✅ Removed: "Video", "Video Cover", "Video (fallback)" labels,
+//    center play overlay, duplicate payment-provider line under
+//    payment status, debug console logs for video errors.
+// ✅ Replaced payment-provider pill bottom-right of the media
+//    with the actual Provider name (falls back to nothing if
+//    the backend hasn't populated it).
+// ✅ Preserved: server-side pagination, search, status filter,
+//    sort, refresh, cancel, pay, review, wallet toggle, payment
+//    status, booking code, date, travelers, price, modal, tabs,
+//    loading / empty / error states, brand colors, dark mode.
+// ============================================================
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Calendar,
   MapPin,
@@ -17,24 +26,20 @@ import {
   CheckCircle,
   Clock,
   ArrowRight,
-  Sparkles,
-  DollarSign,
   Star,
   Wallet,
-  Receipt,
   RefreshCw,
-  Play,
-  Video,
   Search,
-  Filter,
-  ChevronDown,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   getMyBookings,
   cancelBooking,
 } from '../services/bookingService';
-import { getWalletBalance, getTransactionHistory } from '../services/paymentService';
+import {
+  getWalletBalance,
+  getTransactionHistory,
+} from '../services/paymentService';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -42,8 +47,14 @@ import usePagination from '../hooks/usePagination';
 import Pagination from '../components/ui/Pagination';
 import LoadingSkeleton from '../components/ui/LoadingSkeleton';
 import BackToTop from '../components/ui/BackToTop';
+import TravelerTabs from '../components/navigation/TravelerTabs';
 import { PAGINATION } from '../utils/constants';
-import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo } from '../utils/mediaHelpers';
+import {
+  getCoverMedia,
+  getCoverMediaType,
+  getCoverVideo,
+  hasVideo,
+} from '../utils/mediaHelpers';
 
 // ===============================
 // AI TOUR COLORS
@@ -54,20 +65,50 @@ import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo 
 // White : #FFFFFF
 // ===============================
 
+const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+
+// ===============================
+// PROVIDER NAME RESOLVER
+// ===============================
+// Accepts a populated object, a bare string, or null.
+// Never renders an object as a React child.
+const getProviderName = (provider) => {
+  if (!provider) return '';
+
+  if (typeof provider === 'string') return provider.trim();
+
+  if (typeof provider === 'object') {
+    const candidates = [
+      provider.businessName,
+      provider.name,
+      provider.fullName,
+      provider.displayName,
+      provider.username,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return '';
+};
+
 const MyBookings = () => {
   const { user } = useAuth();
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [cancelling, setCancelling] = useState(null);
   const [walletBalance, setWalletBalance] = useState(null);
-  const [transactions, setTransactions] = useState([]);
   const [showWallet, setShowWallet] = useState(false);
-  
+
   // Filter states
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('-createdAt');
 
-  // ✅ usePagination hook for server-side pagination
+  // Server-side pagination
   const {
     data: bookings,
     loading,
@@ -79,7 +120,6 @@ const MyBookings = () => {
     clearFilters,
     refresh,
     setSearchTerm: setPaginationSearch,
-    searchTerm: paginationSearch,
   } = usePagination({
     fetchFn: getMyBookings,
     initialParams: {
@@ -90,7 +130,7 @@ const MyBookings = () => {
     dataKey: 'bookings',
   });
 
-  // Fetch wallet data
+  // Wallet data (provider/admin only)
   const fetchWalletData = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -102,37 +142,39 @@ const MyBookings = () => {
         if (balanceRes.success) {
           setWalletBalance(balanceRes);
         }
-        
-        const txRes = await getTransactionHistory({ limit: 5 });
-        if (txRes.success) {
-          setTransactions(txRes.transactions || []);
-        }
+
+        await getTransactionHistory({ limit: 5 });
       }
-    } catch (error) {
-      console.error('Error fetching wallet data:', error);
+    } catch (err) {
+      console.error('Error fetching wallet data:', err);
     }
   };
 
-  // Handle search with debounce (handled by usePagination)
-  const handleSearch = useCallback((value) => {
-    setSearchTerm(value);
-    setPaginationSearch(value);
-  }, [setPaginationSearch]);
+  const handleSearch = useCallback(
+    (value) => {
+      setSearchTerm(value);
+      setPaginationSearch(value);
+    },
+    [setPaginationSearch]
+  );
 
-  // Handle status filter
-  const handleStatusFilter = useCallback((status) => {
-    setStatusFilter(status);
-    applyFilter('status', status);
-  }, [applyFilter]);
+  const handleStatusFilter = useCallback(
+    (status) => {
+      setStatusFilter(status);
+      applyFilter('status', status);
+    },
+    [applyFilter]
+  );
 
-  // Handle sort change
-  const handleSortChange = useCallback((e) => {
-    const value = e.target.value;
-    setSortBy(value);
-    applyFilter('sort', value);
-  }, [applyFilter]);
+  const handleSortChange = useCallback(
+    (e) => {
+      const value = e.target.value;
+      setSortBy(value);
+      applyFilter('sort', value);
+    },
+    [applyFilter]
+  );
 
-  // Handle refresh
   const handleRefresh = useCallback(() => {
     refresh();
     if (showWallet) {
@@ -141,24 +183,30 @@ const MyBookings = () => {
     toast.success('Refreshed successfully');
   }, [refresh, showWallet]);
 
-  // Toggle wallet
   const toggleWallet = useCallback(() => {
-    setShowWallet(prev => !prev);
+    setShowWallet((prev) => !prev);
     if (!showWallet) {
       fetchWalletData();
     }
   }, [showWallet]);
 
   // ===============================
-  // ENTITY HELPERS (Using mediaHelpers)
+  // ENTITY + MEDIA RESOLUTION
   // ===============================
-
   const getEntity = (booking) => {
     if (!booking) return null;
-    if (booking.listing && typeof booking.listing === 'object' && booking.listing._id) {
+    if (
+      booking.listing &&
+      typeof booking.listing === 'object' &&
+      booking.listing._id
+    ) {
       return booking.listing;
     }
-    if (booking.tour && typeof booking.tour === 'object' && booking.tour._id) {
+    if (
+      booking.tour &&
+      typeof booking.tour === 'object' &&
+      booking.tour._id
+    ) {
       return booking.tour;
     }
     if (booking.coverMedia || booking.coverImage || booking.galleryImages) {
@@ -171,54 +219,36 @@ const MyBookings = () => {
   };
 
   const getEntityMedia = (booking) => {
-    const defaultImage = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-    
     let entity = getEntity(booking);
-    if (!entity) {
-      entity = booking;
-    }
+    if (!entity) entity = booking;
     if (!entity) {
       return {
-        url: defaultImage,
-        type: 'image',
         isVideo: false,
         videoUrl: null,
-        poster: defaultImage,
+        poster: FALLBACK_IMAGE,
+        imageUrl: FALLBACK_IMAGE,
       };
     }
-    
+
     const coverType = getCoverMediaType(entity);
     const coverUrl = getCoverMedia(entity);
     const videoUrl = getCoverVideo(entity);
     const hasVideoContent = hasVideo(entity);
-    
-    // Log for debugging
-    console.log('📹 [MyBookings] Entity media:', {
-      title: entity.title,
-      coverType,
-      coverUrl,
-      videoUrl,
-      hasVideoContent,
-    });
-    
+
     if ((coverType === 'video' || hasVideoContent) && videoUrl) {
       return {
-        url: videoUrl,
-        type: 'video',
         isVideo: true,
-        videoUrl: videoUrl,
-        poster: coverUrl || defaultImage,
-        thumbnail: coverUrl || defaultImage,
+        videoUrl,
+        poster: coverUrl || FALLBACK_IMAGE,
+        imageUrl: coverUrl || FALLBACK_IMAGE,
       };
     }
-    
+
     return {
-      url: coverUrl || defaultImage,
-      type: 'image',
       isVideo: false,
       videoUrl: null,
-      poster: coverUrl || defaultImage,
-      thumbnail: coverUrl || defaultImage,
+      poster: coverUrl || FALLBACK_IMAGE,
+      imageUrl: coverUrl || FALLBACK_IMAGE,
     };
   };
 
@@ -232,22 +262,13 @@ const MyBookings = () => {
     return entity?.location || 'Location not specified';
   };
 
-  const getEntityLink = (booking) => {
-    if (booking?.listing) {
-      return `/listing/${booking.listing._id || booking.listing}`;
-    }
-    if (booking?.tour) {
-      return `/tour/${booking.tour._id || booking.tour}`;
-    }
-    return '#';
-  };
-
   // ===============================
-  // BOOKING ACTIONS
+  // CANCEL
   // ===============================
-
   const handleCancel = async (bookingId) => {
-    const confirmCancel = window.confirm('Are you sure you want to cancel this booking?');
+    const confirmCancel = window.confirm(
+      'Are you sure you want to cancel this booking?'
+    );
     if (!confirmCancel) return;
 
     try {
@@ -257,33 +278,82 @@ const MyBookings = () => {
 
       refresh();
       toast.success('Booking cancelled successfully');
-      if (showWallet) {
-        fetchWalletData();
-      }
-    } catch (error) {
-      console.error('Cancel error:', error);
-      toast.error(error.response?.data?.message || 'Failed to cancel booking');
+      if (showWallet) fetchWalletData();
+    } catch (err) {
+      console.error('Cancel error:', err);
+      toast.error(
+        err.response?.data?.message || 'Failed to cancel booking'
+      );
     } finally {
       setCancelling(null);
     }
   };
 
   // ===============================
-  // HELPERS
+  // STATUS BADGE
   // ===============================
-
   const getStatusBadge = (status) => {
     const styles = {
-      draft: { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400', icon: Clock, label: 'Draft' },
-      pending_payment: { bg: 'bg-[#F59E0B]/10 dark:bg-[#F59E0B]/20', text: 'text-[#F59E0B] dark:text-[#F59E0B]', icon: Clock, label: 'Pending Payment' },
-      paid: { bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20', text: 'text-[#0D9488] dark:text-[#0D9488]', icon: CheckCircle, label: 'Paid' },
-      confirmed: { bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20', text: 'text-[#0D9488] dark:text-[#0D9488]', icon: CheckCircle, label: 'Confirmed' },
-      in_progress: { bg: 'bg-blue-100 dark:bg-blue-900/20', text: 'text-blue-600 dark:text-blue-400', icon: Clock, label: 'In Progress' },
-      completed: { bg: 'bg-green-100 dark:bg-green-900/20', text: 'text-green-600 dark:text-green-400', icon: CheckCircle, label: 'Completed' },
-      review_eligible: { bg: 'bg-[#F59E0B]/10 dark:bg-[#F59E0B]/20', text: 'text-[#F59E0B] dark:text-[#F59E0B]', icon: Star, label: 'Ready for Review' },
-      cancelled: { bg: 'bg-red-100 dark:bg-red-900/20', text: 'text-red-600 dark:text-red-400', icon: XCircle, label: 'Cancelled' },
-      rejected: { bg: 'bg-red-100 dark:bg-red-900/20', text: 'text-red-600 dark:text-red-400', icon: XCircle, label: 'Rejected' },
-      refunded: { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-500 dark:text-gray-400', icon: CheckCircle, label: 'Refunded' },
+      draft: {
+        bg: 'bg-gray-100 dark:bg-gray-800',
+        text: 'text-gray-500 dark:text-gray-400',
+        icon: Clock,
+        label: 'Draft',
+      },
+      pending_payment: {
+        bg: 'bg-[#F59E0B]/10 dark:bg-[#F59E0B]/20',
+        text: 'text-[#F59E0B]',
+        icon: Clock,
+        label: 'Pending Payment',
+      },
+      paid: {
+        bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20',
+        text: 'text-[#0D9488]',
+        icon: CheckCircle,
+        label: 'Paid',
+      },
+      confirmed: {
+        bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20',
+        text: 'text-[#0D9488]',
+        icon: CheckCircle,
+        label: 'Confirmed',
+      },
+      in_progress: {
+        bg: 'bg-blue-100 dark:bg-blue-900/20',
+        text: 'text-blue-600 dark:text-blue-400',
+        icon: Clock,
+        label: 'In Progress',
+      },
+      completed: {
+        bg: 'bg-green-100 dark:bg-green-900/20',
+        text: 'text-green-600 dark:text-green-400',
+        icon: CheckCircle,
+        label: 'Completed',
+      },
+      review_eligible: {
+        bg: 'bg-[#F59E0B]/10 dark:bg-[#F59E0B]/20',
+        text: 'text-[#F59E0B]',
+        icon: Star,
+        label: 'Ready for Review',
+      },
+      cancelled: {
+        bg: 'bg-red-100 dark:bg-red-900/20',
+        text: 'text-red-600 dark:text-red-400',
+        icon: XCircle,
+        label: 'Cancelled',
+      },
+      rejected: {
+        bg: 'bg-red-100 dark:bg-red-900/20',
+        text: 'text-red-600 dark:text-red-400',
+        icon: XCircle,
+        label: 'Rejected',
+      },
+      refunded: {
+        bg: 'bg-gray-100 dark:bg-gray-800',
+        text: 'text-gray-500 dark:text-gray-400',
+        icon: CheckCircle,
+        label: 'Refunded',
+      },
     };
     return styles[status] || styles.pending_payment;
   };
@@ -299,28 +369,22 @@ const MyBookings = () => {
     return styles[status] || styles.pending;
   };
 
-  const getTravelDate = (booking) => {
-    if (booking.travelDate) return booking.travelDate;
-    if (booking.startDate) return booking.startDate;
-    return null;
-  };
+  const getTravelDate = (booking) =>
+    booking.travelDate || booking.startDate || null;
 
-  const canCancel = (status) => {
-    return ['pending_payment', 'paid', 'confirmed'].includes(status);
-  };
+  const canCancel = (status) =>
+    ['pending_payment', 'paid', 'confirmed'].includes(status);
 
-  const canPay = (status) => {
-    return status === 'pending_payment';
-  };
+  const canPay = (status) => status === 'pending_payment';
 
-  const canReview = (booking) => {
-    return (booking.status === 'completed' || booking.status === 'review_eligible') 
-           && !booking.reviewSubmitted 
-           && !booking.canReview === false;
-  };
+  const canReview = (booking) =>
+    (booking.status === 'completed' ||
+      booking.status === 'review_eligible') &&
+    !booking.reviewSubmitted &&
+    booking.canReview !== false;
 
   // ===============================
-  // RENDER BOOKING CARD
+  // BOOKING CARD
   // ===============================
   const renderBookingCard = (booking) => {
     const statusStyle = getStatusBadge(booking.status);
@@ -329,20 +393,14 @@ const MyBookings = () => {
     const paymentColor = getPaymentBadge(booking.paymentStatus);
     const entityTitle = getEntityTitle(booking);
     const entityLocation = getEntityLocation(booking);
-    const entityLink = getEntityLink(booking);
     const media = getEntityMedia(booking);
     const isCancellable = canCancel(booking.status);
     const isPayable = canPay(booking.status);
     const isReviewable = canReview(booking);
 
-    const paymentMethod = booking.paymentMethod || booking.paymentProvider || 'stripe';
-    const providerDisplay = {
-      stripe: '💳 Card',
-      momo: '📱 MTN MoMo',
-      airtel: '📱 Airtel Money',
-      paypal: '💰 PayPal',
-      bankTransfer: '🏦 Bank Transfer',
-    }[paymentMethod] || '💳 Card';
+    const providerName = getProviderName(
+      booking.provider || booking.listing?.provider
+    );
 
     return (
       <div
@@ -350,84 +408,72 @@ const MyBookings = () => {
         className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg hover:shadow-2xl hover:-translate-y-1 duration-300 border border-gray-100 dark:border-gray-800 overflow-hidden"
       >
         <div className="grid md:grid-cols-4">
-          {/* Media */}
+          {/* MEDIA */}
           <div className="relative bg-gray-100 dark:bg-gray-800 min-h-[220px]">
             {media.isVideo && media.videoUrl ? (
-              <div className="relative w-full h-full min-h-[220px] bg-black">
-                <video
-                  key={media.videoUrl}
-                  src={media.videoUrl}
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  poster={media.poster}
-                  preload="metadata"
-                  onError={(e) => {
-                    console.error('❌ [MyBookings] Video error:', media.videoUrl, e);
-                    // Show fallback image
-                    e.target.style.display = 'none';
-                    const parent = e.target.parentElement;
-                    if (parent) {
-                      const img = document.createElement('img');
-                      img.src = media.poster || 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-                      img.className = 'w-full h-full object-cover';
-                      img.alt = entityTitle;
-                      parent.appendChild(img);
-                      // Add video badge
-                      const badge = document.createElement('div');
-                      badge.className = 'absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1';
-                      badge.innerHTML = '📹 Video (fallback)';
-                      parent.appendChild(badge);
-                    }
-                  }}
-                  onLoadedData={() => {
-                    console.log('✅ [MyBookings] Video loaded:', media.videoUrl);
-                  }}
-                />
-                <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                  <div className="w-12 h-12 rounded-full bg-[#0D9488]/80 backdrop-blur flex items-center justify-center">
-                    <Play className="w-5 h-5 text-white ml-0.5" />
-                  </div>
-                </div>
-                <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <Video className="w-3 h-3" />
-                  Video
-                </div>
-              </div>
+              <video
+                key={media.videoUrl}
+                src={media.videoUrl}
+                className="w-full h-full object-cover min-h-[220px]"
+                autoPlay
+                muted
+                loop
+                playsInline
+                poster={media.poster}
+                preload="metadata"
+                onError={(e) => {
+                  const parent = e.target.parentElement;
+                  e.target.style.display = 'none';
+                  if (
+                    parent &&
+                    !parent.querySelector('img.fallback-poster')
+                  ) {
+                    const img = document.createElement('img');
+                    img.src = media.poster || FALLBACK_IMAGE;
+                    img.className =
+                      'w-full h-full object-cover min-h-[220px] fallback-poster';
+                    img.alt = entityTitle;
+                    parent.appendChild(img);
+                  }
+                }}
+              />
             ) : (
               <img
-                src={media.url}
+                src={media.imageUrl}
                 alt={entityTitle}
                 className="w-full h-full object-cover min-h-[220px]"
                 onError={(e) => {
-                  e.target.src = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+                  e.target.src = FALLBACK_IMAGE;
                 }}
               />
             )}
-            
+
+            {/* Status badge */}
             <div className="absolute top-4 left-4">
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${statusStyle.bg} ${statusStyle.text}`}>
+              <span
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${statusStyle.bg} ${statusStyle.text}`}
+              >
                 <StatusIcon className="w-3.5 h-3.5" />
                 {statusStyle.label}
               </span>
             </div>
-            
+
+            {/* Price */}
             {booking.totalPrice && (
-              <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur px-3 py-1 rounded-full text-white text-xs font-bold flex items-center gap-1">
-                <DollarSign className="w-3 h-3" />
+              <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur px-3 py-1 rounded-full text-white text-xs font-bold">
                 ${booking.totalPrice}
               </div>
             )}
-            
-            <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur px-2 py-1 rounded-full text-white text-xs">
-              {providerDisplay}
-            </div>
+
+            {/* Provider name — replaces payment-provider pill */}
+            {providerName && (
+              <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur px-2.5 py-1 rounded-full text-white text-xs max-w-[55%] truncate">
+                by {providerName}
+              </div>
+            )}
           </div>
 
-          {/* Content */}
+          {/* DETAILS */}
           <div className="md:col-span-3 p-6">
             <div className="flex flex-wrap justify-between gap-4">
               <div>
@@ -443,12 +489,6 @@ const MyBookings = () => {
                     Ref: {booking.bookingCode}
                   </p>
                 )}
-                {media.isVideo && (
-                  <span className="inline-flex items-center gap-1 text-xs text-[#0D9488] bg-[#0D9488]/10 px-2 py-0.5 rounded-full mt-1">
-                    <Play className="w-3 h-3" />
-                    Video Cover
-                  </span>
-                )}
               </div>
             </div>
 
@@ -456,9 +496,13 @@ const MyBookings = () => {
               <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50">
                 <Calendar size={18} className="text-[#0D9488]" />
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Travel Date</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Travel Date
+                  </p>
                   <p className="font-semibold text-[#374151] dark:text-white">
-                    {travelDate ? new Date(travelDate).toLocaleDateString() : 'N/A'}
+                    {travelDate
+                      ? new Date(travelDate).toLocaleDateString()
+                      : 'N/A'}
                   </p>
                 </div>
               </div>
@@ -466,7 +510,9 @@ const MyBookings = () => {
               <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50">
                 <Users size={18} className="text-[#F59E0B]" />
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Travelers</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Travelers
+                  </p>
                   <p className="font-semibold text-[#374151] dark:text-white">
                     {booking.numberOfPeople || booking.travelers || 1}
                   </p>
@@ -476,18 +522,17 @@ const MyBookings = () => {
               <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50">
                 <CreditCard size={18} className="text-[#0D9488]" />
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Payment</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Payment
+                  </p>
                   <p className={`font-semibold ${paymentColor}`}>
                     {booking.paymentStatus || 'Pending'}
-                  </p>
-                  <p className="text-[10px] text-gray-400">
-                    {providerDisplay}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Action Buttons */}
+            {/* ACTIONS */}
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
                 to={`/trip/${booking._id}`}
@@ -544,12 +589,13 @@ const MyBookings = () => {
   };
 
   // ===============================
-  // LOADING STATE
+  // LOADING
   // ===============================
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-10">
-        <div className="flex items-center gap-3 mb-8">
+        <TravelerTabs variant="trips" />
+        <div className="flex items-center gap-3 mb-8 mt-6">
           <div className="w-12 h-12 rounded-2xl bg-gray-200 dark:bg-gray-700 animate-pulse" />
           <div>
             <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse" />
@@ -562,12 +608,14 @@ const MyBookings = () => {
   }
 
   // ===============================
-  // MAIN RENDER
+  // PAGE
   // ===============================
   return (
     <div className="max-w-7xl mx-auto px-4 py-10 text-gray-900 dark:text-white">
+      <TravelerTabs variant="trips" />
+
       {/* HEADER */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-8 mt-6">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-lg">
             <Calendar className="w-6 h-6 text-white" />
@@ -581,7 +629,7 @@ const MyBookings = () => {
             </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3 flex-wrap">
           {(user?.role === 'provider' || user?.role === 'admin') && (
             <button
@@ -596,7 +644,7 @@ const MyBookings = () => {
               {showWallet ? 'Hide Wallet' : 'Show Wallet'}
             </button>
           )}
-          
+
           <button
             onClick={handleRefresh}
             className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition flex items-center gap-2 disabled:opacity-50"
@@ -607,7 +655,7 @@ const MyBookings = () => {
         </div>
       </div>
 
-      {/* Wallet Summary */}
+      {/* WALLET SUMMARY (providers/admins only) */}
       {showWallet && walletBalance && (
         <div className="mb-6 p-6 rounded-3xl bg-gradient-to-br from-[#0D9488]/10 to-[#F59E0B]/10 border border-[#0D9488]/20">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -616,7 +664,7 @@ const MyBookings = () => {
                 <Wallet className="w-5 h-5 text-[#0D9488]" />
                 Wallet Balance
               </h3>
-              <div className="mt-2 flex-wrap gap-6">
+              <div className="mt-2 flex flex-wrap gap-6">
                 <div>
                   <p className="text-sm text-gray-500">Total Balance</p>
                   <p className="text-2xl font-bold text-[#0D9488]">
@@ -636,7 +684,7 @@ const MyBookings = () => {
         </div>
       )}
 
-      {/* SEARCH & FILTERS */}
+      {/* SEARCH + FILTERS */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
         <div className="flex-1 relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -648,7 +696,7 @@ const MyBookings = () => {
             className="w-full h-12 pl-12 pr-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
           />
         </div>
-        
+
         <select
           value={statusFilter}
           onChange={(e) => handleStatusFilter(e.target.value)}
@@ -685,7 +733,9 @@ const MyBookings = () => {
             <Calendar className="w-10 h-10 text-[#0D9488]" />
           </div>
           <h2 className="text-2xl font-bold text-[#374151] dark:text-white mb-2">
-            {searchTerm || statusFilter !== 'all' ? 'No matching bookings' : 'No Bookings Yet'}
+            {searchTerm || statusFilter !== 'all'
+              ? 'No matching bookings'
+              : 'No Bookings Yet'}
           </h2>
           <p className="text-gray-500 dark:text-gray-400 mb-6">
             {searchTerm || statusFilter !== 'all'
@@ -730,7 +780,7 @@ const MyBookings = () => {
         </div>
       )}
 
-      {/* Error State */}
+      {/* ERROR */}
       {error && (
         <div className="text-center py-8">
           <p className="text-red-500 mb-4">{error}</p>
@@ -743,7 +793,7 @@ const MyBookings = () => {
         </div>
       )}
 
-      {/* Booking Details Modal */}
+      {/* BOOKING DETAILS MODAL */}
       {selectedBooking && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-900 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl">
@@ -769,27 +819,36 @@ const MyBookings = () => {
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800">
                   <p className="text-sm text-gray-500">Status</p>
-                  <p className={`font-semibold capitalize ${
-                    selectedBooking.status === 'confirmed' ? 'text-[#0D9488]' :
-                    selectedBooking.status === 'pending_payment' ? 'text-[#F59E0B]' :
-                    selectedBooking.status === 'completed' ? 'text-green-600' :
-                    'text-red-600'
-                  }`}>
+                  <p
+                    className={`font-semibold capitalize ${
+                      selectedBooking.status === 'confirmed'
+                        ? 'text-[#0D9488]'
+                        : selectedBooking.status === 'pending_payment'
+                        ? 'text-[#F59E0B]'
+                        : selectedBooking.status === 'completed'
+                        ? 'text-green-600'
+                        : 'text-red-600'
+                    }`}
+                  >
                     {selectedBooking.status}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800">
                   <p className="text-sm text-gray-500">Travel Date</p>
                   <p className="font-semibold text-[#374151] dark:text-white">
-                    {getTravelDate(selectedBooking) 
-                      ? new Date(getTravelDate(selectedBooking)).toLocaleDateString() 
+                    {getTravelDate(selectedBooking)
+                      ? new Date(
+                          getTravelDate(selectedBooking)
+                        ).toLocaleDateString()
                       : 'N/A'}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800">
                   <p className="text-sm text-gray-500">Travelers</p>
                   <p className="font-semibold text-[#374151] dark:text-white">
-                    {selectedBooking.numberOfPeople || selectedBooking.travelers || 1}
+                    {selectedBooking.numberOfPeople ||
+                      selectedBooking.travelers ||
+                      1}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800">
@@ -800,17 +859,16 @@ const MyBookings = () => {
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800">
                   <p className="text-sm text-gray-500">Payment Status</p>
-                  <p className={`font-semibold ${getPaymentBadge(selectedBooking.paymentStatus)}`}>
+                  <p
+                    className={`font-semibold ${getPaymentBadge(
+                      selectedBooking.paymentStatus
+                    )}`}
+                  >
                     {selectedBooking.paymentStatus || 'Pending'}
                   </p>
-                  {selectedBooking.paymentMethod && (
-                    <p className="text-[10px] text-gray-400">
-                      {selectedBooking.paymentMethod}
-                    </p>
-                  )}
                 </div>
               </div>
-              
+
               {selectedBooking.bookingCode && (
                 <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800">
                   <p className="text-sm text-gray-500">Booking Reference</p>
@@ -831,7 +889,6 @@ const MyBookings = () => {
         </div>
       )}
 
-      {/* Back to Top */}
       <BackToTop />
     </div>
   );

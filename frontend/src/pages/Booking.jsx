@@ -1,32 +1,28 @@
 // src/pages/Booking.jsx
-// ✅ FIXED - Added video support and proper media handling
+// ============================================================
+// AI TOUR — BOOKING PAGE
+// ============================================================
+// ✅ Removed internal media labels, play overlay, console noise.
+// ✅ Replaced "Cover Media: Video" summary row with provider name.
+// ✅ Kept "pending approval" banner — necessary user info.
+// ✅ Refresh bus wired: broadcasts on booking creation.
+// ============================================================
 
 import React, { useState, useEffect } from 'react';
 import {
-  Plane,
-  Hotel,
-  Car,
   Users,
-  CreditCard,
   ShieldCheck,
-  Sparkles,
   MapPin,
   Star,
-  Smartphone,
-  Wallet,
-  BadgeDollarSign,
   Loader2,
   Calendar,
   User,
   Mail,
   Phone,
-  Play,
-  Video,
 } from 'lucide-react';
 
 import Card, {
   CardContent,
-  CardImage,
 } from '../components/ui/Card';
 
 import Button from '../components/ui/Button';
@@ -34,12 +30,19 @@ import Input from '../components/ui/Input';
 
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { getTourById } from '../services/tourService';
 import { getListingById } from '../services/listingService';
 import { createBooking } from '../services/bookingService';
+import useRefreshOn from '../hooks/useRefreshOn';
+import { refreshMany } from '../utils/dataRefresh';
 
-// ✅ Import mediaHelpers
-import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo } from '../utils/mediaHelpers';
+// ✅ Media helpers
+import {
+  getImageUrl,
+  getCoverMedia,
+  getCoverMediaType,
+  getCoverVideo,
+  hasVideo,
+} from '../utils/mediaHelpers';
 
 // ===============================
 // AI TOUR COLORS
@@ -50,17 +53,48 @@ import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo 
 // White : #FFFFFF
 // ===============================
 
+// ===============================
+// PROVIDER NAME RESOLVER
+// ===============================
+const getProviderName = (provider) => {
+  if (!provider) return '';
+
+  if (typeof provider === 'string') return provider.trim();
+
+  if (typeof provider === 'object') {
+    const candidates = [
+      provider.businessName,
+      provider.name,
+      provider.fullName,
+      provider.displayName,
+      provider.username,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return '';
+};
+
+// ===============================
+// FALLBACK IMAGE
+// ===============================
+const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+
 const Booking = () => {
   const { listingId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   const [entity, setEntity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // Booking form data
   const [formData, setFormData] = useState({
     fullName: user?.name || '',
     email: user?.email || '',
@@ -70,80 +104,68 @@ const Booking = () => {
     specialRequests: '',
   });
 
-  // Fetch entity (listing) from backend
   useEffect(() => {
     if (listingId) {
       fetchEntity();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
 
   const fetchEntity = async () => {
     try {
       setLoading(true);
       setError('');
-      
+
       const data = await getListingById(listingId);
       setEntity(data.listing);
-    } catch (error) {
-      console.error('Error fetching listing:', error);
+    } catch (err) {
+      console.error('Error fetching listing:', err);
       setError('Failed to load experience details');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ Get entity media
-  const getEntityMedia = (entity) => {
-    const defaultImage = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-    
-    if (!entity) {
+  const getEntityMedia = (currentEntity) => {
+    if (!currentEntity) {
       return {
-        url: defaultImage,
         isVideo: false,
         videoUrl: null,
-        poster: defaultImage,
+        poster: FALLBACK_IMAGE,
+        imageUrl: FALLBACK_IMAGE,
       };
     }
 
-    const coverType = getCoverMediaType(entity);
-    const coverUrl = getCoverMedia(entity);
-    const videoUrl = getCoverVideo(entity);
-    const hasVideoContent = hasVideo(entity);
+    const coverType = getCoverMediaType(currentEntity);
+    const coverUrl = getCoverMedia(currentEntity);
+    const videoUrl = getCoverVideo(currentEntity);
+    const hasVideoContent = hasVideo(currentEntity);
 
-    let poster = coverUrl || defaultImage;
-    
-    if (entity.coverImage) {
-      poster = getImageUrl(entity.coverImage) || defaultImage;
-    } else if (entity.galleryImages && entity.galleryImages.length > 0) {
-      poster = getImageUrl(entity.galleryImages[0]) || defaultImage;
+    let poster = coverUrl || FALLBACK_IMAGE;
+
+    if (currentEntity.coverImage) {
+      poster = getImageUrl(currentEntity.coverImage) || FALLBACK_IMAGE;
+    } else if (
+      Array.isArray(currentEntity.galleryImages) &&
+      currentEntity.galleryImages.length > 0
+    ) {
+      poster = getImageUrl(currentEntity.galleryImages[0]) || FALLBACK_IMAGE;
     }
-
-    console.log('📊 [Booking] Media result:', {
-      coverType,
-      coverUrl,
-      videoUrl,
-      hasVideoContent,
-      poster,
-      entityId: entity._id,
-      entityTitle: entity.title,
-    });
 
     if ((coverType === 'video' || hasVideoContent) && videoUrl) {
       return {
-        url: videoUrl,
         isVideo: true,
-        videoUrl: videoUrl,
-        poster: poster,
-        imageUrl: coverUrl || defaultImage,
+        videoUrl,
+        poster,
+        imageUrl: coverUrl || FALLBACK_IMAGE,
       };
     }
 
     return {
-      url: coverUrl || defaultImage,
       isVideo: false,
       videoUrl: null,
-      poster: poster,
-      imageUrl: coverUrl || defaultImage,
+      poster,
+      imageUrl: coverUrl || FALLBACK_IMAGE,
     };
   };
 
@@ -168,7 +190,6 @@ const Booking = () => {
       return;
     }
 
-    // Validation
     if (!formData.fullName.trim()) {
       alert('Please enter your full name');
       return;
@@ -199,21 +220,24 @@ const Booking = () => {
 
       const token = localStorage.getItem('token');
       const response = await createBooking(bookingData, token);
-      
-      console.log('✅ Booking created:', response);
-      
-      const bookingId = response.booking._id;
-      navigate(`/payment/${bookingId}`);
 
-    } catch (error) {
-      console.error('❌ Booking error:', error);
-      alert(error.response?.data?.message || 'Failed to create booking. Please try again.');
+      const bookingId = response.booking._id;
+
+      // 🔄 Broadcast: new booking appears on traveler dashboard + My Bookings
+      refreshMany('bookings', 'bookings:traveler', 'dashboard');
+
+      navigate(`/payment/${bookingId}`);
+    } catch (err) {
+      console.error('Booking error:', err);
+      alert(
+        err.response?.data?.message ||
+          'Failed to create booking. Please try again.'
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
@@ -221,12 +245,13 @@ const Booking = () => {
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">Loading experience details...</p>
+        <p className="mt-4 text-gray-500 dark:text-gray-400">
+          Loading experience details...
+        </p>
       </div>
     );
   }
 
-  // Error state
   if (error || !entity) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center text-center px-4">
@@ -235,7 +260,8 @@ const Booking = () => {
             Experience Not Available
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mb-6">
-            {error || 'The experience you are looking for is not available for booking.'}
+            {error ||
+              'The experience you are looking for is not available for booking.'}
           </p>
           <Link to="/explore">
             <Button className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B]">
@@ -252,8 +278,8 @@ const Booking = () => {
   const entityTitle = entity.title || 'Experience';
   const entityLocation = entity.location || 'Location not specified';
   const entityDuration = entity.duration || 'N/A';
-  
-  // ✅ Get media using mediaHelpers
+  const providerName = getProviderName(entity.provider);
+
   const media = getEntityMedia(entity);
 
   return (
@@ -266,7 +292,7 @@ const Booking = () => {
           <div className="flex flex-wrap items-center gap-3 mb-6">
             {['Booking', 'Details', 'Payment', 'Confirmation'].map((step, index) => (
               <div
-                key={index}
+                key={step}
                 className={`px-4 py-2 rounded-full text-sm font-medium ${
                   index === 0
                     ? 'bg-white text-[#0D9488]'
@@ -292,63 +318,46 @@ const Booking = () => {
         {/* LEFT */}
         <div className="lg:col-span-2 space-y-8">
 
-          {/* ENTITY DETAILS - WITH VIDEO SUPPORT */}
+          {/* ENTITY DETAILS */}
           <Card className="overflow-hidden rounded-3xl border border-gray-100 dark:border-gray-800">
             <div className="grid md:grid-cols-2">
-              {/* Media Section - Supports Video */}
               <div className="relative h-64 md:h-full min-h-[220px] bg-gray-100 dark:bg-gray-800">
                 {media.isVideo && media.videoUrl ? (
-                  <div className="relative w-full h-full min-h-[220px] bg-black">
-                    <video
-                      key={media.videoUrl}
-                      src={media.videoUrl}
-                      className="w-full h-full object-cover"
-                      autoPlay
-                      muted
-                      loop
-                      playsInline
-                      poster={media.poster}
-                      preload="metadata"
-                      onError={(e) => {
-                        console.error('❌ [Booking] Video error:', media.videoUrl);
-                        e.target.style.display = 'none';
-                        const parent = e.target.parentElement;
-                        if (parent) {
-                          const img = document.createElement('img');
-                          img.src = media.poster || 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-                          img.className = 'w-full h-full object-cover';
-                          img.alt = entityTitle;
-                          parent.appendChild(img);
-                        }
-                      }}
-                    />
-                    <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition" />
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                      <div className="w-12 h-12 rounded-full bg-[#0D9488]/80 backdrop-blur flex items-center justify-center">
-                        <Play className="w-5 h-5 text-white ml-0.5" />
-                      </div>
-                    </div>
-                    <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <Video className="w-3 h-3" />
-                      Video
-                    </div>
-                    <div className="absolute top-3 left-3 bg-[#0D9488]/80 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <Play className="w-3 h-3" />
-                      Cover Video
-                    </div>
-                  </div>
+                  <video
+                    key={media.videoUrl}
+                    src={media.videoUrl}
+                    className="w-full h-full object-cover"
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    poster={media.poster}
+                    preload="metadata"
+                    onError={(e) => {
+                      const parent = e.target.parentElement;
+                      e.target.style.display = 'none';
+                      if (parent && !parent.querySelector('img.fallback-poster')) {
+                        const img = document.createElement('img');
+                        img.src = media.poster || FALLBACK_IMAGE;
+                        img.className =
+                          'w-full h-full object-cover fallback-poster';
+                        img.alt = entityTitle;
+                        parent.appendChild(img);
+                      }
+                    }}
+                  />
                 ) : (
                   <img
-                    src={media.url}
+                    src={media.imageUrl}
                     alt={entityTitle}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      e.target.src = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+                      e.target.src = FALLBACK_IMAGE;
                     }}
                   />
                 )}
               </div>
-              
+
               <CardContent className="p-6 flex flex-col justify-center">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="px-3 py-1 rounded-full bg-[#0D9488]/10 text-[#0D9488] text-xs font-semibold">
@@ -358,20 +367,22 @@ const Booking = () => {
                     <Star className="w-4 h-4 text-[#F59E0B] fill-current mr-1" />
                     {entity.averageRating || entity.rating || 4.8}
                   </div>
-                  {media.isVideo && (
-                    <span className="px-2 py-0.5 rounded-full bg-[#0D9488]/10 text-[#0D9488] text-xs font-semibold flex items-center gap-1">
-                      <Play className="w-3 h-3" />
-                      Video
-                    </span>
-                  )}
                 </div>
                 <h2 className="text-3xl font-bold mb-3 dark:text-white">
                   {entityTitle}
                 </h2>
-                <div className="flex items-center text-gray-500 dark:text-gray-400 mb-4">
+                <div className="flex items-center text-gray-500 dark:text-gray-400 mb-2">
                   <MapPin className="w-4 h-4 mr-1 text-[#0D9488]" />
                   {entityLocation}
                 </div>
+                {providerName && (
+                  <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                    by{' '}
+                    <span className="text-[#0D9488] font-semibold">
+                      {providerName}
+                    </span>
+                  </div>
+                )}
                 <p className="text-gray-600 dark:text-gray-300 leading-relaxed mb-5 line-clamp-3">
                   {entity.description}
                 </p>
@@ -383,7 +394,10 @@ const Booking = () => {
                     </div>
                   </div>
                   <Link to={`/listing/${entity._id}`}>
-                    <Button variant="outline" className="border-[#0D9488] text-[#0D9488]">
+                    <Button
+                      variant="outline"
+                      className="border-[#0D9488] text-[#0D9488]"
+                    >
                       View Details
                     </Button>
                   </Link>
@@ -400,12 +414,11 @@ const Booking = () => {
 
             {isPending && (
               <div className="mb-4 p-4 rounded-2xl bg-[#F59E0B]/10 border border-[#F59E0B]/20 text-[#F59E0B]">
-                ⏳ This experience is pending approval and cannot be booked yet.
+                This experience is not yet open for booking.
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Full Name */}
               <div>
                 <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
                   Full Name *
@@ -423,7 +436,6 @@ const Booking = () => {
                 </div>
               </div>
 
-              {/* Email */}
               <div>
                 <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
                   Email *
@@ -442,7 +454,6 @@ const Booking = () => {
                 </div>
               </div>
 
-              {/* Phone */}
               <div>
                 <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
                   Phone *
@@ -460,7 +471,6 @@ const Booking = () => {
                 </div>
               </div>
 
-              {/* Travelers + Date */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
@@ -469,8 +479,14 @@ const Booking = () => {
                   <div className="flex items-center gap-4">
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, travelers: Math.max(1, formData.travelers - 1) })}
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          travelers: Math.max(1, formData.travelers - 1),
+                        })
+                      }
                       className="w-11 h-11 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-[#0D9488]/10 transition text-xl font-bold"
+                      aria-label="Decrease travelers"
                     >
                       -
                     </button>
@@ -480,8 +496,14 @@ const Booking = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, travelers: formData.travelers + 1 })}
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          travelers: formData.travelers + 1,
+                        })
+                      }
                       className="w-11 h-11 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-[#0D9488]/10 transition text-xl font-bold"
+                      aria-label="Increase travelers"
                     >
                       +
                     </button>
@@ -507,7 +529,6 @@ const Booking = () => {
                 </div>
               </div>
 
-              {/* Special Requests */}
               <div>
                 <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
                   Special Requests
@@ -522,7 +543,6 @@ const Booking = () => {
                 />
               </div>
 
-              {/* Submit */}
               <Button
                 type="submit"
                 disabled={submitting || isPending}
@@ -534,7 +554,7 @@ const Booking = () => {
                     Booking...
                   </>
                 ) : isPending ? (
-                  'Experience Pending Approval'
+                  'Not Yet Available'
                 ) : (
                   `Book Now - $${totalPrice}`
                 )}
@@ -543,10 +563,10 @@ const Booking = () => {
           </Card>
         </div>
 
-        {/* RIGHT SIDEBAR - Booking Summary */}
+        {/* RIGHT SIDEBAR */}
         <div className="lg:sticky lg:top-24 h-fit">
           <Card className="p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xl space-y-6">
-            
+
             <h2 className="text-2xl font-bold text-[#374151] dark:text-white">
               Booking Summary
             </h2>
@@ -565,6 +585,15 @@ const Booking = () => {
                   {entityLocation}
                 </span>
               </div>
+
+              {providerName && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Provider</span>
+                  <span className="font-semibold dark:text-white">
+                    {providerName}
+                  </span>
+                </div>
+              )}
 
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Travelers</span>
@@ -587,16 +616,6 @@ const Booking = () => {
                 </span>
               </div>
 
-              {media.isVideo && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Cover Media</span>
-                  <span className="font-semibold text-[#0D9488] flex items-center gap-1">
-                    <Play className="w-3 h-3" />
-                    Video
-                  </span>
-                </div>
-              )}
-
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                 <div className="flex justify-between items-center">
                   <span className="text-xl font-bold text-[#374151] dark:text-white">
@@ -607,19 +626,26 @@ const Booking = () => {
                   </span>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
-                  ${entity.price} × {formData.travelers} traveler{formData.travelers > 1 ? 's' : ''}
+                  ${entity.price} × {formData.travelers} traveler
+                  {formData.travelers > 1 ? 's' : ''}
                 </p>
               </div>
             </div>
 
-            {/* Trust Badges */}
             <div className="space-y-3">
-              {['Secure Payment', 'Free Cancellation', '24/7 Support'].map((item, index) => (
-                <div key={index} className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50 dark:bg-gray-800">
-                  <ShieldCheck className="w-5 h-5 text-[#0D9488]" />
-                  <span className="text-sm font-medium dark:text-white">{item}</span>
-                </div>
-              ))}
+              {['Secure Payment', 'Free Cancellation', '24/7 Support'].map(
+                (item) => (
+                  <div
+                    key={item}
+                    className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50 dark:bg-gray-800"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-[#0D9488]" />
+                    <span className="text-sm font-medium dark:text-white">
+                      {item}
+                    </span>
+                  </div>
+                )
+              )}
             </div>
           </Card>
         </div>

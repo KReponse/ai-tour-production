@@ -1,69 +1,258 @@
 // backend/src/config/payment.config.js
-// ✅ NEW - Centralized payment configuration
+//
+// AI TOUR RWANDA
+// CENTRALIZED PAYMENT CONFIGURATION
+//
+// MVP PAYMENT POLICY
+// ------------------
+// - Platform commission = 0%
+// - Provider receives 100% of successful payment
+// - Frontend NEVER confirms payment
+// - Backend/provider confirmation is the source of truth
+// - Stripe is the active card payment provider for MVP
+// - Payment currency and settlement currency are separate concepts
+//
+
+// ============================================================
+// ENVIRONMENT HELPERS
+// ============================================================
+
+const parseBoolean = (
+  value,
+  fallback = false
+) => {
+  if (
+    value === undefined ||
+    value === null ||
+    String(value).trim() === ''
+  ) {
+    return fallback;
+  }
+
+  return [
+    'true',
+    '1',
+    'yes',
+    'on',
+  ].includes(
+    String(value)
+      .trim()
+      .toLowerCase()
+  );
+};
+
+const parsePercentage = (
+  value,
+  fallback = 0
+) => {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return fallback;
+  }
+
+  const parsed =
+    Number(value);
+
+  if (
+    !Number.isFinite(parsed)
+  ) {
+    return fallback;
+  }
+
+  return Math.min(
+    Math.max(parsed, 0),
+    100
+  );
+};
+
+const normalizeCurrency = (
+  currency
+) => {
+  return String(
+    currency || ''
+  )
+    .trim()
+    .toUpperCase();
+};
+
+// ============================================================
+// COMMISSION
+// ============================================================
+
+const commissionPercentage =
+  parsePercentage(
+    process.env.PLATFORM_COMMISSION_PERCENTAGE,
+    0
+  );
+
+// ============================================================
+// DEFAULT CURRENCY
+// ============================================================
+
+const defaultCurrency =
+  normalizeCurrency(
+    process.env.DEFAULT_CURRENCY ||
+      'USD'
+  );
+
+// ============================================================
+// STRIPE CONFIGURATION
+// ============================================================
+
+const stripeSecretKey =
+  String(
+    process.env.STRIPE_SECRET_KEY ||
+      ''
+  ).trim();
+
+const stripePublishableKey =
+  String(
+    process.env.STRIPE_PUBLISHABLE_KEY ||
+      ''
+  ).trim();
+
+const stripeWebhookSecret =
+  String(
+    process.env.STRIPE_WEBHOOK_SECRET ||
+      ''
+  ).trim();
 
 /**
- * Payment Configuration
- * 
- * All payment-related settings are centralized here.
- * This allows easy configuration without modifying business logic.
- * 
- * Environment Variables:
- * - PLATFORM_COMMISSION_PERCENTAGE: Commission rate for AI Tour (default: 10)
- * - DEFAULT_CURRENCY: Default currency for transactions (default: USD)
- * - PAYMENT_PROVIDERS: Comma-separated list of enabled providers
+ * Explicit Stripe test mode.
+ *
+ * Preferred:
+ *
+ * STRIPE_TEST_MODE=true
+ *
+ * Fallback:
+ * infer from sk_test_ / sk_live_ key prefix.
  */
+const stripeTestMode =
+  process.env.STRIPE_TEST_MODE !==
+  undefined
+    ? parseBoolean(
+        process.env.STRIPE_TEST_MODE,
+        false
+      )
+    : stripeSecretKey.startsWith(
+        'sk_test_'
+      );
+
+const stripeIsTestKey =
+  stripeSecretKey.startsWith(
+    'sk_test_'
+  );
+
+const stripeIsLiveKey =
+  stripeSecretKey.startsWith(
+    'sk_live_'
+  );
+
+const stripeKeyMismatch =
+  stripeSecretKey &&
+  (
+    (
+      stripeTestMode &&
+      !stripeIsTestKey
+    ) ||
+    (
+      !stripeTestMode &&
+      !stripeIsLiveKey
+    )
+  );
+
+if (stripeKeyMismatch) {
+  console.warn(
+    '⚠️ Stripe mode/key mismatch detected.'
+  );
+
+  console.warn(
+    `⚠️ STRIPE_TEST_MODE=${stripeTestMode}`
+  );
+
+  console.warn(
+    `⚠️ Secret key type=${
+      stripeIsTestKey
+        ? 'test'
+        : stripeIsLiveKey
+          ? 'live'
+          : 'unknown'
+    }`
+  );
+
+  console.warn(
+    '⚠️ Use sk_test_... with STRIPE_TEST_MODE=true for local testing.'
+  );
+}
+
+// ============================================================
+// PAYMENT CONFIG
+// ============================================================
 
 export const paymentConfig = {
-  // ─── Commission Configuration ──────────────────────────────────
+  // ============================================================
+  // COMMISSION
+  // ============================================================
+
   commission: {
-    // ✅ AI Tour's platform commission percentage
-    // Can be overridden by env: PLATFORM_COMMISSION_PERCENTAGE
-    defaultPercentage: parseInt(process.env.PLATFORM_COMMISSION_PERCENTAGE) || 10,
-    
-    // ✅ Commission calculation rules
+    /**
+     * MVP:
+     * AI Tour takes 0% platform commission.
+     */
+    defaultPercentage:
+      commissionPercentage,
+
     rules: {
-      // Minimum commission amount (in default currency)
-      minCommission: 1,
-      // Maximum commission amount (in default currency)
-      maxCommission: 1000,
-      // Round commission to nearest cent
+      minCommission: 0,
+
+      maxCommission: 1000000000,
+
       roundTo: 2,
     },
-    
-    // ✅ Commission distribution
+
     distribution: {
-      platform: 100, // 100% of commission goes to platform
-      // Future: could split between platform and referral partners
+      platform: 100,
     },
   },
 
-  // ─── Currency Configuration ────────────────────────────────────
+  // ============================================================
+  // CURRENCIES
+  // ============================================================
+
   currencies: {
-    // Default currency for all transactions
-    default: process.env.DEFAULT_CURRENCY || 'USD',
-    
-    // Supported currencies
-    supported: ['USD', 'RWF', 'EUR', 'GBP'],
-    
-    // Currency exchange rates (relative to USD)
-    // Format: { currencyCode: rateToUSD }
-    // Example: 1 USD = 1100 RWF
+    default:
+      defaultCurrency,
+
+    supported: [
+      'USD',
+      'RWF',
+      'EUR',
+      'GBP',
+    ],
+
+    /**
+     * These are fallback/reference rates only.
+     *
+     * Real payment conversion should use:
+     * currencyService / exchangeRateService.
+     */
     rates: {
       USD: 1,
       RWF: 1100,
       EUR: 0.85,
       GBP: 0.73,
     },
-    
-    // Currency symbols for display
+
     symbols: {
       USD: '$',
       RWF: 'FRw',
       EUR: '€',
       GBP: '£',
     },
-    
-    // Currency decimal places
+
     decimals: {
       USD: 2,
       RWF: 0,
@@ -72,116 +261,321 @@ export const paymentConfig = {
     },
   },
 
-  // ─── Payment Provider Configuration ────────────────────────────
+  // ============================================================
+  // PAYMENT PROVIDERS
+  // ============================================================
+
   providers: {
-    // ✅ Stripe - Credit/Debit Cards
+    // ==========================================================
+    // STRIPE
+    // ==========================================================
+
     stripe: {
       enabled: true,
-      priority: 1, // Lower number = higher priority
+
+      priority: 1,
+
       name: 'Stripe',
+
       icon: 'credit-card',
-      description: 'Pay with credit or debit card',
-      supportedCurrencies: ['USD', 'EUR', 'GBP'],
-      testMode: process.env.NODE_ENV !== 'production',
+
+      description:
+        'Pay securely with credit or debit card',
+
+      /**
+       * Keep this aligned with StripeProvider.
+       */
+      supportedCurrencies: [
+        'USD',
+        'EUR',
+        'GBP',
+        'RWF',
+      ],
+
+      /**
+       * IMPORTANT:
+       *
+       * Explicit environment variable is preferred.
+       *
+       * STRIPE_TEST_MODE=true
+       */
+      testMode:
+        stripeTestMode,
+
       config: {
-        secretKey: process.env.STRIPE_SECRET_KEY,
-        webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-        publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+        secretKey:
+          stripeSecretKey,
+
+        publishableKey:
+          stripePublishableKey,
+
+        webhookSecret:
+          stripeWebhookSecret,
+
+        testMode:
+          stripeTestMode,
+
+        apiVersion:
+          process.env.STRIPE_API_VERSION ||
+          '',
       },
     },
-    
-    // ✅ MTN Mobile Money - Rwanda
+
+    // ==========================================================
+    // MTN MOMO
+    // ==========================================================
+
     momo: {
-      enabled: process.env.MTN_MOMO_ENABLED === 'true' || false,
+      enabled:
+        process.env.MTN_MOMO_ENABLED ===
+        'true',
+
       priority: 2,
-      name: 'MTN Mobile Money',
+
+      name:
+        'MTN Mobile Money',
+
       icon: 'mobile',
-      description: 'Pay with MTN Mobile Money',
-      supportedCurrencies: ['RWF', 'USD'],
-      testMode: process.env.MTN_MOMO_ENVIRONMENT === 'sandbox',
+
+      description:
+        'Pay with MTN Mobile Money',
+
+      supportedCurrencies: [
+        'RWF',
+        'USD',
+      ],
+
+      testMode:
+        String(
+          process.env.MTN_MOMO_ENVIRONMENT ||
+          'sandbox'
+        )
+          .trim()
+          .toLowerCase() ===
+        'sandbox',
+
       config: {
-        apiKey: process.env.MTN_MOMO_API_KEY,
-        apiSecret: process.env.MTN_MOMO_API_SECRET,
-        environment: process.env.MTN_MOMO_ENVIRONMENT || 'sandbox',
-        collectionAccount: process.env.MTN_MOMO_COLLECTION_ACCOUNT,
-        disbursementAccount: process.env.MTN_MOMO_DISBURSEMENT_ACCOUNT,
-        callbackUrl: process.env.MTN_MOMO_CALLBACK_URL,
+        apiKey:
+          process.env.MTN_MOMO_API_KEY,
+
+        apiSecret:
+          process.env.MTN_MOMO_API_SECRET,
+
+        environment:
+          process.env.MTN_MOMO_ENVIRONMENT ||
+          'sandbox',
+
+        collectionAccount:
+          process.env.MTN_MOMO_COLLECTION_ACCOUNT,
+
+        disbursementAccount:
+          process.env.MTN_MOMO_DISBURSEMENT_ACCOUNT,
+
+        callbackUrl:
+          process.env.MTN_MOMO_CALLBACK_URL,
       },
     },
-    
-    // ✅ Airtel Money - Rwanda
+
+    // ==========================================================
+    // AIRTEL MONEY
+    // ==========================================================
+
     airtel: {
-      enabled: process.env.AIRTEL_ENABLED === 'true' || false,
+      enabled:
+        process.env.AIRTEL_ENABLED ===
+        'true',
+
       priority: 3,
-      name: 'Airtel Money',
+
+      name:
+        'Airtel Money',
+
       icon: 'mobile',
-      description: 'Pay with Airtel Money',
-      supportedCurrencies: ['RWF', 'USD'],
-      testMode: process.env.AIRTEL_ENVIRONMENT === 'sandbox',
+
+      description:
+        'Pay with Airtel Money',
+
+      supportedCurrencies: [
+        'RWF',
+        'USD',
+      ],
+
+      testMode:
+        String(
+          process.env.AIRTEL_ENVIRONMENT ||
+          'sandbox'
+        )
+          .trim()
+          .toLowerCase() ===
+        'sandbox',
+
       config: {
-        apiKey: process.env.AIRTEL_API_KEY,
-        apiSecret: process.env.AIRTEL_API_SECRET,
-        environment: process.env.AIRTEL_ENVIRONMENT || 'sandbox',
-        collectionAccount: process.env.AIRTEL_COLLECTION_ACCOUNT,
-        callbackUrl: process.env.AIRTEL_CALLBACK_URL,
+        apiKey:
+          process.env.AIRTEL_API_KEY,
+
+        apiSecret:
+          process.env.AIRTEL_API_SECRET,
+
+        environment:
+          process.env.AIRTEL_ENVIRONMENT ||
+          'sandbox',
+
+        collectionAccount:
+          process.env.AIRTEL_COLLECTION_ACCOUNT,
+
+        callbackUrl:
+          process.env.AIRTEL_CALLBACK_URL,
       },
     },
-    
-    // ✅ Visa / Mastercard (via Stripe)
+
+    // ==========================================================
+    // CARDS
+    // ==========================================================
+    //
+    // Stripe already handles card payments.
+    //
+    // This remains as a compatibility configuration object,
+    // but it is NOT exposed as an independent provider.
+    //
+
     cards: {
-      enabled: true,
+      enabled: false,
+
       priority: 4,
-      name: 'Visa / Mastercard',
-      icon: 'credit-card',
-      description: 'Pay with Visa or Mastercard',
-      supportedCurrencies: ['USD', 'EUR', 'GBP'],
-      testMode: process.env.NODE_ENV !== 'production',
+
+      name:
+        'Visa / Mastercard',
+
+      icon:
+        'credit-card',
+
+      description:
+        'Processed securely through Stripe',
+
+      supportedCurrencies: [
+        'USD',
+        'EUR',
+        'GBP',
+        'RWF',
+      ],
+
+      testMode:
+        stripeTestMode,
+
       config: {
-        // Uses Stripe under the hood
-        provider: 'stripe',
+        provider:
+          'stripe',
       },
     },
-    
-    // ✅ PayPal
+
+    // ==========================================================
+    // PAYPAL
+    // ==========================================================
+
     paypal: {
-      enabled: process.env.PAYPAL_ENABLED === 'true' || false,
+      enabled:
+        process.env.PAYPAL_ENABLED ===
+        'true',
+
       priority: 5,
-      name: 'PayPal',
-      icon: 'paypal',
-      description: 'Pay with PayPal account',
-      supportedCurrencies: ['USD', 'EUR', 'GBP'],
-      testMode: process.env.PAYPAL_ENVIRONMENT === 'sandbox',
+
+      name:
+        'PayPal',
+
+      icon:
+        'paypal',
+
+      description:
+        'Pay with PayPal',
+
+      supportedCurrencies: [
+        'USD',
+        'EUR',
+        'GBP',
+      ],
+
+      testMode:
+        String(
+          process.env.PAYPAL_ENVIRONMENT ||
+          'sandbox'
+        )
+          .trim()
+          .toLowerCase() ===
+        'sandbox',
+
       config: {
-        clientId: process.env.PAYPAL_CLIENT_ID,
-        clientSecret: process.env.PAYPAL_CLIENT_SECRET,
-        environment: process.env.PAYPAL_ENVIRONMENT || 'sandbox',
+        clientId:
+          process.env.PAYPAL_CLIENT_ID,
+
+        clientSecret:
+          process.env.PAYPAL_CLIENT_SECRET,
+
+        environment:
+          process.env.PAYPAL_ENVIRONMENT ||
+          'sandbox',
       },
     },
-    
-    // ✅ Bank Transfer
+
+    // ==========================================================
+    // BANK TRANSFER
+    // ==========================================================
+
     bankTransfer: {
-      enabled: process.env.BANK_TRANSFER_ENABLED === 'true' || false,
+      enabled:
+        process.env.BANK_TRANSFER_ENABLED ===
+        'true',
+
       priority: 6,
-      name: 'Bank Transfer',
-      icon: 'building',
-      description: 'Pay via bank transfer',
-      supportedCurrencies: ['RWF', 'USD', 'EUR', 'GBP'],
-      testMode: true, // Bank transfers are always manual
+
+      name:
+        'Bank Transfer',
+
+      icon:
+        'building',
+
+      description:
+        'Pay via bank transfer',
+
+      supportedCurrencies: [
+        'RWF',
+        'USD',
+        'EUR',
+        'GBP',
+      ],
+
+      testMode: true,
+
       config: {
-        accountName: process.env.BANK_ACCOUNT_NAME || 'AI Tour Rwanda',
-        accountNumber: process.env.BANK_ACCOUNT_NUMBER,
-        bankName: process.env.BANK_NAME,
-        routingNumber: process.env.BANK_ROUTING_NUMBER,
-        swiftCode: process.env.BANK_SWIFT_CODE,
-        iban: process.env.BANK_IBAN,
-        instructions: process.env.BANK_TRANSFER_INSTRUCTIONS || 
+        accountName:
+          process.env.BANK_ACCOUNT_NAME ||
+          'AI Tour Rwanda',
+
+        accountNumber:
+          process.env.BANK_ACCOUNT_NUMBER,
+
+        bankName:
+          process.env.BANK_NAME,
+
+        routingNumber:
+          process.env.BANK_ROUTING_NUMBER,
+
+        swiftCode:
+          process.env.BANK_SWIFT_CODE,
+
+        iban:
+          process.env.BANK_IBAN,
+
+        instructions:
+          process.env.BANK_TRANSFER_INSTRUCTIONS ||
           'Please include your booking code as reference when making the transfer.',
       },
     },
   },
 
-  // ─── Provider Priority Order ───────────────────────────────────
-  // This determines which providers are shown first to users
+  // ============================================================
+  // PROVIDER PRIORITY
+  // ============================================================
+
   providerPriority: [
     'stripe',
     'momo',
@@ -191,134 +585,307 @@ export const paymentConfig = {
     'bankTransfer',
   ],
 
-  // ─── Wallet Configuration ──────────────────────────────────────
+  // ============================================================
+  // WALLET / WITHDRAWAL
+  // ============================================================
+
   wallet: {
-    // Minimum balance required for withdrawal
-    minWithdrawalAmount: 1000, // In RWF
-    
-    // Maximum withdrawal amount per request
-    maxWithdrawalAmount: 10000000, // In RWF
-    
-    // Withdrawal processing fee
-    withdrawalFee: 0, // Percentage or fixed amount
-    
-    // Settlement days (business days)
-    settlementDays: 3,
-    
-    // Auto-withdrawal threshold (if enabled)
-    autoWithdrawalThreshold: null, // In RWF, null = disabled
+    minWithdrawalAmount:
+      1000,
+
+    maxWithdrawalAmount:
+      10000000,
+
+    withdrawalFee:
+      0,
+
+    settlementDays:
+      3,
+
+    autoWithdrawalThreshold:
+      null,
   },
 
-  // ─── Webhook Configuration ─────────────────────────────────────
+  // ============================================================
+  // WEBHOOK
+  // ============================================================
+
   webhooks: {
-    // Retry attempts for failed webhooks
-    maxRetries: 3,
-    
-    // Retry delay (in milliseconds)
-    retryDelay: 5000,
-    
-    // Webhook timeout (in milliseconds)
-    timeout: 30000,
+    maxRetries:
+      3,
+
+    retryDelay:
+      5000,
+
+    timeout:
+      30000,
   },
 
-  // ─── Security Configuration ────────────────────────────────────
+  // ============================================================
+  // SECURITY
+  // ============================================================
+
   security: {
-    // Require 3D Secure for cards
-    require3DSecure: true,
-    
-    // Enable fraud detection
-    fraudDetection: true,
-    
-    // Maximum transaction amount before manual review
-    maxTransactionAmount: 10000, // In USD
+    require3DSecure:
+      true,
+
+    fraudDetection:
+      true,
+
+    /**
+     * Maximum amount in original transaction currency.
+     */
+    maxTransactionAmount:
+      10000,
   },
 
-  // ─── Feature Flags ─────────────────────────────────────────────
+  // ============================================================
+  // FEATURES
+  // ============================================================
+
   features: {
-    // Allow partial refunds
-    partialRefunds: true,
-    
-    // Allow payment method changes after booking
-    changePaymentMethod: false,
-    
-    // Enable multi-currency display
-    multiCurrencyDisplay: true,
-    
-    // Show estimated fees before payment
-    showFeesBeforePayment: true,
+    partialRefunds:
+      true,
+
+    changePaymentMethod:
+      false,
+
+    multiCurrencyDisplay:
+      true,
+
+    /**
+     * MVP:
+     * Platform commission = 0%.
+     */
+    showFeesBeforePayment:
+      false,
   },
 };
 
-// ─── Helper Functions ────────────────────────────────────────────
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
 
 /**
- * Get enabled providers in priority order
+ * Get enabled configured providers
+ * in priority order.
  */
-export const getEnabledProviders = () => {
-  const { providers, providerPriority } = paymentConfig;
-  return providerPriority
-    .filter(name => providers[name] && providers[name].enabled)
-    .map(name => ({
-      id: name,
-      ...providers[name],
-    }));
-};
+export const getEnabledProviders =
+  () => {
+    const {
+      providers,
+      providerPriority,
+    } = paymentConfig;
+
+    return providerPriority
+      .filter(
+        (providerId) =>
+          providers[
+            providerId
+          ] &&
+          providers[
+            providerId
+          ].enabled === true
+      )
+      .map(
+        (providerId) => ({
+          id: providerId,
+          ...providers[
+            providerId
+          ],
+        })
+      );
+  };
 
 /**
- * Check if a provider supports a specific currency
+ * Check provider currency support.
  */
-export const providerSupportsCurrency = (providerId, currency) => {
-  const provider = paymentConfig.providers[providerId];
-  if (!provider || !provider.enabled) return false;
-  return provider.supportedCurrencies.includes(currency);
-};
+export const providerSupportsCurrency =
+  (
+    providerId,
+    currency
+  ) => {
+    const provider =
+      paymentConfig
+        .providers[
+          providerId
+        ];
+
+    if (
+      !provider ||
+      provider.enabled !== true
+    ) {
+      return false;
+    }
+
+    const normalizedCurrency =
+      normalizeCurrency(
+        currency
+      );
+
+    return (
+      Array.isArray(
+        provider.supportedCurrencies
+      ) &&
+      provider.supportedCurrencies.includes(
+        normalizedCurrency
+      )
+    );
+  };
 
 /**
- * Get default currency
+ * Get default currency.
  */
-export const getDefaultCurrency = () => {
-  return paymentConfig.currencies.default;
-};
+export const getDefaultCurrency =
+  () => {
+    return paymentConfig
+      .currencies
+      .default;
+  };
 
 /**
- * Get supported currencies
+ * Get supported currencies.
  */
-export const getSupportedCurrencies = () => {
-  return paymentConfig.currencies.supported;
-};
+export const getSupportedCurrencies =
+  () => {
+    return [
+      ...paymentConfig
+        .currencies
+        .supported,
+    ];
+  };
 
 /**
- * Format currency amount for display
+ * Format currency for display.
  */
-export const formatCurrency = (amount, currency) => {
-  const symbols = paymentConfig.currencies.symbols;
-  const decimals = paymentConfig.currencies.decimals;
-  const symbol = symbols[currency] || currency;
-  const decimalPlaces = decimals[currency] || 2;
-  
-  const formatted = amount.toFixed(decimalPlaces);
-  
-  // Currency symbol placement
-  if (currency === 'RWF') {
+export const formatCurrency = (
+  amount,
+  currency
+) => {
+  const safeAmount =
+    Number(amount) || 0;
+
+  const normalizedCurrency =
+    normalizeCurrency(
+      currency
+    );
+
+  const symbols =
+    paymentConfig
+      .currencies
+      .symbols;
+
+  const decimals =
+    paymentConfig
+      .currencies
+      .decimals;
+
+  const symbol =
+    symbols[
+      normalizedCurrency
+    ] ||
+    normalizedCurrency;
+
+  const decimalPlaces =
+    decimals[
+      normalizedCurrency
+    ] ?? 2;
+
+  const formatted =
+    safeAmount.toFixed(
+      decimalPlaces
+    );
+
+  if (
+    normalizedCurrency ===
+    'RWF'
+  ) {
     return `${formatted} ${symbol}`;
   }
+
   return `${symbol}${formatted}`;
 };
 
 /**
- * Calculate commission amount
+ * Calculate platform commission.
+ *
+ * MVP:
+ * 0%.
  */
-export const calculateCommission = (amount, customPercentage = null) => {
-  const percentage = customPercentage || paymentConfig.commission.defaultPercentage;
-  const commission = (amount * percentage) / 100;
-  const { minCommission, maxCommission, roundTo } = paymentConfig.commission.rules;
-  
-  // Apply min/max limits
-  let finalCommission = Math.max(commission, minCommission);
-  finalCommission = Math.min(finalCommission, maxCommission);
-  
-  // Round to specified decimal places
-  return Math.round(finalCommission * Math.pow(10, roundTo)) / Math.pow(10, roundTo);
-};
+export const calculateCommission =
+  (
+    amount,
+    customPercentage = null
+  ) => {
+    const safeAmount =
+      Number(amount);
+
+    if (
+      !Number.isFinite(
+        safeAmount
+      ) ||
+      safeAmount <= 0
+    ) {
+      return 0;
+    }
+
+    const percentage =
+      customPercentage !== null &&
+      customPercentage !== undefined
+        ? parsePercentage(
+            customPercentage,
+            paymentConfig
+              .commission
+              .defaultPercentage
+          )
+        : paymentConfig
+            .commission
+            .defaultPercentage;
+
+    if (
+      percentage <= 0
+    ) {
+      return 0;
+    }
+
+    const commission =
+      (
+        safeAmount *
+        percentage
+      ) / 100;
+
+    const roundTo =
+      paymentConfig
+        .commission
+        .rules
+        .roundTo;
+
+    const multiplier =
+      Math.pow(
+        10,
+        roundTo
+      );
+
+    const rounded =
+      Math.round(
+        commission *
+        multiplier
+      ) /
+      multiplier;
+
+    return Math.min(
+      Math.max(
+        rounded,
+        paymentConfig
+          .commission
+          .rules
+          .minCommission
+      ),
+      paymentConfig
+        .commission
+        .rules
+        .maxCommission
+    );
+  };
 
 export default paymentConfig;

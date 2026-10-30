@@ -1,12 +1,8 @@
 // backend/src/routes/reviewRoutes.js
-// ✅ PRODUCTION READY - Review Routes with Moderation Workflow
-// ✅ FIXED: Added /helpful route
-// ✅ FIXED: Route order - specific routes BEFORE wildcard routes
-// ✅ FIXED: All action routes before wildcard /:id
-// ✅ FIXED: Added /my-reviews alias for backward compatibility
 
 import express from "express";
 import { AuthMiddleware } from "../middleware/auth.middleware.js";
+
 import {
   createReview,
   editReview,
@@ -20,25 +16,17 @@ import {
   getProviderReviews,
   getProviderReviewStats,
   toggleHelpful,
+  // ✅ NEW admin handlers
+  getAdminReviews,
+  updateReviewStatus,
 } from "../controllers/reviewController.js";
 
 const router = express.Router();
 
 // ============================================================
-// ✅ AUTHENTICATED ROUTES - ORDER MATTERS!
+// PROVIDER ROUTES (static first)
 // ============================================================
 
-// ─── Provider Routes (Specific first) ──────────────────────────
-
-// Get provider reviews
-router.get(
-  "/provider",
-  AuthMiddleware.authenticate,
-  AuthMiddleware.requireRole("provider"),
-  getProviderReviews
-);
-
-// Get provider review stats
 router.get(
   "/provider/stats",
   AuthMiddleware.authenticate,
@@ -46,47 +34,52 @@ router.get(
   getProviderReviewStats
 );
 
-// ─── Traveler Routes (Specific first) ──────────────────────────
-
-// ✅ Get my reviews - Primary route
 router.get(
-  "/my",
+  "/provider",
   AuthMiddleware.authenticate,
-  getMyReviews
+  AuthMiddleware.requireRole("provider"),
+  getProviderReviews
 );
 
-// ✅ ADDED: Alias for backward compatibility with frontend
-// This ensures both /my and /my-reviews work
+// ============================================================
+// ✅ NEW: ADMIN ROUTES (before /:id)
+// ============================================================
+
 router.get(
-  "/my-reviews",
+  "/admin/reviews",
   AuthMiddleware.authenticate,
-  getMyReviews
+  AuthMiddleware.requireRole("admin"),
+  getAdminReviews
 );
 
-// Get review by booking ID
+router.put(
+  "/admin/reviews/:id/status",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.requireRole("admin"),
+  updateReviewStatus
+);
+
+// ============================================================
+// TRAVELER ROUTES
+// ============================================================
+
+router.get("/my", AuthMiddleware.authenticate, getMyReviews);
+router.get("/my-reviews", AuthMiddleware.authenticate, getMyReviews);
+
 router.get(
   "/booking/:bookingId",
   AuthMiddleware.authenticate,
   getReviewByBooking
 );
 
-// ─── Action Routes (Must come before /:id) ─────────────────────
+// ============================================================
+// REVIEW ACTION ROUTES (before /:id)
+// ============================================================
 
-// Toggle helpful
-router.post(
-  "/:id/helpful",
-  AuthMiddleware.authenticate,
-  toggleHelpful
-);
+router.post("/:id/helpful", AuthMiddleware.authenticate, toggleHelpful);
 
-// Report review
-router.post(
-  "/:id/report",
-  AuthMiddleware.authenticate,
-  reportReview
-);
+router.post("/:id/report", AuthMiddleware.authenticate, reportReview);
 
-// Add provider reply
 router.post(
   "/:id/reply",
   AuthMiddleware.authenticate,
@@ -94,7 +87,6 @@ router.post(
   addProviderReply
 );
 
-// Edit provider reply
 router.put(
   "/:id/reply",
   AuthMiddleware.authenticate,
@@ -102,36 +94,20 @@ router.put(
   editProviderReply
 );
 
-// ─── Create/Update/Delete Routes ───────────────────────────────
+// ============================================================
+// CRUD
+// ============================================================
 
-// Create review (immediately published)
-router.post(
-  "/",
-  AuthMiddleware.authenticate,
-  createReview
-);
+router.post("/", AuthMiddleware.authenticate, createReview);
 
-// Edit review (within window)
-router.put(
-  "/:id",
-  AuthMiddleware.authenticate,
-  editReview
-);
+router.put("/:id", AuthMiddleware.authenticate, editReview);
 
-// Delete review (soft delete, within window)
-router.delete(
-  "/:id",
-  AuthMiddleware.authenticate,
-  deleteReview
-);
+router.delete("/:id", AuthMiddleware.authenticate, deleteReview);
 
-// ─── Generic / ID Routes (MUST BE LAST) ────────────────────────
+// ============================================================
+// GET BY ID (LAST)
+// ============================================================
 
-// Get review by ID - WILDCARD - MUST BE LAST
-router.get(
-  "/:id",
-  AuthMiddleware.authenticate,
-  getReviewById
-);
+router.get("/:id", AuthMiddleware.authenticate, getReviewById);
 
 export default router;

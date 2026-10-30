@@ -1,7 +1,17 @@
 // src/pages/ProviderPending.jsx
-// ✅ COMPLETE FIXED - Prevent infinite redirect loop with useRef and proper role checks
+// ============================================================
+// AI TOUR — PROVIDER PENDING APPROVAL (FINAL)
+// ============================================================
+// ✅ Auto-redirects when the provider is approved: subscribes
+//    to the 'providers' domain and refreshes the auth user
+//    so the existing redirect effect fires without the user
+//    needing to reload the page.
+// ✅ Uses a ref guard to prevent infinite redirect loops.
+// ✅ Preserves all UI, animation, and behavior.
+// ✅ Fixed logo import path (was ../../ when it should be ../).
+// ============================================================
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -12,11 +22,11 @@ import {
   Building2,
   ShieldCheck,
   Sparkles,
-  Loader2,
 } from "lucide-react";
 
-import logo from "../../assets/images/logo.png";
-import { useAuth } from "../../contexts/AuthContext";
+import logo from "../assets/images/logo.png";
+import { useAuth } from "../contexts/AuthContext";
+import useRefreshOn from "../hooks/useRefreshOn";
 
 // ===============================
 // AI TOUR COLORS
@@ -29,9 +39,9 @@ import { useAuth } from "../../contexts/AuthContext";
 
 const ProviderPending = () => {
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, refreshUser } = useAuth();
 
-  // ✅ Use ref to prevent infinite redirect loop
+  // ✅ Guard against infinite redirect loops
   const hasRedirectedRef = useRef(false);
 
   const handleLogout = () => {
@@ -39,56 +49,72 @@ const ProviderPending = () => {
     navigate("/login");
   };
 
-  /* =========================
-  ✅ FIXED: AUTO REDIRECT IF APPROVED - Only once
-  ========================= */
+  // ✅ Auto-refresh the auth user when 'providers' is
+  //    invalidated by an admin approval in another tab.
+  //    refreshUser() updates user.verificationStatus, which
+  //    triggers the redirect effect below.
+  const handleProvidersChange = useCallback(async () => {
+    try {
+      await refreshUser();
+    } catch {
+      // refreshUser already handles 401 by clearing session
+    }
+  }, [refreshUser]);
+
+  useRefreshOn(['providers', 'provider-requests'], handleProvidersChange);
+
+  // ✅ Redirect to dashboard when the provider becomes approved
   useEffect(() => {
-    // ✅ Only redirect once to prevent infinite loop
-    if (!hasRedirectedRef.current) {
-      const userRole = user?.role?.toLowerCase();
-      const verificationStatus = user?.verificationStatus?.toLowerCase();
-      
-      console.log('📌 ProviderPending - User role:', userRole);
-      console.log('📌 ProviderPending - Verification status:', verificationStatus);
-      
-      // ✅ Check if user is approved provider
-      if (userRole === "provider" && verificationStatus === "approved") {
-        hasRedirectedRef.current = true;
-        console.log('✅ Provider approved, redirecting to dashboard...');
-        navigate("/provider/dashboard");
-      }
+    if (hasRedirectedRef.current) return;
+
+    const userRole = user?.role?.toLowerCase();
+    const verificationStatus = user?.verificationStatus?.toLowerCase();
+
+    if (
+      userRole === 'provider' &&
+      verificationStatus === 'approved'
+    ) {
+      hasRedirectedRef.current = true;
+      navigate('/provider/dashboard');
     }
   }, [user, navigate]);
 
-  // If user is already approved, show loading briefly before redirect
+  // Show loading briefly while approved user transitions
   const userRole = user?.role?.toLowerCase();
   const verificationStatus = user?.verificationStatus?.toLowerCase();
-  
-  if (userRole === "provider" && verificationStatus === "approved") {
+
+  if (
+    userRole === 'provider' &&
+    verificationStatus === 'approved'
+  ) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-[#0D9488]/5 via-white to-[#F59E0B]/5 dark:from-gray-950 dark:via-gray-900 dark:to-black">
         <div className="relative w-16 h-16">
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">Redirecting to dashboard...</p>
+        <p className="mt-4 text-gray-500 dark:text-gray-400">
+          Redirecting to dashboard...
+        </p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-10 bg-gradient-to-br from-[#0D9488]/5 via-white to-[#F59E0B]/5 dark:from-gray-950 dark:via-gray-900 dark:to-black">
-
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
         className="w-full max-w-xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-[32px] shadow-2xl border border-white/20 dark:border-gray-800 p-8 md:p-10 text-center"
       >
-
         {/* LOGO */}
         <div className="w-24 h-24 mx-auto rounded-[30px] bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-xl shadow-[#0D9488]/30 mb-6">
-          <img src={logo} alt="AI Tour Logo" className="w-14 h-14 object-contain" />
+          <img
+            src={logo}
+            alt="AI Tour Logo"
+            className="w-14 h-14 object-contain"
+          />
         </div>
 
         <h1 className="text-4xl font-black text-[#374151] dark:text-white">
@@ -114,7 +140,8 @@ const ProviderPending = () => {
         </h2>
 
         <p className="mt-3 text-gray-600 dark:text-gray-300 leading-relaxed">
-          Thank you for joining AI Tour. Your tourism business profile is currently under review by our admin team.
+          Thank you for joining AI Tour. Your tourism business
+          profile is currently under review by our admin team.
         </p>
 
         {/* STATUS CARD */}
@@ -142,8 +169,8 @@ const ProviderPending = () => {
             <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
               <motion.div
                 initial={{ width: 0 }}
-                animate={{ width: "50%" }}
-                transition={{ duration: 1.5, ease: "easeInOut" }}
+                animate={{ width: '50%' }}
+                transition={{ duration: 1.5, ease: 'easeInOut' }}
                 className="h-full bg-gradient-to-r from-[#0D9488] to-[#F59E0B] rounded-full"
               />
             </div>

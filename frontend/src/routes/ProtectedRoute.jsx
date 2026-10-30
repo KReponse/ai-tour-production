@@ -1,5 +1,29 @@
-// src/routes/ProtectedRoute.jsx
-// ✅ COMPLETE FIXED - Prevent infinite redirect loops with proper provider verification
+// frontend/src/routes/ProtectedRoute.jsx
+// ============================================================
+// AI TOUR — PROTECTED ROUTE
+// ============================================================
+// ✅ Preserves the intended destination when redirecting to /login
+//    by passing `state.from` (with pathname + search + hash).
+//    After login, `Login.jsx` reads it and sends the user back
+//    to the exact original URL.
+// ✅ Waits for `loading` (AuthContext session restore) before
+//    deciding, so refreshing a protected page while logged in
+//    does NOT bounce to /login.
+// ✅ Prevents redirect loops: an already-on-/login request is
+//    never redirected to /login again.
+// ✅ Uses `replace: true` on redirects (via <Navigate replace />)
+//    so history isn't polluted with dead entries.
+// ✅ Preserves all existing role checks:
+//    - admin → /admin/dashboard
+//    - provider → /provider/dashboard
+//    - traveler → /
+// ✅ Preserves provider verification flow:
+//    - pending  → /provider/pending
+//    - rejected → /provider/request
+//    - unverified → /provider/pending (with /provider/request allowed)
+//    - approved → all provider pages allowed
+// ✅ Preserves "traveler trying provider area" behavior.
+// ============================================================
 
 import React, { useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
@@ -9,9 +33,9 @@ import { useAuth } from "../contexts/AuthContext";
 // ROLE MAPPING
 // ===============================
 const ROLE_MAP = {
-  'user': 'traveler',
-  'provider': 'provider',
-  'admin': 'admin',
+  user: "traveler",
+  provider: "provider",
+  admin: "admin",
 };
 
 const mapRole = (role) => ROLE_MAP[role] || role;
@@ -37,7 +61,10 @@ const ProtectedRoute = ({
   }, [user?.verificationStatus]);
 
   // ✅ Memoize current path
-  const currentPath = useMemo(() => location.pathname, [location.pathname]);
+  const currentPath = useMemo(
+    () => location.pathname,
+    [location.pathname]
+  );
 
   // =========================
   // LOADING
@@ -56,58 +83,85 @@ const ProtectedRoute = ({
   // =========================
   // NOT LOGGED IN
   // =========================
+  // ✅ Destination-preserving redirect:
+  //    - Never redirect /login → /login (would loop).
+  //    - Pass the full location (pathname + search + hash) via
+  //      state.from so Login.jsx can return the user here.
+  //    - Use `replace` so the browser back button doesn't get
+  //      stuck bouncing between /login and the protected route.
   if (!user) {
-    return <Navigate to="/login" replace />;
+    if (
+      currentPath === "/login" ||
+      currentPath.startsWith("/login/")
+    ) {
+      // Already on /login — render nothing; the /login route
+      // itself will handle rendering. Returning <></> avoids a
+      // self-redirect loop.
+      return <></>;
+    }
+
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location }}
+      />
+    );
   }
 
   // =========================
   // ROLE CHECK
   // =========================
-  if (allowedRoles.length > 0 && !allowedRoles.includes(userRole)) {
+  if (
+    allowedRoles.length > 0 &&
+    !allowedRoles.includes(userRole)
+  ) {
     // Redirect based on role
-    if (userRole === 'admin') {
+    if (userRole === "admin") {
       return <Navigate to="/admin/dashboard" replace />;
     }
-    if (userRole === 'provider') {
+    if (userRole === "provider") {
       return <Navigate to="/provider/dashboard" replace />;
     }
     return <Navigate to="/" replace />;
   }
 
   // =========================
-  // ✅ FIXED: PROVIDER VERIFICATION CHECK
+  // PROVIDER VERIFICATION CHECK
   // =========================
-  if (allowedRoles.includes("provider") && userRole === "provider") {
-    
-    // ✅ If verification status is explicitly "pending"
+  if (
+    allowedRoles.includes("provider") &&
+    userRole === "provider"
+  ) {
+    // If verification status is explicitly "pending"
     if (verificationStatus === "pending") {
-      // Allow access to pending page only
-      if (currentPath !== "/provider/pending" && currentPath !== "/provider/request") {
+      if (
+        currentPath !== "/provider/pending" &&
+        currentPath !== "/provider/request"
+      ) {
         return <Navigate to="/provider/pending" replace />;
       }
     }
-    
-    // ✅ If verification status is "rejected"
+
+    // If verification status is "rejected"
     if (verificationStatus === "rejected") {
-      // Allow access to request page only
       if (currentPath !== "/provider/request") {
         return <Navigate to="/provider/request" replace />;
       }
     }
-    
-    // ✅ If no verification status (new provider)
+
+    // If no verification status (new provider)
     if (!verificationStatus) {
-      // Allow access to pending and request pages
-      const allowedPaths = ["/provider/pending", "/provider/request"];
+      const allowedPaths = [
+        "/provider/pending",
+        "/provider/request",
+      ];
       if (!allowedPaths.includes(currentPath)) {
         return <Navigate to="/provider/pending" replace />;
       }
     }
-    
-    // ✅ If verification status is "approved" - allow all access
-    if (verificationStatus === "approved") {
-      // Allow access to all pages
-    }
+
+    // If verification status is "approved" — allow all access
   }
 
   // =========================

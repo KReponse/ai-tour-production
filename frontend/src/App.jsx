@@ -11,33 +11,33 @@
 // ✅ ADDED: Provider Chat route
 // ✅ FIXED: ResetPassword and VerifyEmail use query parameters (?token=)
 // ✅ ADDED: /messages routes for backward compatibility
+// ✅ AI widgets now render outside Suspense so they don't flash
+//    during lazy page loads (redirect experience improvement)
 // ❌ REMOVED: Featured Experiences (completely removed)
 
 import React, { Suspense, lazy, useState, useEffect } from 'react';
-import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 
-// ✅ IMPORT CurrencyProvider
 import { CurrencyProvider } from './contexts/CurrencyContext';
 
-// Layouts - Loaded eagerly (critical)
+// Layouts
 import MainLayout from './components/layout/Layout';
 import DashboardLayout from './layouts/DashboardLayout';
 import AdminLayout from './layouts/AdminLayout';
 
-// Core Components - Loaded eagerly (critical)
+// Core components
 import FloatingAIButton from './components/ui/FloatingAIButton';
 import AIWidget from './components/ai/AIWidget';
 import ProtectedRoute from './routes/ProtectedRoute';
 
-// ✅ Socket.IO
+// Socket.IO
 import { initSocket, disconnectSocket } from './lib/socket';
 import { useAuth } from './contexts/AuthContext';
 
 // ============================================================
-// ✅ LAZY LOAD ALL PAGE COMPONENTS
+// LAZY-LOADED PAGES (unchanged)
 // ============================================================
 
-// User Pages - Lazy loaded
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Explore = lazy(() => import('./pages/Explore'));
@@ -66,23 +66,16 @@ const ReviewDetails = lazy(() => import('./pages/ReviewDetails'));
 const Review = lazy(() => import('./pages/Review'));
 const ListingDetails = lazy(() => import('./pages/ListingDetails'));
 
-// ✅ CHAT PAGES - Real-time messaging
 const Chat = lazy(() => import('./pages/Chat'));
-
-// ✅ ADMIN CHAT
 const AdminChat = lazy(() => import('./pages/admin/AdminChat'));
-
-// ✅ PROVIDER CHAT
 const ProviderChat = lazy(() => import('./pages/provider/ProviderChat'));
 
-// Auth Pages - Lazy loaded
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
 
-// Footer Pages - Lazy loaded
 const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
 const HelpCenter = lazy(() => import('./pages/HelpCenter'));
@@ -94,13 +87,9 @@ const FAQs = lazy(() => import('./pages/FAQs'));
 const PublicProfile = lazy(() => import('./pages/PublicProfile'));
 const ProviderPublicProfile = lazy(() => import('./pages/ProviderProfile'));
 
-// Provider Notifications
 const ProviderNotifications = lazy(() => import('./pages/provider/ProviderNotifications'));
-
-// Provider Booking Details
 const ProviderBookingDetails = lazy(() => import('./pages/provider/BookingDetails'));
 
-// ✅ PAYMENT PAGES - Lazy loaded
 const TravelerPayments = lazy(() => import('./pages/traveler/Payments'));
 const TravelerPaymentDetails = lazy(() => import('./pages/traveler/PaymentDetails'));
 const ProviderPayments = lazy(() => import('./pages/provider/Payments'));
@@ -108,15 +97,12 @@ const ProviderPaymentDetails = lazy(() => import('./pages/provider/PaymentDetail
 const AdminPayments = lazy(() => import('./pages/admin/AdminPayments'));
 const AdminPaymentDetails = lazy(() => import('./pages/admin/PaymentDetails'));
 
-// ✅ ADMIN FINANCIAL PAGES - Lazy loaded
 const AdminSettlements = lazy(() => import('./pages/admin/Settlements'));
 const AdminLedger = lazy(() => import('./pages/admin/Ledger'));
 const AdminExchangeRates = lazy(() => import('./pages/admin/ExchangeRates'));
 
-// ✅ ADMIN HERO MEDIA - Lazy loaded
 const HeroMedia = lazy(() => import('./pages/admin/HeroMedia'));
 
-// Admin Pages - Lazy loaded
 const Users = lazy(() => import('./pages/admin/Users'));
 const Tours = lazy(() => import('./pages/admin/Tours'));
 const Providers = lazy(() => import('./pages/admin/Providers'));
@@ -139,7 +125,6 @@ const TermsSettings = lazy(() => import('./pages/admin/TermsSettings'));
 const CareersSettings = lazy(() => import('./pages/admin/CareersSettings'));
 const BlogSettings = lazy(() => import('./pages/admin/BlogSettings'));
 
-// Provider Pages - Lazy loaded
 const ProviderDashboard = lazy(() => import('./pages/provider/Dashboard'));
 const ProviderRequests = lazy(() => import('./pages/provider/Requests'));
 const Bookings = lazy(() => import('./pages/provider/Bookings'));
@@ -157,13 +142,12 @@ const ProviderRequest = lazy(() => import('./pages/ProviderRequest'));
 const ProviderReviews = lazy(() => import('./pages/provider/Reviews'));
 const ProfileEdit = lazy(() => import('./pages/provider/ProfileEdit'));
 
-// Listing Pages - Lazy loaded
 const MyListings = lazy(() => import('./pages/provider/MyListings'));
 const AddListing = lazy(() => import('./pages/provider/AddListing'));
 const EditListing = lazy(() => import('./pages/provider/EditListing'));
 
 // ============================================================
-// ✅ LOADING FALLBACK COMPONENT
+// LOADING FALLBACK
 // ============================================================
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-[60vh]">
@@ -178,13 +162,12 @@ const PageLoader = () => (
 );
 
 // ============================================================
-// ✅ APP COMPONENT
+// APP
 // ============================================================
 function App() {
   const [isWidgetOpen, setIsWidgetOpen] = useState(false);
   const { token, user } = useAuth();
 
-  // ✅ Initialize socket when user authenticates
   useEffect(() => {
     if (token && user) {
       initSocket(token);
@@ -192,7 +175,6 @@ function App() {
       disconnectSocket();
     }
 
-    // Cleanup on unmount
     return () => {
       disconnectSocket();
     };
@@ -200,6 +182,8 @@ function App() {
 
   return (
     <CurrencyProvider>
+      {/* Suspense now wraps only the routes — AI widgets stay
+          mounted across page loads, so redirects feel smoother. */}
       <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* ================= USER SITE ================= */}
@@ -210,19 +194,17 @@ function App() {
               </MainLayout>
             }
           >
-            {/* PUBLIC ROUTES */}
+            {/* PUBLIC */}
             <Route path="/" element={<Home />} />
             <Route path="/explore" element={<Explore />} />
             <Route path="/destination/:id" element={<DestinationDetails />} />
-            
-            {/* Auth Routes - ✅ FIXED: No :token parameter */}
+
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
 
-            {/* Footer & Legal Pages */}
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/provider/:providerId" element={<ProviderPublicProfile />} />
             <Route path="/terms" element={<Terms />} />
@@ -234,14 +216,14 @@ function App() {
             <Route path="/faqs" element={<FAQs />} />
             <Route path="/reviews/:reviewId" element={<ReviewDetails />} />
 
-            {/* PROTECTED ROUTES */}
+            {/* PROTECTED */}
             <Route path="/ai-planner" element={<ProtectedRoute><AIPlanner /></ProtectedRoute>} />
             <Route path="/booking/:listingId" element={<ProtectedRoute><Booking /></ProtectedRoute>} />
             <Route path="/booking-details/:bookingId" element={<ProtectedRoute><BookingDetails /></ProtectedRoute>} />
             <Route path="/trip/:bookingId" element={<ProtectedRoute><TripDetails /></ProtectedRoute>} />
             <Route path="/payment/:bookingId" element={<ProtectedRoute><PaymentPage /></ProtectedRoute>} />
             <Route path="/review/:bookingId" element={<ProtectedRoute><Review /></ProtectedRoute>} />
-            
+
             <Route path="/trips" element={<ProtectedRoute><Trips /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
@@ -252,26 +234,22 @@ function App() {
             <Route path="/edit-profile" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
             <Route path="/custom-request" element={<ProtectedRoute><CustomRequest /></ProtectedRoute>} />
             <Route path="/ai-chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
-            
+
             <Route path="/tour/:id" element={<TourDetails />} />
             <Route path="/listing/:id" element={<ListingDetails />} />
             <Route path="/my-bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
             <Route path="/my-reviews" element={<ProtectedRoute><MyReviews /></ProtectedRoute>} />
             <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
 
-            {/* ✅ TRAVELER PAYMENT PAGES */}
             <Route path="/traveler/payments" element={<ProtectedRoute><TravelerPayments /></ProtectedRoute>} />
             <Route path="/traveler/payments/:paymentId" element={<ProtectedRoute><TravelerPaymentDetails /></ProtectedRoute>} />
 
-            {/* Legacy Payment pages */}
             <Route path="/payment-success" element={<PaymentSuccess />} />
             <Route path="/payment-cancel" element={<PaymentCancel />} />
 
-            {/* ✅ CHAT ROUTES - Real-time messaging */}
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
             <Route path="/chat/:conversationId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
 
-            {/* ✅ MESSAGES ROUTES - Alias for /chat (backward compatibility) */}
             <Route path="/messages" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
             <Route path="/messages/:conversationId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
           </Route>
@@ -296,28 +274,26 @@ function App() {
             <Route path="travelers" element={<Travelers />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="earnings" element={<Earnings />} />
-            
-            {/* ✅ PROVIDER PAYMENT PAGES */}
+
             <Route path="payments" element={<ProviderPayments />} />
             <Route path="payments/:paymentId" element={<ProviderPaymentDetails />} />
-            
+
             <Route path="profile" element={<ProviderProfileDashboard />} />
             <Route path="settings" element={<ProviderSettings />} />
             <Route path="notifications" element={<ProviderNotifications />} />
-            
+
             <Route path="add-tour" element={<AddTour />} />
             <Route path="tours" element={<MyTours />} />
             <Route path="tours/edit/:id" element={<EditTour />} />
-            
+
             <Route path="pending" element={<ProviderPending />} />
             <Route path="reviews" element={<ProviderReviews />} />
             <Route path="profile/edit" element={<ProfileEdit />} />
-            
+
             <Route path="listings" element={<MyListings />} />
             <Route path="add-listing" element={<AddListing />} />
             <Route path="listings/edit/:id" element={<EditListing />} />
-            
-            {/* ✅ PROVIDER CHAT ROUTE */}
+
             <Route path="chat" element={<ProviderChat />} />
             <Route path="chat/:conversationId" element={<ProviderChat />} />
           </Route>
@@ -337,26 +313,23 @@ function App() {
             <Route path="providers" element={<Providers />} />
             <Route path="settings" element={<AdminSettings />} />
             <Route path="bookings" element={<AdminBookings />} />
-            
-            {/* ✅ ADMIN PAYMENT PAGES */}
+
             <Route path="payments" element={<AdminPayments />} />
             <Route path="payments/:paymentId" element={<AdminPaymentDetails />} />
-            
-            {/* ✅ ADMIN FINANCIAL PAGES */}
+
             <Route path="settlements" element={<AdminSettlements />} />
             <Route path="ledger" element={<AdminLedger />} />
             <Route path="exchange-rates" element={<AdminExchangeRates />} />
-            
-            {/* ✅ ADMIN HERO MEDIA */}
+
             <Route path="hero-media" element={<HeroMedia />} />
-            
+
             <Route path="footer-settings" element={<FooterSettings />} />
             <Route path="tours" element={<Tours />} />
             <Route path="requests" element={<AdminRequests />} />
             <Route path="notifications" element={<AdminNotifications />} />
             <Route path="provider-requests" element={<AdminProviderRequests />} />
             <Route path="reviews" element={<AdminReviews />} />
-            
+
             <Route path="about-settings" element={<AboutSettings />} />
             <Route path="contact-settings" element={<ContactSettings />} />
             <Route path="faq-settings" element={<FaqSettings />} />
@@ -368,16 +341,17 @@ function App() {
 
             <Route path="listings" element={<ManagementListings />} />
             <Route path="provider-requests/:id" element={<ProviderRequestDetails />} />
-            
-            {/* ✅ ADMIN CHAT ROUTE */}
+
             <Route path="chat" element={<AdminChat />} />
             <Route path="chat/:conversationId" element={<AdminChat />} />
           </Route>
         </Routes>
-
-        <AIWidget isOpen={isWidgetOpen} onClose={() => setIsWidgetOpen(false)} />
-        <FloatingAIButton onOpen={() => setIsWidgetOpen(true)} />
       </Suspense>
+
+      {/* AI widgets stay mounted across lazy page loads — no flash
+          during auth redirects */}
+      <AIWidget isOpen={isWidgetOpen} onClose={() => setIsWidgetOpen(false)} />
+      <FloatingAIButton onOpen={() => setIsWidgetOpen(true)} />
     </CurrencyProvider>
   );
 }

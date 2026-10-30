@@ -1,7 +1,15 @@
-// src/pages/BookingDetails.jsx
-// ✅ COMPLETE FIXED - Fixed React warning for non-boolean attribute 'jsx'
+// frontend/src/pages/BookingDetails.jsx
+// ============================================================
+// AI TOUR — BOOKING DETAILS PAGE
+// ============================================================
+// ✅ Auto-refreshes when other pages invalidate 'bookings'
+//    (e.g. after canceling from TripDetails or paying from
+//    PaymentSuccess).
+// ✅ Cancels broadcast 'bookings', 'bookings:traveler', and
+//    'dashboard' so Trips / Dashboard counters update.
+// ============================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Calendar,
@@ -15,41 +23,66 @@ import {
   ArrowLeft,
   DollarSign,
   User,
-  Mail,
-  Phone,
   FileText,
   Printer,
-  Download,
   Share2,
   Sparkles,
   AlertCircle,
   MessageCircle,
   Star,
-  Shield,
-  Award,
-  Calendar as CalendarIcon,
-  Play,
-  Video,
 } from 'lucide-react';
-import Card, { CardContent } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { getBookingById, cancelBooking } from '../services/bookingService';
 import { useAuth } from '../contexts/AuthContext';
+import { refreshData, refreshMany } from '../utils/dataRefresh';
+import useRefreshOn from '../hooks/useRefreshOn';
 import toast from 'react-hot-toast';
 
-// ✅ FIXED: Import mediaHelpers for consistent image and video handling
-import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo } from '../utils/mediaHelpers';
+import {
+  getImageUrl,
+  getCoverMedia,
+  getCoverMediaType,
+  getCoverVideo,
+  hasVideo,
+} from '../utils/mediaHelpers';
 
-// ===============================
-// AI TOUR COLORS
-// ===============================
-// Teal  : #0D9488
-// Gold  : #F59E0B
-// Slate : #374151
-// White : #FFFFFF
-// ===============================
+const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const PAYMENT_STATUS_LABELS = {
+  unpaid: 'Not yet paid',
+  pending: 'Payment processing',
+  processing: 'Payment processing',
+  paid: 'Paid',
+  succeeded: 'Paid',
+  failed: 'Payment failed',
+  refunded: 'Refunded',
+  partially_refunded: 'Partially refunded',
+};
+
+const formatPaymentStatus = (status) => {
+  if (!status) return PAYMENT_STATUS_LABELS.unpaid;
+  const key = String(status).toLowerCase();
+  return PAYMENT_STATUS_LABELS[key] || 'Unknown';
+};
+
+const getProviderName = (provider) => {
+  if (!provider) return '';
+  if (typeof provider === 'string') return provider.trim();
+  if (typeof provider === 'object') {
+    const candidates = [
+      provider.businessName,
+      provider.name,
+      provider.fullName,
+      provider.displayName,
+      provider.username,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+    }
+  }
+  return '';
+};
 
 const BookingDetails = () => {
   const { bookingId } = useParams();
@@ -60,23 +93,12 @@ const BookingDetails = () => {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    if (bookingId) {
-      fetchBooking();
-    } else {
-      console.error('❌ [BookingDetails] No bookingId provided in URL');
-      setError('Invalid booking ID');
-      setLoading(false);
-    }
-  }, [bookingId]);
-
-  const fetchBooking = async () => {
+  const fetchBooking = useCallback(async () => {
+    if (!bookingId) return;
     try {
       setLoading(true);
       setError(null);
-      
-      console.log('📤 [BookingDetails] Fetching booking with ID:', bookingId);
-      
+
       const token = localStorage.getItem('token');
       if (!token) {
         setError('Please login to view booking details');
@@ -85,15 +107,12 @@ const BookingDetails = () => {
       }
 
       const data = await getBookingById(bookingId, token);
-      console.log('✅ [BookingDetails] Booking fetched:', data);
       setBooking(data.booking);
-    } catch (error) {
-      console.error('❌ [BookingDetails] Error fetching booking:', error);
-      
-      if (error.response?.status === 401) {
+    } catch (err) {
+      if (err.response?.status === 401) {
         setError('Please login to view booking details');
         setTimeout(() => navigate('/login'), 2000);
-      } else if (error.response?.status === 404) {
+      } else if (err.response?.status === 404) {
         setError('Booking not found');
       } else {
         setError('Failed to load booking details. Please try again.');
@@ -101,22 +120,25 @@ const BookingDetails = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [bookingId, navigate]);
 
-  // ✅ FIXED: handleCancel with proper reason
+  useEffect(() => {
+    fetchBooking();
+  }, [fetchBooking]);
+
+  // ✅ Auto-refresh when a sibling page invalidates 'bookings'
+  useRefreshOn(['bookings', 'bookings:traveler'], fetchBooking);
+
   const handleCancel = async () => {
-    // ✅ Ask for a cancellation reason
     const reason = window.prompt(
       'Please tell us why you want to cancel this booking:',
       'I need to change my travel plans'
     );
-    
-    // If user clicks Cancel on the prompt, don't proceed
     if (reason === null) return;
-    
-    // ✅ If reason is empty, use a default
-    const cancellationReason = reason.trim() || 'User requested cancellation';
-    
+
+    const cancellationReason =
+      reason.trim() || 'User requested cancellation';
+
     const confirmCancel = window.confirm(
       `Are you sure you want to cancel this booking?\n\nReason: ${cancellationReason}`
     );
@@ -124,14 +146,14 @@ const BookingDetails = () => {
 
     try {
       setCancelling(true);
-      
-      // ✅ FIXED: Only pass bookingId and reason (token is handled inside bookingService)
       await cancelBooking(bookingId, cancellationReason);
       await fetchBooking();
+      refreshMany('bookings', 'bookings:traveler', 'dashboard');
       toast.success('Booking cancelled successfully');
-    } catch (error) {
-      console.error('Error cancelling booking:', error);
-      toast.error(error.response?.data?.message || 'Failed to cancel booking');
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message || 'Failed to cancel booking'
+      );
     } finally {
       setCancelling(false);
     }
@@ -163,17 +185,9 @@ const BookingDetails = () => {
 
   const getStatusConfig = (status) => {
     const configs = {
-      draft: {
-        icon: FileText,
-        label: 'Draft',
-        color: 'text-gray-500',
-        bg: 'bg-gray-100',
-        border: 'border-gray-200',
-        text: 'Draft',
-      },
       pending_payment: {
         icon: Clock,
-        label: 'Pending Payment',
+        label: 'Awaiting Payment',
         color: 'text-[#F59E0B]',
         bg: 'bg-[#F59E0B]/10',
         border: 'border-[#F59E0B]/20',
@@ -193,7 +207,7 @@ const BookingDetails = () => {
         color: 'text-[#0D9488]',
         bg: 'bg-[#0D9488]/10',
         border: 'border-[#0D9488]/20',
-        text: 'Confirmed!',
+        text: 'Confirmed',
       },
       in_progress: {
         icon: Clock,
@@ -227,14 +241,6 @@ const BookingDetails = () => {
         border: 'border-red-500/20',
         text: 'Cancelled',
       },
-      rejected: {
-        icon: XCircle,
-        label: 'Rejected',
-        color: 'text-red-500',
-        bg: 'bg-red-500/10',
-        border: 'border-red-500/20',
-        text: 'Rejected',
-      },
       failed_payment: {
         icon: XCircle,
         label: 'Payment Failed',
@@ -247,10 +253,7 @@ const BookingDetails = () => {
     return configs[status] || configs.pending_payment;
   };
 
-  const getEntity = () => {
-    return booking?.listing || booking?.tour || null;
-  };
-
+  const getEntity = () => booking?.listing || booking?.tour || null;
   const getEntityLink = () => {
     if (booking?.listing) {
       const listingId = booking.listing._id || booking.listing;
@@ -262,91 +265,49 @@ const BookingDetails = () => {
     }
     return '#';
   };
-
-  const getEntityTitle = () => {
-    const entity = getEntity();
-    return entity?.title || 'Experience';
-  };
-
-  const getEntityLocation = () => {
-    const entity = getEntity();
-    return entity?.location || 'Location not specified';
-  };
-
-  const getEntityDuration = () => {
-    const entity = getEntity();
-    return entity?.duration || 'N/A';
-  };
-
-  const getEntityPrice = () => {
-    const entity = getEntity();
-    return entity?.price || 0;
-  };
-
+  const getEntityTitle = () => getEntity()?.title || 'Experience';
+  const getEntityLocation = () =>
+    getEntity()?.location || 'Location not specified';
+  const getEntityDuration = () => getEntity()?.duration || 'N/A';
+  const getEntityPrice = () => getEntity()?.price || 0;
   const getEntityTravelers = () => {
-    const entity = getEntity();
-    return entity?.travelers || entity?.capacity || 10;
+    const e = getEntity();
+    return e?.travelers || e?.capacity || 10;
   };
 
   const getEntityMedia = (entity) => {
-    const defaultImage = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-    
     if (!entity) {
-      return { 
-        url: defaultImage, 
-        isVideo: false, 
-        videoUrl: null, 
-        poster: defaultImage,
-        imageUrl: defaultImage,
+      return {
+        isVideo: false,
+        videoUrl: null,
+        poster: FALLBACK_IMAGE,
+        imageUrl: FALLBACK_IMAGE,
       };
     }
-
     const coverType = getCoverMediaType(entity);
     const coverUrl = getCoverMedia(entity);
     const videoUrl = getCoverVideo(entity);
     const hasVideoContent = hasVideo(entity);
-    
-    let poster = defaultImage;
-    if (entity.coverImage) {
-      poster = getImageUrl(entity.coverImage) || defaultImage;
-    } else if (entity.galleryImages && entity.galleryImages.length > 0) {
-      poster = getImageUrl(entity.galleryImages[0]) || defaultImage;
-    } else if (entity.images && entity.images.length > 0) {
-      poster = getImageUrl(entity.images[0]) || defaultImage;
-    } else if (entity.image) {
-      poster = getImageUrl(entity.image) || defaultImage;
-    }
 
-    let imageUrl = coverUrl || defaultImage;
-    
-    console.log('📊 Media result:', {
-      coverType,
-      coverUrl,
-      videoUrl,
-      hasVideoContent,
-      poster,
-      imageUrl,
-      entityId: entity._id,
-      entityTitle: entity.title,
-    });
+    let poster = FALLBACK_IMAGE;
+    if (entity.coverImage) {
+      poster = getImageUrl(entity.coverImage) || FALLBACK_IMAGE;
+    } else if (
+      Array.isArray(entity.galleryImages) &&
+      entity.galleryImages.length
+    ) {
+      poster = getImageUrl(entity.galleryImages[0]) || FALLBACK_IMAGE;
+    } else if (Array.isArray(entity.images) && entity.images.length) {
+      poster = getImageUrl(entity.images[0]) || FALLBACK_IMAGE;
+    } else if (entity.image) {
+      poster = getImageUrl(entity.image) || FALLBACK_IMAGE;
+    }
+    const imageUrl = coverUrl || FALLBACK_IMAGE;
 
     if ((coverType === 'video' || hasVideoContent) && videoUrl) {
-      return {
-        url: videoUrl,
-        isVideo: true,
-        videoUrl: videoUrl,
-        poster: poster,
-        imageUrl: imageUrl,
-      };
+      return { isVideo: true, videoUrl, poster, imageUrl };
     }
-
-    return {
-      url: imageUrl,
-      isVideo: false,
-      videoUrl: null,
-      poster: imageUrl,
-      imageUrl: imageUrl,
-    };
+    return { isVideo: false, videoUrl: null, poster: imageUrl, imageUrl };
   };
 
   const renderMedia = (media, title) => {
@@ -363,89 +324,53 @@ const BookingDetails = () => {
             playsInline
             poster={media.poster}
             onError={(e) => {
-              console.error('❌ Video error:', media.videoUrl);
-              e.target.style.display = 'none';
               const parent = e.target.parentElement;
-              if (parent) {
+              e.target.style.display = 'none';
+              if (parent && !parent.querySelector('img.fallback-poster')) {
                 const img = document.createElement('img');
-                img.src = media.poster || 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-                img.className = 'w-full h-full object-cover';
-                img.alt = title || 'Media';
+                img.src = media.poster || FALLBACK_IMAGE;
+                img.className = 'w-full h-full object-cover fallback-poster';
+                img.alt = title || 'Experience';
                 parent.appendChild(img);
               }
             }}
           />
-          <div className="absolute top-3 left-3 bg-[#0D9488]/80 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-            <Play className="w-3 h-3" />
-            Cover Video
-          </div>
-          <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-            <Video className="w-3 h-3" />
-            Video
-          </div>
         </div>
       );
     }
-
     return (
       <div className="relative w-full h-48 md:h-56 lg:h-64 bg-gray-200 dark:bg-gray-800 rounded-2xl overflow-hidden">
         <img
-          src={media.url}
+          src={media.imageUrl}
           alt={title || 'Experience image'}
           className="w-full h-full object-cover"
           onError={(e) => {
-            e.target.src = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+            e.target.src = FALLBACK_IMAGE;
           }}
         />
-        <div className="absolute top-3 left-3 bg-[#0D9488]/80 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
-          <span>📷</span>
-          Cover Image
-        </div>
       </div>
     );
   };
 
-  const getUserName = () => {
-    if (booking?.user) {
-      return booking.user.name || booking.user.fullName || 'User';
-    }
-    return booking?.fullName || 'User';
-  };
+  const getUserName = () =>
+    booking?.user?.name || booking?.user?.fullName || booking?.fullName || 'User';
+  const getUserEmail = () => booking?.user?.email || booking?.email || 'N/A';
+  const getUserPhone = () => booking?.user?.phone || booking?.phone || 'N/A';
+  const getBookingCode = () =>
+    booking?.bookingCode || booking?._id?.slice(-8)?.toUpperCase() || 'N/A';
 
-  const getUserEmail = () => {
-    if (booking?.user) {
-      return booking.user.email || 'N/A';
-    }
-    return booking?.email || 'N/A';
-  };
+  const isJWT = (str) =>
+    typeof str === 'string' && str.startsWith('eyJ') && str.split('.').length >= 3;
 
-  const getUserPhone = () => {
-    if (booking?.user) {
-      return booking.user.phone || 'N/A';
-    }
-    return booking?.phone || 'N/A';
-  };
-
-  const getBookingCode = () => {
-    return booking?.bookingCode || booking?._id?.slice(-8)?.toUpperCase() || 'N/A';
-  };
-
-  // ✅ Helper: Check if string is a JWT token
-  const isJWT = (str) => {
-    if (!str || typeof str !== 'string') return false;
-    return str.startsWith('eyJ') && str.split('.').length >= 3;
-  };
-
-  // ✅ Helper: Get safe cancellation reason
   const getSafeCancellationReason = (reason) => {
     if (!reason) return null;
-    if (isJWT(reason)) {
-      return 'Invalid cancellation reason';
-    }
+    if (isJWT(reason)) return null;
     return reason;
   };
 
-  const safeCancellationReason = getSafeCancellationReason(booking?.cancellationReason);
+  const safeCancellationReason = getSafeCancellationReason(
+    booking?.cancellationReason
+  );
 
   if (loading) {
     return (
@@ -481,19 +406,31 @@ const BookingDetails = () => {
     );
   }
 
-  if (!booking) {
-    return null;
-  }
+  if (!booking) return null;
 
   const statusConfig = getStatusConfig(booking.status);
   const StatusIcon = statusConfig.icon;
-  
-  const canCancel = ['pending_payment', 'paid', 'confirmed'].includes(booking.status);
-  const isPastExperience = booking.startDate && new Date(booking.startDate) < new Date();
-  const isActive = ['pending_payment', 'paid', 'confirmed', 'in_progress'].includes(booking.status);
-  const canReview = (booking.status === 'completed' || booking.status === 'review_eligible') && !booking.reviewSubmitted;
-  const canPay = booking.status === 'pending_payment' && booking.paymentStatus !== 'paid';
-  const isEnded = ['cancelled', 'rejected', 'failed_payment'].includes(booking.status);
+  const providerName = getProviderName(booking.provider);
+
+  const canCancel = ['pending_payment', 'paid', 'confirmed'].includes(
+    booking.status
+  );
+  const isPastExperience =
+    booking.startDate && new Date(booking.startDate) < new Date();
+  const isActive = [
+    'pending_payment',
+    'paid',
+    'confirmed',
+    'in_progress',
+  ].includes(booking.status);
+  const canReview =
+    (booking.status === 'completed' ||
+      booking.status === 'review_eligible') &&
+    !booking.reviewSubmitted;
+  const canPay =
+    booking.status === 'pending_payment' &&
+    booking.paymentStatus !== 'paid';
+  const isEnded = ['cancelled', 'failed_payment'].includes(booking.status);
 
   const entity = getEntity();
   const media = getEntityMedia(entity);
@@ -520,7 +457,9 @@ const BookingDetails = () => {
                 <h1 className="text-3xl font-bold text-[#374151] dark:text-white">
                   {entityTitle}
                 </h1>
-                <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusConfig.bg} ${statusConfig.color} border ${statusConfig.border}`}>
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-semibold ${statusConfig.bg} ${statusConfig.color} border ${statusConfig.border}`}
+                >
                   <span className="flex items-center gap-1">
                     <StatusIcon className="w-4 h-4" />
                     {statusConfig.label}
@@ -534,33 +473,58 @@ const BookingDetails = () => {
                     </span>
                   </span>
                 )}
-                {media.isVideo && (
-                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-[#0D9488]/10 text-[#0D9488] border border-[#0D9488]/20 flex items-center gap-1">
-                    <Play className="w-3 h-3" />
-                    Video Cover
-                  </span>
-                )}
               </div>
               <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                 <MapPin className="w-4 h-4 text-[#0D9488]" />
                 <span>{entityLocation}</span>
               </div>
+              {providerName && (
+                <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">
+                  by{' '}
+                  <span className="text-[#0D9488] font-semibold">
+                    {providerName}
+                  </span>
+                </p>
+              )}
               <p className="text-gray-500 dark:text-gray-400 mt-1">
-                Booking Reference: <span className="font-mono font-semibold text-[#0D9488]">{getBookingCode()}</span>
+                Booking Reference:{' '}
+                <span className="font-mono font-semibold text-[#0D9488]">
+                  {getBookingCode()}
+                </span>
               </p>
             </div>
             <div className="flex flex-wrap gap-2 no-print">
-              <button onClick={handlePrint} className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-2">
+              <button
+                onClick={handlePrint}
+                className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-2"
+              >
                 <Printer className="w-4 h-4" />
                 <span className="hidden sm:inline">Print</span>
               </button>
-              <button onClick={() => { navigator.share?.({ title: `Booking ${getBookingCode()}`, text: `Booking for ${entityTitle}`, url: window.location.href }); }} className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.share?.({
+                    title: `Booking ${getBookingCode()}`,
+                    text: `Booking for ${entityTitle}`,
+                    url: window.location.href,
+                  });
+                }}
+                className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-2"
+              >
                 <Share2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Share</span>
               </button>
               {canCancel && !isPastExperience && !isEnded && (
-                <button onClick={handleCancel} disabled={cancelling} className="px-4 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2">
-                  {cancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="px-4 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  {cancelling ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <XCircle className="w-4 h-4" />
+                  )}
                   <span>{cancelling ? 'Cancelling...' : 'Cancel Booking'}</span>
                 </button>
               )}
@@ -577,8 +541,13 @@ const BookingDetails = () => {
               </h2>
               {entity ? (
                 <div className="space-y-4">
-                  <Link to={getEntityLink()} className="block hover:opacity-80 transition">
-                    <h3 className="text-lg font-semibold text-[#0D9488]">{entityTitle}</h3>
+                  <Link
+                    to={getEntityLink()}
+                    className="block hover:opacity-80 transition"
+                  >
+                    <h3 className="text-lg font-semibold text-[#0D9488]">
+                      {entityTitle}
+                    </h3>
                   </Link>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
@@ -597,16 +566,12 @@ const BookingDetails = () => {
                       <DollarSign className="w-4 h-4 text-[#0D9488]" />
                       <span>${getEntityPrice()} per person</span>
                     </div>
-                    {media.isVideo && (
-                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300 col-span-2">
-                        <Video className="w-4 h-4 text-[#0D9488]" />
-                        <span>Cover Media: <span className="text-[#0D9488] font-semibold">Video</span></span>
-                      </div>
-                    )}
                   </div>
                 </div>
               ) : (
-                <p className="text-gray-500 dark:text-gray-400">Experience information unavailable</p>
+                <p className="text-gray-500 dark:text-gray-400">
+                  Experience information unavailable
+                </p>
               )}
             </div>
 
@@ -618,44 +583,90 @@ const BookingDetails = () => {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Booking Date</label>
-                    <p className="text-[#374151] dark:text-white font-medium">{formatDateTime(booking.createdAt)}</p>
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Booking Date
+                    </label>
+                    <p className="text-[#374151] dark:text-white font-medium">
+                      {formatDateTime(booking.createdAt)}
+                    </p>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Status</label>
-                    <p className={`font-medium ${statusConfig.color}`}>{statusConfig.text}</p>
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Status
+                    </label>
+                    <p className={`font-medium ${statusConfig.color}`}>
+                      {statusConfig.text}
+                    </p>
                   </div>
                   {booking.startDate && (
                     <div>
-                      <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Start Date</label>
-                      <p className="text-[#374151] dark:text-white font-medium">{formatDate(booking.startDate)}</p>
+                      <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                        Start Date
+                      </label>
+                      <p className="text-[#374151] dark:text-white font-medium">
+                        {formatDate(booking.startDate)}
+                      </p>
                     </div>
                   )}
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Number of Travelers</label>
-                    <p className="text-[#374151] dark:text-white font-medium">{booking.numberOfPeople || booking.travelers || 1} person{booking.numberOfPeople > 1 ? 's' : ''}</p>
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Travelers
+                    </label>
+                    <p className="text-[#374151] dark:text-white font-medium">
+                      {booking.numberOfPeople || booking.travelers || 1}{' '}
+                      person
+                      {(booking.numberOfPeople || booking.travelers || 1) > 1
+                        ? 's'
+                        : ''}
+                    </p>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Amount</label>
-                    <p className="text-2xl font-bold text-[#0D9488]">${booking.totalPrice || booking.amount || getEntityPrice() || 0}</p>
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Total Amount
+                    </label>
+                    <p className="text-2xl font-bold text-[#0D9488]">
+                      $
+                      {booking.totalPrice ||
+                        booking.amount ||
+                        getEntityPrice() ||
+                        0}
+                    </p>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Payment Status</label>
-                    <p className={`font-medium ${booking.paymentStatus === 'paid' ? 'text-green-600' : booking.paymentStatus === 'pending' ? 'text-[#F59E0B]' : 'text-red-500'}`}>
-                      {booking.paymentStatus || 'unpaid'}
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Payment
+                    </label>
+                    <p
+                      className={`font-medium ${
+                        booking.paymentStatus === 'paid'
+                          ? 'text-green-600'
+                          : booking.paymentStatus === 'failed'
+                          ? 'text-red-500'
+                          : 'text-[#F59E0B]'
+                      }`}
+                    >
+                      {formatPaymentStatus(booking.paymentStatus)}
                     </p>
                   </div>
                 </div>
+
                 {booking.specialRequests && (
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Special Requests</label>
-                    <p className="text-[#374151] dark:text-white mt-1 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">{booking.specialRequests}</p>
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Special Requests
+                    </label>
+                    <p className="text-[#374151] dark:text-white mt-1 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                      {booking.specialRequests}
+                    </p>
                   </div>
                 )}
+
                 {booking.status === 'cancelled' && safeCancellationReason && (
                   <div>
-                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Cancellation Reason</label>
-                    <p className="text-red-600 dark:text-red-400 mt-1 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl break-words break-all whitespace-pre-wrap">
+                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                      Cancellation Reason
+                    </label>
+                    <p className="text-red-600 dark:text-red-400 mt-1 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl break-words whitespace-pre-wrap">
                       {safeCancellationReason}
                     </p>
                   </div>
@@ -670,16 +681,28 @@ const BookingDetails = () => {
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Full Name</label>
-                  <p className="text-[#374151] dark:text-white font-medium">{getUserName()}</p>
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Full Name
+                  </label>
+                  <p className="text-[#374151] dark:text-white font-medium">
+                    {getUserName()}
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Email</label>
-                  <p className="text-[#374151] dark:text-white font-medium">{getUserEmail()}</p>
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Email
+                  </label>
+                  <p className="text-[#374151] dark:text-white font-medium">
+                    {getUserEmail()}
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Phone</label>
-                  <p className="text-[#374151] dark:text-white font-medium">{getUserPhone()}</p>
+                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Phone
+                  </label>
+                  <p className="text-[#374151] dark:text-white font-medium">
+                    {getUserPhone()}
+                  </p>
                 </div>
               </div>
             </div>
@@ -687,75 +710,174 @@ const BookingDetails = () => {
 
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
-              <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4">Quick Actions</h2>
+              <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4">
+                Quick Actions
+              </h2>
               <div className="space-y-3">
-                {entity && <Link to={getEntityLink()}><Button variant="outline" className="w-full">View Experience</Button></Link>}
-                {canPay && <Link to={`/payment/${booking._id}`} className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold hover:scale-[1.02] transition flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Pay Now</Link>}
-                {canReview && <Link to={`/review/${booking._id}`} className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold hover:scale-[1.02] transition flex items-center justify-center gap-2"><Star className="w-4 h-4" /> Leave a Review</Link>}
-                {booking.provider && <Link to={`/messages?userId=${booking.provider._id}`} className="w-full py-2.5 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition flex items-center justify-center gap-2"><MessageCircle className="w-4 h-4" /> Contact Provider</Link>}
-                {canCancel && !isPastExperience && !isEnded && <button onClick={handleCancel} disabled={cancelling} className="w-full py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-600 transition disabled:opacity-50">{cancelling ? 'Processing...' : 'Cancel Booking'}</button>}
-                <button onClick={() => navigate('/dashboard')} className="w-full py-2.5 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition">Go to Dashboard</button>
+                {entity && (
+                  <Link to={getEntityLink()}>
+                    <Button variant="outline" className="w-full">
+                      View Experience
+                    </Button>
+                  </Link>
+                )}
+                {canPay && (
+                  <Link
+                    to={`/payment/${booking._id}`}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold hover:scale-[1.02] transition flex items-center justify-center gap-2"
+                  >
+                    <CreditCard className="w-4 h-4" /> Pay Now
+                  </Link>
+                )}
+                {canReview && (
+                  <Link
+                    to={`/review/${booking._id}`}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold hover:scale-[1.02] transition flex items-center justify-center gap-2"
+                  >
+                    <Star className="w-4 h-4" /> Leave a Review
+                  </Link>
+                )}
+                {booking.provider && (
+                  <Link
+                    to={`/messages?userId=${
+                      booking.provider._id || booking.provider
+                    }`}
+                    className="w-full py-2.5 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle className="w-4 h-4" /> Contact Provider
+                  </Link>
+                )}
+                {canCancel && !isPastExperience && !isEnded && (
+                  <button
+                    onClick={handleCancel}
+                    disabled={cancelling}
+                    className="w-full py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-600 transition disabled:opacity-50"
+                  >
+                    {cancelling ? 'Processing...' : 'Cancel Booking'}
+                  </button>
+                )}
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  className="w-full py-2.5 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition"
+                >
+                  Go to Dashboard
+                </button>
               </div>
             </div>
 
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
-              <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4">Booking Status</h2>
+              <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4">
+                Booking Progress
+              </h2>
               <div className="space-y-3">
-                <div className="flex items-center gap-3"><div className={`w-3 h-3 rounded-full ${['pending_payment', 'paid', 'confirmed', 'in_progress', 'completed', 'review_eligible'].includes(booking.status) ? 'bg-[#0D9488]' : 'bg-gray-300'}`} /><span className="text-sm text-gray-600 dark:text-gray-300">Booking Created</span></div>
-                <div className="flex items-center gap-3"><div className={`w-3 h-3 rounded-full ${['paid', 'confirmed', 'in_progress', 'completed', 'review_eligible'].includes(booking.status) ? 'bg-[#0D9488]' : 'bg-gray-300'}`} /><span className="text-sm text-gray-600 dark:text-gray-300">Payment Received</span></div>
-                <div className="flex items-center gap-3"><div className={`w-3 h-3 rounded-full ${['confirmed', 'in_progress', 'completed', 'review_eligible'].includes(booking.status) ? 'bg-[#0D9488]' : 'bg-gray-300'}`} /><span className="text-sm text-gray-600 dark:text-gray-300">Confirmed by Provider</span></div>
-                <div className="flex items-center gap-3"><div className={`w-3 h-3 rounded-full ${['completed', 'review_eligible'].includes(booking.status) ? 'bg-[#0D9488]' : 'bg-gray-300'}`} /><span className="text-sm text-gray-600 dark:text-gray-300">Experience Completed</span></div>
-                <div className="flex items-center gap-3"><div className={`w-3 h-3 rounded-full ${booking.status === 'review_eligible' ? 'bg-[#F59E0B]' : booking.status === 'completed' && !booking.reviewSubmitted ? 'bg-[#F59E0B]' : 'bg-gray-300'}`} /><span className="text-sm text-gray-600 dark:text-gray-300">Ready for Review</span></div>
+                <ProgressStep
+                  active={[
+                    'pending_payment',
+                    'paid',
+                    'confirmed',
+                    'in_progress',
+                    'completed',
+                    'review_eligible',
+                  ].includes(booking.status)}
+                  label="Booking Created"
+                />
+                <ProgressStep
+                  active={[
+                    'paid',
+                    'confirmed',
+                    'in_progress',
+                    'completed',
+                    'review_eligible',
+                  ].includes(booking.status)}
+                  label="Payment Received"
+                />
+                <ProgressStep
+                  active={[
+                    'confirmed',
+                    'in_progress',
+                    'completed',
+                    'review_eligible',
+                  ].includes(booking.status)}
+                  label="Confirmed by Provider"
+                />
+                <ProgressStep
+                  active={['completed', 'review_eligible'].includes(
+                    booking.status
+                  )}
+                  label="Experience Completed"
+                />
+                <ProgressStep
+                  gold
+                  active={
+                    booking.status === 'review_eligible' ||
+                    (booking.status === 'completed' &&
+                      !booking.reviewSubmitted)
+                  }
+                  label="Ready for Review"
+                />
               </div>
             </div>
 
             <div className="bg-gradient-to-br from-[#0D9488]/5 to-[#F59E0B]/5 rounded-3xl border border-[#0D9488]/10 p-6">
-              <h3 className="font-bold text-[#374151] dark:text-white mb-2">Need Help?</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Have questions about your booking? Contact our support team.</p>
-              <button onClick={() => navigate('/contact')} className="w-full py-2 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition flex items-center justify-center gap-2"><MessageCircle className="w-4 h-4" /> Contact Support</button>
+              <h3 className="font-bold text-[#374151] dark:text-white mb-2">
+                Need Help?
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Have questions about your booking? Contact our support team.
+              </p>
+              <button
+                onClick={() => navigate('/contact')}
+                className="w-full py-2 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition flex items-center justify-center gap-2"
+              >
+                <MessageCircle className="w-4 h-4" /> Contact Support
+              </button>
             </div>
 
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-4 text-center">
-              <div className="flex items-center justify-center gap-1 text-[#F59E0B] mb-2">{[...Array(5)].map((_, i) => <Star key={i} className="w-4 h-4 fill-[#F59E0B]" />)}</div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Secure booking • Best price guarantee • 24/7 support</p>
+              <div className="flex items-center justify-center gap-1 text-[#F59E0B] mb-2">
+                {[...Array(5)].map((_, i) => (
+                  <Star key={i} className="w-4 h-4 fill-[#F59E0B]" />
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Secure booking • Best price guarantee • 24/7 support
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ✅ FIXED: Print Styles - No jsx attribute warning */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          .no-print {
-            display: none !important;
-          }
-          .min-h-screen {
-            min-height: auto !important;
-            padding: 0 !important;
-          }
-          .max-w-4xl {
-            max-width: 100% !important;
-            margin: 0 !important;
-          }
-          button {
-            display: none !important;
-          }
-          a {
-            text-decoration: none !important;
-          }
-          .bg-white {
-            background: white !important;
-          }
-          .shadow-lg {
-            box-shadow: none !important;
-          }
-          .border {
-            border: 1px solid #e5e7eb !important;
-          }
+          .no-print { display: none !important; }
+          .min-h-screen { min-height: auto !important; padding: 0 !important; }
+          .max-w-4xl { max-width: 100% !important; margin: 0 !important; }
+          button { display: none !important; }
+          a { text-decoration: none !important; }
+          .bg-white { background: white !important; }
+          .shadow-lg { box-shadow: none !important; }
+          .border { border: 1px solid #e5e7eb !important; }
         }
       ` }} />
     </div>
   );
 };
+
+const ProgressStep = ({ active, gold = false, label }) => (
+  <div className="flex items-center gap-3">
+    <div
+      className={`w-3 h-3 rounded-full ${
+        active
+          ? gold
+            ? 'bg-[#F59E0B]'
+            : 'bg-[#0D9488]'
+          : 'bg-gray-300'
+      }`}
+    />
+    <span className="text-sm text-gray-600 dark:text-gray-300">
+      {label}
+    </span>
+  </div>
+);
 
 export default BookingDetails;

@@ -1,4 +1,5 @@
 // frontend/src/pages/admin/Reviews.jsx
+// ✅ Refresh bus wired: subscribes to reviews:admin/reviews, broadcasts on delete/status change
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -27,6 +28,8 @@ import ReviewCard from '../../components/ReviewCard';
 import { getAdminReviews, deleteReview, updateReviewStatus } from '../../services/reviewService';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import useRefreshOn from '../../hooks/useRefreshOn';
+import { refreshMany } from '../../utils/dataRefresh';
 
 // ===============================
 // AI TOUR COLORS
@@ -49,7 +52,7 @@ const AdminReviews = () => {
     total: 0,
     average: 0,
     pending: 0,
-    published: 0,    // ✅ Changed from approved
+    published: 0,
     hidden: 0,
     deleted: 0,
   });
@@ -57,6 +60,9 @@ const AdminReviews = () => {
   useEffect(() => {
     fetchReviews();
   }, []);
+
+  // 🔄 Cross-page sync: refetch when any consumer broadcasts review changes
+  useRefreshOn(['reviews:admin', 'reviews'], fetchReviews);
 
   useEffect(() => {
     filterReviews();
@@ -70,7 +76,6 @@ const AdminReviews = () => {
       setReviews(reviewsList);
       setFilteredReviews(reviewsList);
 
-      // Calculate stats
       if (reviewsList.length > 0) {
         const total = reviewsList.length;
         const sum = reviewsList.reduce((acc, r) => acc + r.rating, 0);
@@ -115,9 +120,13 @@ const AdminReviews = () => {
 
   const handleDelete = async (reviewId) => {
     if (!window.confirm('Are you sure you want to permanently delete this review?')) return;
-    
+
     try {
       await deleteReview(reviewId);
+
+      // 🔄 Broadcast: hidden/deleted reviews affect listing ratings + provider + traveler views
+      refreshMany('reviews', 'reviews:admin', 'reviews:provider', 'listings');
+
       await fetchReviews();
       toast.success('Review deleted successfully');
     } catch (error) {
@@ -126,22 +135,24 @@ const AdminReviews = () => {
     }
   };
 
-  // ✅ FIXED: Use correct status values
   const handleStatusUpdate = async (reviewId, status) => {
     try {
-      // Map frontend display status to backend enum values
       const statusMap = {
         'pending': 'pending',
-        'published': 'published',   // ✅ This is the correct value
-        'approved': 'published',    // ✅ Map approved → published
+        'published': 'published',
+        'approved': 'published',
         'hidden': 'hidden',
         'deleted': 'deleted',
-        'rejected': 'hidden',       // ✅ Map rejected → hidden
+        'rejected': 'hidden',
       };
-      
+
       const backendStatus = statusMap[status] || status;
-      
+
       await updateReviewStatus(reviewId, backendStatus);
+
+      // 🔄 Broadcast: same as delete — status change affects ratings, provider, traveler
+      refreshMany('reviews', 'reviews:admin', 'reviews:provider', 'listings');
+
       await fetchReviews();
       toast.success(`Review ${status} successfully`);
     } catch (error) {
@@ -150,7 +161,6 @@ const AdminReviews = () => {
     }
   };
 
-  // ✅ Get status display name
   const getStatusDisplay = (status) => {
     const map = {
       'pending': 'Pending',

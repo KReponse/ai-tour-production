@@ -1,5 +1,6 @@
 // src/pages/ProviderStatus.jsx
-// ✅ COMPLETE FIXED - Correct API endpoint
+// ✅ Complete: waiting page subscribes to live status updates from admin approvals
+// ✅ Fixed: auto-redirect now fires on live status change (was blocked by stale localStorage)
 
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
@@ -15,6 +16,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import useRefreshOn from '../hooks/useRefreshOn';
 
 // ===============================
 // AI TOUR COLORS
@@ -25,7 +27,6 @@ import { useNavigate } from "react-router-dom";
 // White : #FFFFFF
 // ===============================
 
-// ✅ FIX: Use correct API URL
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const ProviderStatus = () => {
@@ -35,11 +36,9 @@ const ProviderStatus = () => {
   const [error, setError] = useState(null);
   const token = localStorage.getItem("token");
 
-  // ✅ Use ref to prevent duplicate fetches
   const hasFetchedRef = useRef(false);
 
   const fetchStatus = async () => {
-    // ✅ Don't fetch if no token
     if (!token) {
       setError("Please login to view your provider status");
       setLoading(false);
@@ -49,17 +48,13 @@ const ProviderStatus = () => {
     try {
       setLoading(true);
       setError(null);
-      
-      // ✅ FIX: Correct endpoint - /provider-request/my
+
       const endpoint = `${API_URL}/provider-request/my`;
-      console.log('📌 Fetching status from:', endpoint);
-      
+
       const { data } = await axios.get(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
-      console.log("✅ Provider status:", data);
-      
+
       if (data && data.request) {
         setRequest(data.request);
       } else if (data && data.success === false) {
@@ -71,7 +66,7 @@ const ProviderStatus = () => {
       console.error("❌ Error fetching status:", error);
       console.error("❌ Response status:", error.response?.status);
       console.error("❌ Response data:", error.response?.data);
-      
+
       if (error.response?.status === 401) {
         setError("Your session has expired. Please login again.");
         localStorage.removeItem('token');
@@ -88,7 +83,6 @@ const ProviderStatus = () => {
     }
   };
 
-  // ✅ Only fetch once on mount
   useEffect(() => {
     if (!hasFetchedRef.current) {
       hasFetchedRef.current = true;
@@ -96,21 +90,18 @@ const ProviderStatus = () => {
     }
   }, []);
 
-  // ✅ Auto redirect if approved
+  // 🔄 Cross-page sync: admin approval flips this page's status live
+  useRefreshOn(['providers', 'provider-requests', 'users'], fetchStatus);
+
+  // ✅ Auto-redirect on approval
+  // (Now that the subscription can flip status live, localStorage.user is stale.
+  //  We trust the server's `request.status` directly.)
   useEffect(() => {
-    if (request?.status === "approved") {
-      const savedUser = localStorage.getItem('user');
-      let userData = null;
-      try {
-        userData = JSON.parse(savedUser);
-      } catch (e) {
-        console.warn('⚠️ Could not parse user data');
-      }
-      
-      if (userData?.role === "provider" && userData?.verificationStatus === "approved") {
-        console.log('✅ Provider approved, redirecting to dashboard...');
-        navigate("/provider/dashboard");
-      }
+    if (request?.status === 'approved') {
+      const timer = setTimeout(() => {
+        navigate('/provider/dashboard');
+      }, 1500);
+      return () => clearTimeout(timer);
     }
   }, [request, navigate]);
 

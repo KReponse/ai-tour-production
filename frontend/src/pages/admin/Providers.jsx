@@ -1,24 +1,35 @@
 // src/pages/admin/Providers.jsx
-// ✅ COMPLETE FIXED - Added image support for logos with mediaHelpers
+// ============================================================
+// AI TOUR — ADMIN PROVIDERS APPROVAL (FINAL)
+// ============================================================
+// ✅ Broadcasts every approve / reject / needs-info so all
+//    mounted consumers stay in sync without a page reload.
+// ✅ Auto-refreshes when the list is invalidated by another
+//    admin action (from /admin/provider-requests or
+//    /admin/ProviderRequestDetails in another tab).
+// ✅ fetchProviders wrapped in useCallback — stable ref for
+//    the subscription.
+// ✅ Preserves all UI: table, filters, search, avatar/logo,
+//    actions, footer.
+// ============================================================
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import {
   Loader2,
   CheckCircle,
   XCircle,
   Ban,
-  Eye,
   Search,
   Sparkles,
   Users,
-  Mail,
   Shield,
   Clock,
 } from "lucide-react";
 
-// ✅ FIXED: Import media helper for images
-import { getImageUrl } from '../../utils/mediaHelpers';
+import { getImageUrl } from "../../utils/mediaHelpers";
+import useRefreshOn from "../../hooks/useRefreshOn";
+import { refreshMany } from "../../utils/dataRefresh";
 
 // ===============================
 // AI TOUR COLORS
@@ -29,7 +40,8 @@ import { getImageUrl } from '../../utils/mediaHelpers';
 // White : #FFFFFF
 // ===============================
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API =
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const Providers = () => {
   const [providers, setProviders] = useState([]);
@@ -38,19 +50,23 @@ const Providers = () => {
   const [search, setSearch] = useState("");
   const [actionLoading, setActionLoading] = useState(null);
 
-  const token = localStorage.getItem("token");
-
-  const fetchProviders = async () => {
+  // ✅ Stable fetch — used by mount, retry, and subscription
+  const fetchProviders = useCallback(async () => {
     try {
-      const { data } = await axios.get(`${API}/admin/provider-requests`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
+      const token = localStorage.getItem("token");
+      const { data } = await axios.get(
+        `${API}/admin/provider-requests`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
       const requests = data.requests || [];
-      
+
       const transformedProviders = requests.map((req) => ({
         _id: req._id,
-        name: req.businessName || req.fullName || req.user?.name || "Unnamed",
+        name:
+          req.businessName || req.fullName || req.user?.name || "Unnamed",
         email: req.businessEmail || req.user?.email || "",
         phone: req.businessPhone || req.phone || "",
         verificationStatus: req.status || "pending",
@@ -86,7 +102,7 @@ const Providers = () => {
         accountNumber: req.accountNumber,
         mobileMoney: req.mobileMoney,
       }));
-      
+
       setProviders(transformedProviders);
     } catch (err) {
       console.error("❌ Error fetching provider requests:", err);
@@ -94,41 +110,61 @@ const Providers = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchProviders();
+  }, [fetchProviders]);
+
+  // ✅ Auto-refresh when provider data is invalidated elsewhere
+  useRefreshOn(["providers", "provider-requests"], fetchProviders);
+
+  // ✅ Broadcast helper
+  const broadcastProviderChange = useCallback(() => {
+    refreshMany("providers", "provider-requests", "users", "dashboard");
   }, []);
 
-  const updateStatus = async (id, action, reason = "") => {
-    try {
-      setActionLoading(id);
-      
-      const statusMap = {
-        approve: "approved",
-        reject: "rejected",
-        suspend: "rejected",
-      };
-      
-      const status = statusMap[action] || action;
-      
-      await axios.patch(
-        `${API}/admin/provider-requests/${id}`,
-        { 
-          status,
-          adminNotes: reason || (action === "suspend" ? "Account suspended by admin" : "")
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      await fetchProviders();
-    } catch (err) {
-      console.error("❌ Error updating provider status:", err);
-      alert(err.response?.data?.message || "Failed to update provider status");
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  const updateStatus = useCallback(
+    async (id, action, reason = "") => {
+      try {
+        setActionLoading(id);
+
+        const token = localStorage.getItem("token");
+        const statusMap = {
+          approve: "approved",
+          reject: "rejected",
+          suspend: "rejected",
+        };
+
+        const status = statusMap[action] || action;
+
+        await axios.patch(
+          `${API}/admin/provider-requests/${id}`,
+          {
+            status,
+            adminNotes:
+              reason ||
+              (action === "suspend"
+                ? "Account suspended by admin"
+                : ""),
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        await fetchProviders();
+        // ✅ Notify every other consumer
+        broadcastProviderChange();
+      } catch (err) {
+        console.error("❌ Error updating provider status:", err);
+        alert(
+          err.response?.data?.message || "Failed to update provider status"
+        );
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [fetchProviders, broadcastProviderChange]
+  );
 
   const filtered = providers.filter((p) => {
     const name = p?.name || p?.businessName || "";
@@ -186,23 +222,34 @@ const Providers = () => {
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Loading providers...</p>
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+          Loading providers...
+        </p>
       </div>
     );
   }
 
   const statusCounts = {
     all: providers.length,
-    pending: providers.filter(p => p.verificationStatus === 'pending').length,
-    approved: providers.filter(p => p.verificationStatus === 'approved').length,
-    rejected: providers.filter(p => p.verificationStatus === 'rejected').length,
-    suspended: providers.filter(p => p.verificationStatus === 'suspended').length,
-    needs_information: providers.filter(p => p.verificationStatus === 'needs_information').length,
+    pending: providers.filter(
+      (p) => p.verificationStatus === "pending"
+    ).length,
+    approved: providers.filter(
+      (p) => p.verificationStatus === "approved"
+    ).length,
+    rejected: providers.filter(
+      (p) => p.verificationStatus === "rejected"
+    ).length,
+    suspended: providers.filter(
+      (p) => p.verificationStatus === "suspended"
+    ).length,
+    needs_information: providers.filter(
+      (p) => p.verificationStatus === "needs_information"
+    ).length,
   };
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto animate-fade-in">
-
       {/* HEADER */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
@@ -227,7 +274,14 @@ const Providers = () => {
       {/* FILTER BAR */}
       <div className="flex flex-col md:flex-row gap-3 justify-between">
         <div className="flex gap-2 flex-wrap">
-          {["all", "pending", "approved", "rejected", "suspended", "needs_information"].map((s) => (
+          {[
+            "all",
+            "pending",
+            "approved",
+            "rejected",
+            "suspended",
+            "needs_information",
+          ].map((s) => (
             <button
               key={s}
               onClick={() => setFilter(s)}
@@ -237,7 +291,8 @@ const Providers = () => {
                   : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
               }`}
             >
-              {s === "needs_information" ? "Needs Info" : s} ({statusCounts[s] || 0})
+              {s === "needs_information" ? "Needs Info" : s} (
+              {statusCounts[s] || 0})
             </button>
           ))}
         </div>
@@ -259,11 +314,21 @@ const Providers = () => {
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Provider/Business</th>
-              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Email</th>
-              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Type</th>
-              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Status</th>
-              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">Actions</th>
+              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Provider/Business
+              </th>
+              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Email
+              </th>
+              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Type
+              </th>
+              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Status
+              </th>
+              <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Actions
+              </th>
             </tr>
           </thead>
 
@@ -275,40 +340,47 @@ const Providers = () => {
                     <Users className="w-8 h-8 text-gray-400" />
                   </div>
                   <p>No provider requests found</p>
-                  <p className="text-sm">Try adjusting your filters or search</p>
+                  <p className="text-sm">
+                    Try adjusting your filters or search
+                  </p>
                 </td>
               </tr>
             ) : (
               filtered.map((p) => {
                 const badge = statusBadge(p.verificationStatus);
                 const StatusIcon = badge.icon;
-
-                // ✅ Get logo URL using media helper
                 const logoUrl = p.logo ? getImageUrl(p.logo) : null;
 
                 return (
-                  <tr key={p._id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200">
+                  <tr
+                    key={p._id}
+                    className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200"
+                  >
                     <td className="p-4">
                       <div className="flex items-center gap-3">
-                        {/* ✅ Logo with image support */}
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white text-xs font-bold overflow-hidden flex-shrink-0">
                           {logoUrl ? (
-                            <img 
-                              src={logoUrl} 
+                            <img
+                              src={logoUrl}
                               alt={p.businessName || p.name}
                               className="w-full h-full object-cover"
                               onError={(e) => {
-                                e.target.style.display = 'none';
+                                e.target.style.display = "none";
                                 const parent = e.target.parentElement;
                                 if (parent) {
-                                  const initial = (p.businessName || p.name || 'B').charAt(0);
+                                  const initial = (
+                                    p.businessName ||
+                                    p.name ||
+                                    "B"
+                                  ).charAt(0);
                                   parent.textContent = initial;
-                                  parent.className = 'w-8 h-8 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white text-xs font-bold flex-shrink-0';
+                                  parent.className =
+                                    "w-8 h-8 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white text-xs font-bold flex-shrink-0";
                                 }
                               }}
                             />
                           ) : (
-                            (p.businessName || p.name || 'B').charAt(0)
+                            (p.businessName || p.name || "B").charAt(0)
                           )}
                         </div>
                         <div>
@@ -321,20 +393,24 @@ const Providers = () => {
                         </div>
                       </div>
                     </td>
-                    <td className="p-4 text-gray-500 dark:text-gray-400 text-sm">{p.email}</td>
+                    <td className="p-4 text-gray-500 dark:text-gray-400 text-sm">
+                      {p.email}
+                    </td>
                     <td className="p-4 text-sm text-gray-500 dark:text-gray-400 capitalize">
                       {p.businessType?.replace(/_/g, " ") || "—"}
                     </td>
 
-                    {/* STATUS */}
                     <td className="p-4">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${badge.bg} ${badge.text}`}>
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${badge.bg} ${badge.text}`}
+                      >
                         <StatusIcon className="w-3.5 h-3.5" />
-                        {p.verificationStatus === "needs_information" ? "Needs Info" : p.verificationStatus}
+                        {p.verificationStatus === "needs_information"
+                          ? "Needs Info"
+                          : p.verificationStatus}
                       </span>
                     </td>
 
-                    {/* ACTIONS */}
                     <td className="p-4 flex flex-wrap gap-2">
                       <button
                         onClick={() => updateStatus(p._id, "approve")}
@@ -352,7 +428,12 @@ const Providers = () => {
                       <button
                         onClick={() => {
                           const reason = prompt("Rejection reason:");
-                          if (reason !== null) updateStatus(p._id, "reject", reason || "No reason provided");
+                          if (reason !== null)
+                            updateStatus(
+                              p._id,
+                              "reject",
+                              reason || "No reason provided"
+                            );
                         }}
                         disabled={actionLoading === p._id}
                         className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all duration-300 text-sm font-medium disabled:opacity-50"
@@ -363,8 +444,15 @@ const Providers = () => {
 
                       <button
                         onClick={() => {
-                          const reason = prompt("Reason for requesting more information:");
-                          if (reason !== null) updateStatus(p._id, "needs_information", reason || "More information required");
+                          const reason = prompt(
+                            "Reason for requesting more information:"
+                          );
+                          if (reason !== null)
+                            updateStatus(
+                              p._id,
+                              "needs_information",
+                              reason || "More information required"
+                            );
                         }}
                         disabled={actionLoading === p._id}
                         className="bg-[#F59E0B] hover:bg-[#F59E0B]/80 text-white px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all duration-300 text-sm font-medium disabled:opacity-50"
@@ -380,9 +468,10 @@ const Providers = () => {
           </tbody>
         </table>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
-          <span>Showing {filtered.length} of {providers.length} provider requests</span>
+          <span>
+            Showing {filtered.length} of {providers.length} provider requests
+          </span>
           <span>Last updated: {new Date().toLocaleString()}</span>
         </div>
       </div>

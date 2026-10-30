@@ -1,10 +1,5 @@
 // frontend/src/pages/Reviews.jsx
-// ✅ COMPLETE FIXED - Strategy C (Load More) with useLoadMore hook
-// ✅ Added: useLoadMore hook for Load More pagination
-// ✅ Added: LoadingSkeleton for initial load
-// ✅ Added: BackToTop button
-// ✅ Added: handleHelpfulToggle for Helpful button
-// ✅ FIXED: Infinite loop by stabilizing dependencies with useRef
+// ✅ Complete: Community Reviews with shared traveler tabs
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -32,6 +27,7 @@ import { toggleHelpful } from '../services/reviewService';
 import useLoadMore from '../hooks/useLoadMore';
 import LoadingSkeleton from '../components/ui/LoadingSkeleton';
 import BackToTop from '../components/ui/BackToTop';
+import TravelerTabs from '../components/navigation/TravelerTabs';
 import { PAGINATION } from '../utils/constants';
 import toast from 'react-hot-toast';
 
@@ -102,11 +98,11 @@ const Reviews = () => {
     }
 
     const response = await axios.get(`${API_URL}/public/reviews?${queryParams}`);
-    
+
     if (response.data.success) {
       return response.data;
     }
-    
+
     throw new Error('Failed to fetch reviews');
   }, [filters]);
 
@@ -163,12 +159,10 @@ const Reviews = () => {
 
   // ✅ FIXED: Reset when filters change - with debounce to prevent rapid calls
   useEffect(() => {
-    // Clear any pending timeout
     if (resetTimeoutRef.current) {
       clearTimeout(resetTimeoutRef.current);
     }
 
-    // Debounce the reset to prevent multiple rapid calls
     resetTimeoutRef.current = setTimeout(() => {
       if (isMountedRef.current) {
         reset();
@@ -184,12 +178,10 @@ const Reviews = () => {
 
   // ✅ FIXED: Handle search with debounce - stabilized
   useEffect(() => {
-    // Clear any pending search timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    // Debounce search to prevent rapid API calls
     searchTimeoutRef.current = setTimeout(() => {
       if (isMountedRef.current && filters.search !== undefined) {
         reset();
@@ -220,16 +212,13 @@ const Reviews = () => {
   // ✅ handleHelpfulToggle - STABLE with useCallback
   const handleHelpfulToggle = useCallback(async (reviewId) => {
     try {
-      console.log('📤 [Reviews] Toggling helpful for review:', reviewId);
-      
       const result = await toggleHelpful(reviewId);
-      
+
       if (result && result.success) {
-        // Refresh the reviews list to update the count
         await refresh();
         return result;
       }
-      
+
       return false;
     } catch (error) {
       console.error('❌ [Reviews] Error toggling helpful:', error);
@@ -273,6 +262,7 @@ const Reviews = () => {
   if (loading && reviews.length === 0) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <TravelerTabs variant="reviews" />
         <div className="text-center">
           <div className="h-10 w-48 bg-gray-200 dark:bg-gray-700 rounded mx-auto mb-2 animate-pulse" />
           <div className="h-4 w-64 bg-gray-200 dark:bg-gray-700 rounded mx-auto animate-pulse" />
@@ -287,20 +277,23 @@ const Reviews = () => {
   // ===============================
   if (error) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16 text-center">
-        <div className="w-20 h-20 mx-auto rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-          <AlertCircle className="w-10 h-10 text-red-500" />
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <TravelerTabs variant="reviews" />
+        <div className="text-center py-8">
+          <div className="w-20 h-20 mx-auto rounded-full bg-red-500/10 flex items-center justify-center mb-4">
+            <AlertCircle className="w-10 h-10 text-red-500" />
+          </div>
+          <h3 className="text-xl font-bold text-[#374151] dark:text-white mb-2">
+            Unable to Load Reviews
+          </h3>
+          <p className="text-gray-500 dark:text-gray-400">{error}</p>
+          <button
+            onClick={refresh}
+            className="mt-4 px-6 py-2 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition"
+          >
+            Try Again
+          </button>
         </div>
-        <h3 className="text-xl font-bold text-[#374151] dark:text-white mb-2">
-          Unable to Load Reviews
-        </h3>
-        <p className="text-gray-500 dark:text-gray-400">{error}</p>
-        <button
-          onClick={refresh}
-          className="mt-4 px-6 py-2 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/90 transition"
-        >
-          Try Again
-        </button>
       </div>
     );
   }
@@ -310,6 +303,9 @@ const Reviews = () => {
   // ===============================
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+
+      {/* ✅ Shared reviews tabs */}
+      <TravelerTabs variant="reviews" />
 
       {/* Header */}
       <div className="text-center">
@@ -456,7 +452,6 @@ const Reviews = () => {
             />
           ))}
 
-          {/* Load More Button */}
           {hasMore && (
             <div className="text-center pt-4">
               <Button
@@ -476,7 +471,6 @@ const Reviews = () => {
             </div>
           )}
 
-          {/* End of results */}
           {!hasMore && reviews.length > 0 && (
             <div className="text-center py-4 text-gray-400 text-sm">
               You've seen all {total} reviews 🎉
@@ -485,7 +479,6 @@ const Reviews = () => {
         </div>
       )}
 
-      {/* Back to Top */}
       <BackToTop />
     </div>
   );

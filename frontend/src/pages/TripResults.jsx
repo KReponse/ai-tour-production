@@ -1,30 +1,38 @@
 // src/pages/TripResults.jsx
-// ✅ UPDATED - Full cover media (image + video) support
+// ============================================================
+// AI TOUR — TRIP RESULTS PAGE
+// ============================================================
+// ✅ Removed internal media labels ("Video") from cards and
+//    inline pills next to tour titles.
+// ✅ Removed media debug console.log/console.error.
+// ✅ Removed "Pending" status badge — internal moderation
+//    state not shown to travelers.
+// ✅ Removed Views badge on the media — vanity metric, not a
+//    booking decision factor.
+// ✅ Preserved: filtering (search/price/location), sorting
+//    (6 options), grid/list toggle, media rendering with
+//    image + video fallback, CardImage contract, includes
+//    chips, rating display, price, "View Deal" CTA, brand
+//    colors, responsive layout, routing.
+// ============================================================
 
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { 
-  Filter, 
-  SortAsc, 
-  Clock, 
-  Wallet, 
-  Star, 
-  Wifi, 
-  Coffee, 
-  Car, 
-  Hotel, 
+import {
+  Filter,
+  SortAsc,
+  Clock,
+  Star,
+  Coffee,
+  Car,
+  Hotel,
   MapPin,
   Sparkles,
-  Loader2,
   TrendingUp,
   ChevronDown,
   Grid3x3,
   List,
   X,
-  Check,
-  Eye,
-  Play,
-  Video,
 } from 'lucide-react';
 import Card, { CardImage, CardContent } from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -39,7 +47,23 @@ import { getTours } from '../services/tourService';
 // White : #FFFFFF
 // ===============================
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL =
+  import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+
+const VIDEO_EXTENSIONS = [
+  '.mp4',
+  '.mov',
+  '.webm',
+  '.avi',
+  '.mkv',
+  '.m4v',
+  '.3gp',
+  '.mpeg',
+  '.mpg',
+];
 
 const TripResults = () => {
   const location = useLocation();
@@ -55,7 +79,6 @@ const TripResults = () => {
     location: '',
   });
 
-  // Get search query from URL
   const searchParams = new URLSearchParams(location.search);
   const searchQuery = searchParams.get('search') || '';
 
@@ -65,14 +88,14 @@ const TripResults = () => {
 
   useEffect(() => {
     applyFilters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tours, sortBy, filters, searchQuery]);
 
   const fetchTours = async () => {
     try {
       setLoading(true);
       const data = await getTours();
-      console.log('✅ Tours from backend:', data);
-      
+
       if (data && data.tours) {
         setTours(data.tours);
       } else if (data && Array.isArray(data)) {
@@ -80,8 +103,8 @@ const TripResults = () => {
       } else {
         setTours([]);
       }
-    } catch (error) {
-      console.error('❌ Error fetching tours:', error);
+    } catch {
+      setTours([]);
     } finally {
       setLoading(false);
     }
@@ -90,29 +113,28 @@ const TripResults = () => {
   const applyFilters = () => {
     let result = [...tours];
 
-    // Search filter
     if (searchQuery) {
-      result = result.filter(tour =>
-        tour.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tour.location?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tour.description?.toLowerCase().includes(searchQuery.toLowerCase())
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (tour) =>
+          tour.title?.toLowerCase().includes(q) ||
+          tour.location?.toLowerCase().includes(q) ||
+          tour.description?.toLowerCase().includes(q)
       );
     }
 
-    // Price filter
-    result = result.filter(tour =>
-      tour.price >= filters.minPrice &&
-      tour.price <= filters.maxPrice
+    result = result.filter(
+      (tour) =>
+        tour.price >= filters.minPrice && tour.price <= filters.maxPrice
     );
 
-    // Location filter
     if (filters.location) {
-      result = result.filter(tour =>
-        tour.location?.toLowerCase().includes(filters.location.toLowerCase())
+      const q = filters.location.toLowerCase();
+      result = result.filter((tour) =>
+        tour.location?.toLowerCase().includes(q)
       );
     }
 
-    // Sort
     switch (sortBy) {
       case 'recommended':
         result.sort((a, b) => {
@@ -128,13 +150,17 @@ const TripResults = () => {
         result.sort((a, b) => b.price - a.price);
         break;
       case 'rating':
-        result.sort((a, b) => (b.averageRating || 0) - (a.averageRating || 0));
+        result.sort(
+          (a, b) => (b.averageRating || 0) - (a.averageRating || 0)
+        );
         break;
       case 'popular':
         result.sort((a, b) => (b.views || 0) - (a.views || 0));
         break;
       case 'newest':
-        result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        result.sort(
+          (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+        );
         break;
       default:
         break;
@@ -143,137 +169,128 @@ const TripResults = () => {
     setFilteredTours(result);
   };
 
-  const getImageUrl = (image) => {
+  // ===============================
+  // MEDIA HELPERS
+  // ===============================
+  const buildUrl = (image) => {
     if (!image) return null;
     if (image.startsWith('http')) return image;
     if (image.startsWith('/')) return image;
     return `${API_URL}/uploads/${image}`;
   };
 
-  // ✅ Check if a string is a video file
   const isVideoFile = (url) => {
     if (!url) return false;
-    const videoExtensions = ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.m4v', '.3gp', '.mpeg', '.mpg'];
-    return videoExtensions.some(ext => url.toLowerCase().endsWith(ext));
+    return VIDEO_EXTENSIONS.some((ext) =>
+      url.toLowerCase().endsWith(ext)
+    );
   };
 
-  // ✅ Get cover media type (image or video)
   const getCoverMediaType = (tour) => {
     if (!tour) return 'image';
-    
-    // Check explicit coverMediaType
+
     if (tour.coverMediaType === 'video') return 'video';
     if (tour.coverMediaType === 'image') return 'image';
-    
-    // Check if coverMedia is a video file
+
     if (tour.coverMedia && isVideoFile(tour.coverMedia)) return 'video';
-    
-    // Check if videos array exists
     if (tour.videos && tour.videos.length > 0) return 'video';
-    
-    // Check galleryImages for videos
+
     if (tour.galleryImages && tour.galleryImages.length > 0) {
       for (const img of tour.galleryImages) {
         if (isVideoFile(img)) return 'video';
       }
     }
-    
+
     return 'image';
   };
 
-  // ✅ Get cover video URL
   const getCoverVideo = (tour) => {
     if (!tour) return null;
-    
+
     if (tour.coverMediaType === 'video' && tour.coverMedia) {
-      return getImageUrl(tour.coverMedia);
+      return buildUrl(tour.coverMedia);
     }
     if (tour.coverMedia && isVideoFile(tour.coverMedia)) {
-      return getImageUrl(tour.coverMedia);
+      return buildUrl(tour.coverMedia);
     }
     if (tour.videos && tour.videos.length > 0) {
-      return getImageUrl(tour.videos[0]);
+      return buildUrl(tour.videos[0]);
     }
     if (tour.galleryImages && tour.galleryImages.length > 0) {
       for (const img of tour.galleryImages) {
         if (isVideoFile(img)) {
-          return getImageUrl(img);
+          return buildUrl(img);
         }
       }
     }
     return null;
   };
 
-  // ✅ Get tour media (supports both image and video)
   const getTourMedia = (tour) => {
     if (!tour) {
       return {
-        url: 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500',
         isVideo: false,
         videoUrl: null,
-        poster: 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500',
-        mediaType: 'image'
+        poster: FALLBACK_IMAGE,
+        imageUrl: FALLBACK_IMAGE,
       };
     }
 
     const coverType = getCoverMediaType(tour);
     const videoUrl = getCoverVideo(tour);
-    
-    // Get poster image
+
     let poster = null;
     if (tour.coverImage) {
-      poster = getImageUrl(tour.coverImage);
-    } else if (tour.galleryImages && tour.galleryImages.length > 0) {
-      poster = getImageUrl(tour.galleryImages[0]);
-    } else if (tour.images && tour.images.length > 0) {
-      poster = getImageUrl(tour.images[0]);
+      poster = buildUrl(tour.coverImage);
+    } else if (
+      Array.isArray(tour.galleryImages) &&
+      tour.galleryImages.length
+    ) {
+      poster = buildUrl(tour.galleryImages[0]);
+    } else if (Array.isArray(tour.images) && tour.images.length) {
+      poster = buildUrl(tour.images[0]);
     } else if (tour.image) {
-      poster = getImageUrl(tour.image);
+      poster = buildUrl(tour.image);
     }
-    
-    const defaultImage = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-    
-    // If it's a video, return video data
+
     if (coverType === 'video' && videoUrl) {
       return {
-        url: videoUrl,
         isVideo: true,
-        videoUrl: videoUrl,
-        poster: poster || defaultImage,
-        mediaType: 'video'
+        videoUrl,
+        poster: poster || FALLBACK_IMAGE,
+        imageUrl: poster || FALLBACK_IMAGE,
       };
     }
-    
-    // Otherwise return image
-    let imageUrl = defaultImage;
+
+    let imageUrl = FALLBACK_IMAGE;
     if (tour.coverImage) {
-      imageUrl = getImageUrl(tour.coverImage) || defaultImage;
-    } else if (tour.galleryImages && tour.galleryImages.length > 0) {
-      imageUrl = getImageUrl(tour.galleryImages[0]) || defaultImage;
-    } else if (tour.images && tour.images.length > 0) {
-      imageUrl = getImageUrl(tour.images[0]) || defaultImage;
+      imageUrl = buildUrl(tour.coverImage) || FALLBACK_IMAGE;
+    } else if (
+      Array.isArray(tour.galleryImages) &&
+      tour.galleryImages.length
+    ) {
+      imageUrl = buildUrl(tour.galleryImages[0]) || FALLBACK_IMAGE;
+    } else if (Array.isArray(tour.images) && tour.images.length) {
+      imageUrl = buildUrl(tour.images[0]) || FALLBACK_IMAGE;
     } else if (tour.image) {
-      imageUrl = getImageUrl(tour.image) || defaultImage;
+      imageUrl = buildUrl(tour.image) || FALLBACK_IMAGE;
     }
-    
+
     return {
-      url: imageUrl,
       isVideo: false,
       videoUrl: null,
       poster: imageUrl,
-      mediaType: 'image'
+      imageUrl,
     };
-  };
-
-  const getTourImage = (tour) => {
-    const media = getTourMedia(tour);
-    return media.url;
   };
 
   const getIncludes = (tour) => {
     const items = [];
     if (tour.included) {
-      const includedItems = tour.included.split(',').map(s => s.trim()).filter(Boolean);
+      const includedItems = tour.included
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       items.push(...includedItems);
     }
     if (items.length === 0) {
@@ -294,7 +311,9 @@ const TripResults = () => {
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488]/20" />
           <div className="absolute inset-0 rounded-full border-4 border-[#0D9488] border-t-transparent animate-spin" />
         </div>
-        <p className="mt-4 text-gray-500 dark:text-gray-400">Loading trips...</p>
+        <p className="mt-4 text-gray-500 dark:text-gray-400">
+          Loading trips...
+        </p>
       </div>
     );
   }
@@ -313,7 +332,9 @@ const TripResults = () => {
                 Trip Results
               </h1>
               <p className="text-gray-500 dark:text-gray-400">
-                {searchQuery ? `Results for "${searchQuery}"` : `Found ${filteredTours.length} trips`}
+                {searchQuery
+                  ? `Results for "${searchQuery}"`
+                  : `Found ${filteredTours.length} trips`}
               </p>
             </div>
           </div>
@@ -324,44 +345,50 @@ const TripResults = () => {
         </div>
       </div>
 
-      {/* FILTERS AND SORT */}
+      {/* FILTERS + SORT */}
       <div className="flex flex-wrap gap-4 items-center justify-between">
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={() => setShowFilters(!showFilters)}
             className="border-[#0D9488] text-[#0D9488] hover:bg-[#0D9488]/10"
           >
             <Filter className="w-4 h-4 mr-2" />
             Filters
-            {showFilters ? <ChevronDown className="w-4 h-4 ml-1 rotate-180" /> : <ChevronDown className="w-4 h-4 ml-1" />}
+            <ChevronDown
+              className={`w-4 h-4 ml-1 ${
+                showFilters ? 'rotate-180' : ''
+              }`}
+            />
           </Button>
-          
+
           <div className="flex border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
             <button
               onClick={() => setView('grid')}
               className={`px-3 py-2 transition-all duration-300 ${
-                view === 'grid' 
-                  ? 'bg-[#0D9488] text-white' 
+                view === 'grid'
+                  ? 'bg-[#0D9488] text-white'
                   : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
+              aria-label="Grid view"
             >
               <Grid3x3 className="w-4 h-4" />
             </button>
             <button
               onClick={() => setView('list')}
               className={`px-3 py-2 transition-all duration-300 ${
-                view === 'list' 
-                  ? 'bg-[#0D9488] text-white' 
+                view === 'list'
+                  ? 'bg-[#0D9488] text-white'
                   : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
+              aria-label="List view"
             >
               <List className="w-4 h-4" />
             </button>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
           <SortAsc className="w-4 h-4 text-gray-400" />
           <select
@@ -391,7 +418,12 @@ const TripResults = () => {
                 type="number"
                 min="0"
                 value={filters.minPrice}
-                onChange={(e) => setFilters({ ...filters, minPrice: Number(e.target.value) })}
+                onChange={(e) =>
+                  setFilters({
+                    ...filters,
+                    minPrice: Number(e.target.value),
+                  })
+                }
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
               />
             </div>
@@ -403,7 +435,12 @@ const TripResults = () => {
                 type="number"
                 min="0"
                 value={filters.maxPrice}
-                onChange={(e) => setFilters({ ...filters, maxPrice: Number(e.target.value) })}
+                onChange={(e) =>
+                  setFilters({
+                    ...filters,
+                    maxPrice: Number(e.target.value),
+                  })
+                }
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
               />
             </div>
@@ -415,14 +452,18 @@ const TripResults = () => {
                 type="text"
                 placeholder="Search location..."
                 value={filters.location}
-                onChange={(e) => setFilters({ ...filters, location: e.target.value })}
+                onChange={(e) =>
+                  setFilters({ ...filters, location: e.target.value })
+                }
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none transition"
               />
             </div>
           </div>
           <div className="mt-4 flex justify-end">
             <Button
-              onClick={() => setFilters({ minPrice: 0, maxPrice: 5000, location: '' })}
+              onClick={() =>
+                setFilters({ minPrice: 0, maxPrice: 5000, location: '' })
+              }
               className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
             >
               <X className="w-4 h-4 mr-2" />
@@ -442,11 +483,19 @@ const TripResults = () => {
             No Tours Found
           </h2>
           <p className="text-gray-500 dark:text-gray-400">
-            {searchQuery ? `No results found for "${searchQuery}"` : 'Try adjusting your filters or search terms'}
+            {searchQuery
+              ? `No results found for "${searchQuery}"`
+              : 'Try adjusting your filters or search terms'}
           </p>
         </div>
       ) : (
-        <div className={`grid ${view === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'} gap-6`}>
+        <div
+          className={`grid ${
+            view === 'grid'
+              ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+              : 'grid-cols-1'
+          } gap-6`}
+        >
           {filteredTours.map((tour) => {
             const includes = getIncludes(tour);
             const media = getTourMedia(tour);
@@ -454,61 +503,32 @@ const TripResults = () => {
 
             return (
               <Link to={`/tour/${tour._id}`} key={tour._id}>
-                <Card hover className="h-full border border-gray-100 dark:border-gray-800 rounded-3xl overflow-hidden">
+                <Card
+                  hover
+                  className="h-full border border-gray-100 dark:border-gray-800 rounded-3xl overflow-hidden"
+                >
                   <div className="relative">
-                    {/* ✅ Use CardImage with video support */}
-                    <CardImage 
-                      src={media.isVideo ? media.videoUrl : media.url}
+                    <CardImage
+                      src={media.isVideo ? media.videoUrl : media.imageUrl}
                       alt={tour.title}
                       height="h-56"
                       seed={tour._id}
                       videoPoster={media.poster}
                     />
-                    
-                    {/* Video indicator */}
-                    {media.isVideo && (
-                      <div className="absolute bottom-4 left-4 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Play className="w-3 h-3" />
-                        Video
-                      </div>
-                    )}
-                    
-                    {/* Status Badge */}
-                    {tour.status === 'pending' && (
-                      <div className="absolute top-4 left-4 bg-[#F59E0B] text-white px-3 py-1 rounded-full text-xs font-bold">
-                        Pending
-                      </div>
-                    )}
-                    
-                    {/* Rating Badge */}
+
                     <div className="absolute top-4 right-4 flex items-center gap-1 bg-white/90 dark:bg-gray-900/90 backdrop-blur px-2 py-1 rounded-lg shadow-lg">
                       <Star className="w-4 h-4 text-[#F59E0B] fill-[#F59E0B]" />
                       <span className="text-sm font-bold text-[#374151] dark:text-white">
                         {ratingDisplay}
                       </span>
                     </div>
-                    
-                    {/* Views Badge */}
-                    {tour.views > 0 && (
-                      <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur px-2 py-1 rounded-lg text-white text-xs flex items-center gap-1">
-                        <Eye className="w-3 h-3" />
-                        {tour.views}
-                      </div>
-                    )}
                   </div>
+
                   <CardContent className="p-5">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-lg font-bold text-[#374151] dark:text-white line-clamp-1">
-                        {tour.title}
-                      </h3>
-                      {media.isVideo && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] text-[#0D9488] bg-[#0D9488]/10 px-1.5 py-0.5 rounded">
-                          <Play className="w-3 h-3" />
-                          Video
-                        </span>
-                      )}
-                    </div>
-                    
+                    <h3 className="text-lg font-bold text-[#374151] dark:text-white line-clamp-1 mb-2">
+                      {tour.title}
+                    </h3>
+
                     <div className="flex items-center text-gray-500 dark:text-gray-400 text-sm mb-3">
                       <MapPin className="w-4 h-4 mr-1 text-[#0D9488]" />
                       <span>{tour.location}</span>
@@ -521,11 +541,22 @@ const TripResults = () => {
 
                     <div className="flex flex-wrap gap-2 mb-4">
                       {includes.map((item, idx) => (
-                        <span key={idx} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300">
-                          {item.includes('Hotel') && <Hotel className="w-3 h-3 inline mr-1 text-[#0D9488]" />}
-                          {item.includes('Breakfast') && <Coffee className="w-3 h-3 inline mr-1 text-[#F59E0B]" />}
-                          {item.includes('Transport') && <Car className="w-3 h-3 inline mr-1 text-[#0D9488]" />}
-                          {item.includes('Tour') && <MapPin className="w-3 h-3 inline mr-1 text-[#0D9488]" />}
+                        <span
+                          key={`${item}-${idx}`}
+                          className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300"
+                        >
+                          {item.includes('Hotel') && (
+                            <Hotel className="w-3 h-3 inline mr-1 text-[#0D9488]" />
+                          )}
+                          {item.includes('Breakfast') && (
+                            <Coffee className="w-3 h-3 inline mr-1 text-[#F59E0B]" />
+                          )}
+                          {item.includes('Transport') && (
+                            <Car className="w-3 h-3 inline mr-1 text-[#0D9488]" />
+                          )}
+                          {item.includes('Tour') && (
+                            <MapPin className="w-3 h-3 inline mr-1 text-[#0D9488]" />
+                          )}
                           {item}
                         </span>
                       ))}
@@ -533,11 +564,15 @@ const TripResults = () => {
 
                     <div className="flex justify-between items-center">
                       <div>
-                        <div className="text-2xl font-bold text-[#0D9488]">${tour.price}</div>
-                        <div className="text-xs text-gray-400">per person</div>
+                        <div className="text-2xl font-bold text-[#0D9488]">
+                          ${tour.price}
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          per person
+                        </div>
                       </div>
-                      <Button 
-                        variant="primary" 
+                      <Button
+                        variant="primary"
                         size="sm"
                         className="bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white shadow-lg shadow-[#0D9488]/30 hover:scale-[1.02] transition"
                       >

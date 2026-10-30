@@ -2,306 +2,2814 @@
 
 import mongoose from "mongoose";
 
-const earningSchema = new mongoose.Schema(
-{
-  provider: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
-  },
+const { Schema } = mongoose;
 
-  booking: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Booking",
-    required: true,
-  },
+/**
+ * ============================================================
+ * AI TOUR RWANDA
+ * EARNING MODEL
+ * ============================================================
+ *
+ * Financial ledger created from a successful Booking payment.
+ *
+ * MVP BUSINESS RULES
+ *
+ * - Platform commission = 0%
+ * - Provider receives 100%
+ * - One earning per booking
+ * - Payment and withdrawal are separate financial operations
+ * - Failed payout NEVER reverses a successful payment
+ * - Withdrawal reservation affects ONLY the requested amount
+ * - Refunds require a confirmed payment/refund flow
+ *
+ * FINANCIAL FLOW
+ *
+ * Payment PAID
+ *      ↓
+ * Earning AVAILABLE
+ *      ↓
+ * Withdrawal PENDING
+ *      ↓
+ * Reserve exact earning amount
+ *      ↓
+ * Withdrawal APPROVED
+ *      ↓
+ * External payout
+ *      ↓
+ * Withdrawal PAID
+ *      ↓
+ * Reserved earning allocation = PAID
+ *
+ * If payout is rejected/failed before money is sent:
+ *
+ * Reserved earning allocation
+ *      ↓
+ * RELEASED
+ *      ↓
+ * Amount returns to AVAILABLE
+ *
+ * IMPORTANT
+ *
+ * This model does NOT send money.
+ * It only records and controls provider earning balances.
+ * ============================================================
+ */
 
-  payment: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Payment",
-  },
+// ============================================================
+// CONSTANTS
+// ============================================================
 
-  // ✅ Amount breakdown
-  amount: {
-    type: Number,
-    required: true,
-    min: [0.01, "Amount must be greater than 0"],
-  },
+const EARNING_STATUSES = [
+  "pending",
+  "available",
+  "withdrawn",
+  "failed",
+  "refunded",
+];
 
-  // ✅ Platform fee (10% by default)
-  platformFee: {
-    type: Number,
-    default: 0,
-    min: [0, "Platform fee cannot be negative"],
-  },
+const WITHDRAWAL_ALLOCATION_STATUSES = [
+  "reserved",
+  "processing",
+  "paid",
+  "failed",
+  "released",
+];
 
-  // ✅ Net amount after fees (amount - platformFee)
-  netAmount: {
-    type: Number,
-    default: 0,
-    min: [0, "Net amount cannot be negative"],
-  },
+const BOOKING_TYPES = [
+  "listing",
+];
 
-  // ✅ Booking type for analytics
-  bookingType: {
-    type: String,
-    enum: ["listing", "tour"],
-    required: true,
-  },
+const CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "RWF",
+];
 
-  // ✅ Status tracking
-  status: {
-    type: String,
-    enum: [
-      "pending",      // Initial state, waiting for confirmation
-      "available",    // Ready for withdrawal
-      "withdrawn",    // Successfully withdrawn
-      "failed",       // Withdrawal failed
-      "refunded",     // Earning refunded (if booking cancelled)
-    ],
-    default: "pending",
-  },
+// ============================================================
+// MONEY HELPERS
+// ============================================================
 
-  // ✅ Withdrawal reference
-  withdrawal: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Withdrawal",
-  },
+const roundMoney = (value) => {
+  const number = Number(value);
 
-  // ✅ Payment reference
-  paymentId: {
-    type: String,
-  },
-
-  withdrawnAt: {
-    type: Date,
-  },
-
-  // ✅ For testing
-  isTestMode: {
-    type: Boolean,
-    default: false,
-  },
-
-  // ✅ Metadata for additional context
-  metadata: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    default: {},
-  },
-},
-{
-  timestamps: true,
-});
-
-// =========================
-// ✅ INDEXES
-// =========================
-
-// Primary lookups
-earningSchema.index({ provider: 1, createdAt: -1 });
-earningSchema.index({ booking: 1 });
-earningSchema.index({ payment: 1 });
-
-// Status filters
-earningSchema.index({ status: 1, createdAt: -1 });
-earningSchema.index({ provider: 1, status: 1 });
-
-// Date range queries
-earningSchema.index({ createdAt: -1 });
-earningSchema.index({ withdrawnAt: -1 });
-
-// Withdrawal lookup
-earningSchema.index({ withdrawal: 1 });
-
-// Compound index for provider earnings summary
-earningSchema.index({ provider: 1, status: 1, createdAt: -1 });
-
-// =========================
-// ✅ VIRTUALS
-// =========================
-
-// Check if earning can be withdrawn
-earningSchema.virtual("isWithdrawable").get(function() {
-  return this.status === "available" && this.amount > 0 && !this.withdrawal;
-});
-
-// Check if earning is processing
-earningSchema.virtual("isProcessing").get(function() {
-  return this.status === "pending";
-});
-
-// Check if earning is already withdrawn
-earningSchema.virtual("isWithdrawn").get(function() {
-  return this.status === "withdrawn";
-});
-
-// Get platform fee percentage (10%)
-earningSchema.virtual("platformFeePercentage").get(function() {
-  return 10; // 10% platform fee
-});
-
-// =========================
-// ✅ INSTANCE METHODS
-// =========================
-
-// Mark earning as available (after payment confirmation)
-earningSchema.methods.markAsAvailable = async function() {
-  this.status = "available";
-  await this.save();
-  return this;
-};
-
-// Mark earning as withdrawn
-earningSchema.methods.markAsWithdrawn = async function(withdrawalId) {
-  this.status = "withdrawn";
-  this.withdrawal = withdrawalId;
-  this.withdrawnAt = new Date();
-  await this.save();
-  return this;
-};
-
-// Mark earning as failed
-earningSchema.methods.markAsFailed = async function(reason) {
-  this.status = "failed";
-  this.metadata = { ...this.metadata, failureReason: reason };
-  await this.save();
-  return this;
-};
-
-// Mark earning as refunded (if booking cancelled)
-earningSchema.methods.markAsRefunded = async function() {
-  this.status = "refunded";
-  await this.save();
-  return this;
-};
-
-// Calculate net amount (after platform fee)
-earningSchema.methods.calculateNetAmount = function() {
-  this.netAmount = this.amount - this.platformFee;
-  return this.netAmount;
-};
-
-// =========================
-// ✅ STATIC METHODS
-// =========================
-
-// Get total earnings for a provider
-earningSchema.statics.getTotalEarnings = async function(providerId) {
-  const result = await this.aggregate([
-    {
-      $match: {
-        provider: providerId,
-        status: { $in: ["available", "withdrawn"] },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        total: { $sum: "$amount" },
-        netTotal: { $sum: "$netAmount" },
-        platformFees: { $sum: "$platformFee" },
-        count: { $sum: 1 },
-      },
-    },
-  ]);
-  return result[0] || { total: 0, netTotal: 0, platformFees: 0, count: 0 };
-};
-
-// Get available earnings (ready for withdrawal)
-earningSchema.statics.getAvailableEarnings = async function(providerId) {
-  const result = await this.aggregate([
-    {
-      $match: {
-        provider: providerId,
-        status: "available",
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        total: { $sum: "$netAmount" },
-        count: { $sum: 1 },
-      },
-    },
-  ]);
-  return result[0] || { total: 0, count: 0 };
-};
-
-// Get earnings by status
-earningSchema.statics.getEarningsByStatus = async function(providerId, status) {
-  const filter = { provider: providerId };
-  if (status) filter.status = status;
-  
-  return this.find(filter)
-    .populate('booking', 'bookingCode startDate totalPrice')
-    .populate('withdrawal', 'amount status')
-    .sort({ createdAt: -1 });
-};
-
-// Get earnings for a specific booking
-earningSchema.statics.getByBooking = async function(bookingId) {
-  return this.findOne({ booking: bookingId });
-};
-
-// Get total platform fees collected
-earningSchema.statics.getTotalPlatformFees = async function() {
-  const result = await this.aggregate([
-    {
-      $match: {
-        status: { $in: ["available", "withdrawn"] },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalFees: { $sum: "$platformFee" },
-        count: { $sum: 1 },
-      },
-    },
-  ]);
-  return result[0] || { totalFees: 0, count: 0 };
-};
-
-// Get earnings summary for dashboard
-earningSchema.statics.getDashboardSummary = async function(providerId) {
-  const [total, available, withdrawn] = await Promise.all([
-    this.aggregate([
-      { $match: { provider: providerId, status: { $in: ["available", "withdrawn"] } } },
-      { $group: { _id: null, total: { $sum: "$netAmount" } } }
-    ]),
-    this.aggregate([
-      { $match: { provider: providerId, status: "available" } },
-      { $group: { _id: null, total: { $sum: "$netAmount" } } }
-    ]),
-    this.aggregate([
-      { $match: { provider: providerId, status: "withdrawn" } },
-      { $group: { _id: null, total: { $sum: "$netAmount" } } }
-    ])
-  ]);
-
-  return {
-    totalEarnings: total[0]?.total || 0,
-    availableBalance: available[0]?.total || 0,
-    withdrawnTotal: withdrawn[0]?.total || 0
-  };
-};
-
-// =========================
-// ✅ MIDDLEWARE
-// =========================
-
-// Pre-save middleware to calculate net amount
-earningSchema.pre("save", function(next) {
-  if (this.isModified("amount") || this.isModified("platformFee")) {
-    this.netAmount = this.amount - this.platformFee;
+  if (!Number.isFinite(number)) {
+    return 0;
   }
-  next();
+
+  return Number(number.toFixed(2));
+};
+
+const toNumber = (
+  value,
+  fallback = 0
+) => {
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+};
+
+// ============================================================
+// OBJECT ID HELPER
+// ============================================================
+
+const toObjectId = (value) => {
+  if (
+    value instanceof mongoose.Types.ObjectId
+  ) {
+    return value;
+  }
+
+  if (
+    !mongoose.Types.ObjectId.isValid(value)
+  ) {
+    throw new Error(
+      "Invalid provider id"
+    );
+  }
+
+  return new mongoose.Types.ObjectId(value);
+};
+
+// ============================================================
+// SCHEMA
+// ============================================================
+
+const earningSchema = new Schema(
+  {
+    // ========================================================
+    // OWNERSHIP
+    // ========================================================
+
+    provider: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: [
+        true,
+        "Provider is required",
+      ],
+      index: true,
+    },
+
+    booking: {
+      type: Schema.Types.ObjectId,
+      ref: "Booking",
+      required: [
+        true,
+        "Booking is required",
+      ],
+      index: true,
+    },
+
+    payment: {
+      type: Schema.Types.ObjectId,
+      ref: "Payment",
+      required: [
+        true,
+        "Payment is required",
+      ],
+      index: true,
+    },
+
+    // ========================================================
+    // ORIGINAL EARNING AMOUNTS
+    // ========================================================
+
+    /**
+     * Gross earning generated by the booking payment.
+     *
+     * MVP:
+     *
+     * Provider receives 100%.
+     */
+    amount: {
+      type: Number,
+      required: [
+        true,
+        "Earning amount is required",
+      ],
+      min: [
+        0.01,
+        "Earning amount must be greater than 0",
+      ],
+    },
+
+    /**
+     * AI Tour platform commission.
+     *
+     * MVP = 0%.
+     */
+    platformFee: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Platform fee cannot be negative",
+      ],
+    },
+
+    /**
+     * Provider's final earning after platform fee.
+     *
+     * MVP:
+     *
+     * netAmount = amount
+     */
+    netAmount: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Net amount cannot be negative",
+      ],
+    },
+
+    /**
+     * Original/payment currency.
+     */
+    currency: {
+      type: String,
+      enum: CURRENCIES,
+      default: "RWF",
+      uppercase: true,
+      trim: true,
+      index: true,
+    },
+
+    // ========================================================
+    // SETTLEMENT AMOUNTS
+    // ========================================================
+
+    /**
+     * Currency in which the provider's earning is settled.
+     *
+     * Example:
+     *
+     * Payment = USD
+     * Provider settlement = RWF
+     *
+     * settlementCurrency = RWF
+     */
+    settlementCurrency: {
+      type: String,
+      enum: CURRENCIES,
+      default: "RWF",
+      uppercase: true,
+      trim: true,
+      index: true,
+    },
+
+    /**
+     * Amount after settlement currency conversion.
+     *
+     * This is the amount belonging to the provider before
+     * any external payout cost.
+     *
+     * MVP platform commission = 0%.
+     */
+    settlementAmount: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Settlement amount cannot be negative",
+      ],
+    },
+
+    /**
+     * Exchange rate used during settlement.
+     */
+    settlementExchangeRate: {
+      type: Number,
+      default: 1,
+      min: [
+        0,
+        "Settlement exchange rate cannot be negative",
+      ],
+    },
+
+    /**
+     * External settlement/conversion fee.
+     *
+     * This is tracked separately.
+     *
+     * It must NOT silently reduce the provider's earning
+     * under the current MVP business rule.
+     */
+    settlementFee: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Settlement fee cannot be negative",
+      ],
+    },
+
+    // ========================================================
+    // AVAILABLE BALANCE
+    // ========================================================
+
+    /**
+     * Amount currently available for withdrawal.
+     *
+     * IMPORTANT:
+     *
+     * This amount is reduced when an amount is RESERVED
+     * for a withdrawal.
+     *
+     * If the withdrawal later fails/rejects, the reservation
+     * is released and the amount returns here.
+     */
+    availableAmount: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Available amount cannot be negative",
+      ],
+    },
+
+    /**
+     * Amount currently reserved or already paid through
+     * withdrawal allocations.
+     *
+     * This field is cumulative across the earning lifecycle.
+     *
+     * A reservation temporarily increases this value.
+     *
+     * If reservation is released, it is decreased again.
+     */
+    withdrawnAmount: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Withdrawn amount cannot be negative",
+      ],
+    },
+
+    /**
+     * Amount removed because of confirmed refunds.
+     */
+    refundedAmount: {
+      type: Number,
+      default: 0,
+      min: [
+        0,
+        "Refunded amount cannot be negative",
+      ],
+    },
+
+    // ========================================================
+    // BOOKING TYPE
+    // ========================================================
+
+    bookingType: {
+      type: String,
+      enum: BOOKING_TYPES,
+      default: "listing",
+      required: true,
+    },
+
+    // ========================================================
+    // STATUS
+    // ========================================================
+
+    status: {
+      type: String,
+      enum: EARNING_STATUSES,
+      default: "pending",
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
+
+    // ========================================================
+    // LATEST WITHDRAWAL
+    // ========================================================
+
+    /**
+     * Latest withdrawal associated with this earning.
+     *
+     * Historical truth remains withdrawalHistory.
+     */
+    withdrawal: {
+      type: Schema.Types.ObjectId,
+      ref: "Withdrawal",
+      default: null,
+      index: true,
+    },
+
+    withdrawnAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ========================================================
+    // WITHDRAWAL HISTORY
+    // ========================================================
+
+    /**
+     * Every withdrawal allocation associated with this earning.
+     *
+     * One earning can be split across multiple withdrawals.
+     *
+     * Example:
+     *
+     * Earning = RWF 100,000
+     *
+     * Withdrawal #1 = RWF 30,000
+     * Withdrawal #2 = RWF 20,000
+     *
+     * withdrawalHistory keeps both records.
+     */
+    withdrawalHistory: [
+      {
+        withdrawal: {
+          type: Schema.Types.ObjectId,
+          ref: "Withdrawal",
+          required: true,
+        },
+
+        amount: {
+          type: Number,
+          min: [
+            0.01,
+            "Withdrawal allocation must be greater than 0",
+          ],
+          required: true,
+        },
+
+        currency: {
+          type: String,
+          enum: CURRENCIES,
+          uppercase: true,
+          trim: true,
+          required: true,
+        },
+
+        allocatedAt: {
+          type: Date,
+          default: Date.now,
+        },
+
+        transactionReference: {
+          type: String,
+          trim: true,
+          default: null,
+        },
+
+        status: {
+          type: String,
+          enum:
+            WITHDRAWAL_ALLOCATION_STATUSES,
+          default: "reserved",
+          lowercase: true,
+          trim: true,
+        },
+
+        /**
+         * Useful for audit/reconciliation.
+         */
+        processedAt: {
+          type: Date,
+          default: null,
+        },
+
+        failureReason: {
+          type: String,
+          trim: true,
+          default: null,
+        },
+      },
+    ],
+
+    // ========================================================
+    // PAYMENT REFERENCE
+    // ========================================================
+
+    /**
+     * External payment transaction reference.
+     *
+     * Examples:
+     *
+     * Stripe PaymentIntent
+     * MTN transaction reference
+     * Airtel transaction reference
+     */
+    paymentId: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
+
+    // ========================================================
+    // TEST MODE
+    // ========================================================
+
+    isTestMode: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // ========================================================
+    // METADATA
+    // ========================================================
+
+    metadata: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: {},
+    },
+  },
+  {
+    timestamps: true,
+
+    strict: true,
+
+    toJSON: {
+      virtuals: true,
+
+      transform: (_doc, ret) => {
+        delete ret.__v;
+
+        return ret;
+      },
+    },
+
+    toObject: {
+      virtuals: true,
+
+      transform: (_doc, ret) => {
+        delete ret.__v;
+
+        return ret;
+      },
+    },
+  }
+);
+
+// ============================================================
+// INDEXES
+// ============================================================
+
+earningSchema.index({
+  provider: 1,
+  createdAt: -1,
 });
 
-// =========================
-// ✅ CREATE AND EXPORT MODEL
-// =========================
+earningSchema.index(
+  {
+    booking: 1,
+  },
+  {
+    unique: true,
+    name:
+      "unique_earning_per_booking",
+  }
+);
 
-const Earning = mongoose.model("Earning", earningSchema);
+earningSchema.index({
+  payment: 1,
+});
+
+earningSchema.index({
+  status: 1,
+  createdAt: -1,
+});
+
+earningSchema.index({
+  provider: 1,
+  status: 1,
+  createdAt: -1,
+});
+
+earningSchema.index({
+  provider: 1,
+  currency: 1,
+  status: 1,
+  createdAt: -1,
+});
+
+earningSchema.index({
+  provider: 1,
+  settlementCurrency: 1,
+  status: 1,
+  createdAt: -1,
+});
+
+earningSchema.index({
+  withdrawnAt: -1,
+});
+
+earningSchema.index({
+  withdrawal: 1,
+});
+
+// ============================================================
+// VIRTUALS
+// ============================================================
+
+/**
+ * Whether money is currently withdrawable.
+ */
+earningSchema.virtual(
+  "isWithdrawable"
+).get(function () {
+  return (
+    this.status === "available" &&
+    Number(
+      this.availableAmount || 0
+    ) > 0
+  );
+});
+
+/**
+ * Backward-compatible alias.
+ */
+earningSchema.virtual(
+  "isAvailable"
+).get(function () {
+  return (
+    this.status === "available"
+  );
+});
+
+/**
+ * Pending earning.
+ */
+earningSchema.virtual(
+  "isProcessing"
+).get(function () {
+  return (
+    this.status === "pending"
+  );
+});
+
+/**
+ * Fully withdrawn.
+ */
+earningSchema.virtual(
+  "isWithdrawn"
+).get(function () {
+  return (
+    this.status === "withdrawn"
+  );
+});
+
+/**
+ * Fully refunded.
+ */
+earningSchema.virtual(
+  "isRefunded"
+).get(function () {
+  return (
+    this.status === "refunded"
+  );
+});
+
+/**
+ * Remaining withdrawable balance.
+ */
+earningSchema.virtual(
+  "remainingWithdrawableAmount"
+).get(function () {
+  if (
+    this.status !== "available"
+  ) {
+    return 0;
+  }
+
+  return roundMoney(
+    Math.max(
+      0,
+      Number(
+        this.availableAmount || 0
+      )
+    )
+  );
+});
+
+/**
+ * MVP platform fee percentage.
+ */
+earningSchema.virtual(
+  "platformFeePercentage"
+).get(function () {
+  const amount =
+    Number(this.amount || 0);
+
+  if (
+    amount <= 0
+  ) {
+    return 0;
+  }
+
+  return roundMoney(
+    (
+      Number(
+        this.platformFee || 0
+      ) /
+      amount
+    ) * 100
+  );
+});
+
+/**
+ * Whether the earning has an active reservation.
+ */
+earningSchema.virtual(
+  "hasActiveWithdrawalReservation"
+).get(function () {
+  return (
+    this.withdrawalHistory?.some(
+      (allocation) =>
+        allocation.status ===
+          "reserved" ||
+        allocation.status ===
+          "processing"
+    ) || false
+  );
+});
+
+// ============================================================
+// INTERNAL FINANCIAL VALIDATION
+// ============================================================
+
+earningSchema.methods.validateFinancialState =
+  function () {
+    const amount =
+      toNumber(
+        this.amount,
+        0
+      );
+
+    const platformFee =
+      toNumber(
+        this.platformFee,
+        0
+      );
+
+    const netAmount =
+      toNumber(
+        this.netAmount,
+        0
+      );
+
+    const availableAmount =
+      toNumber(
+        this.availableAmount,
+        0
+      );
+
+    const withdrawnAmount =
+      toNumber(
+        this.withdrawnAmount,
+        0
+      );
+
+    const refundedAmount =
+      toNumber(
+        this.refundedAmount,
+        0
+      );
+
+    if (
+      amount <= 0
+    ) {
+      throw new Error(
+        "Earning amount must be greater than 0"
+      );
+    }
+
+    /*
+     * MVP business rule.
+     */
+    if (
+      platformFee !== 0
+    ) {
+      throw new Error(
+        "AI Tour MVP platform fee must be 0"
+      );
+    }
+
+    if (
+      netAmount < 0
+    ) {
+      throw new Error(
+        "Net amount cannot be negative"
+      );
+    }
+
+    if (
+      availableAmount < 0
+    ) {
+      throw new Error(
+        "Available amount cannot be negative"
+      );
+    }
+
+    if (
+      withdrawnAmount < 0
+    ) {
+      throw new Error(
+        "Withdrawn amount cannot be negative"
+      );
+    }
+
+    if (
+      refundedAmount < 0
+    ) {
+      throw new Error(
+        "Refunded amount cannot be negative"
+      );
+    }
+
+    const allocated =
+      roundMoney(
+        availableAmount +
+          withdrawnAmount +
+          refundedAmount
+      );
+
+    if (
+      allocated >
+      roundMoney(netAmount) +
+        0.01
+    ) {
+      throw new Error(
+        "Earning financial allocations exceed net amount"
+      );
+    }
+
+    return true;
+  };
+
+// ============================================================
+// SYNC FINANCIAL AMOUNTS
+// ============================================================
+
+earningSchema.methods.syncFinancialAmounts =
+  function () {
+    const amount =
+      toNumber(
+        this.amount,
+        0
+      );
+
+    /*
+     * MVP:
+     *
+     * Platform commission = 0%.
+     */
+    this.platformFee = 0;
+
+    this.netAmount =
+      roundMoney(amount);
+
+    const withdrawn =
+      Math.max(
+        0,
+        toNumber(
+          this.withdrawnAmount,
+          0
+        )
+      );
+
+    const refunded =
+      Math.max(
+        0,
+        toNumber(
+          this.refundedAmount,
+          0
+        )
+      );
+
+    /*
+     * Only calculate available from the remaining ledger
+     * balance.
+     */
+    this.availableAmount =
+      roundMoney(
+        Math.max(
+          0,
+          this.netAmount -
+            withdrawn -
+            refunded
+        )
+      );
+
+    return this;
+  };
+
+// ============================================================
+// MARK AS AVAILABLE
+// ============================================================
+
+earningSchema.methods.markAsAvailable =
+  async function () {
+    if (
+      this.status ===
+      "refunded"
+    ) {
+      throw new Error(
+        "Refunded earning cannot become available"
+      );
+    }
+
+    if (
+      this.status ===
+      "withdrawn"
+    ) {
+      throw new Error(
+        "Withdrawn earning cannot become available"
+      );
+    }
+
+    this.status =
+      "available";
+
+    const withdrawn =
+      toNumber(
+        this.withdrawnAmount,
+        0
+      );
+
+    const refunded =
+      toNumber(
+        this.refundedAmount,
+        0
+      );
+
+    this.availableAmount =
+      roundMoney(
+        Math.max(
+          0,
+          toNumber(
+            this.netAmount,
+            0
+          ) -
+            withdrawn -
+            refunded
+        )
+      );
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// RESERVE FOR WITHDRAWAL
+// ============================================================
+
+/**
+ * Reserve an exact amount for a withdrawal.
+ *
+ * IMPORTANT:
+ *
+ * This is NOT proof that money was sent.
+ *
+ * It only moves money from:
+ *
+ * availableAmount
+ *
+ * to:
+ *
+ * reserved/withdrawnAmount
+ *
+ * The withdrawal document remains the source of truth
+ * for the payout transaction.
+ */
+earningSchema.methods.reserveForWithdrawal =
+  async function (
+    withdrawalId,
+    amount,
+    transactionReference = null
+  ) {
+    if (
+      this.status !==
+      "available"
+    ) {
+      throw new Error(
+        "Only available earnings can be reserved for withdrawal"
+      );
+    }
+
+    if (!withdrawalId) {
+      throw new Error(
+        "Withdrawal id is required"
+      );
+    }
+
+    const requestedAmount =
+      roundMoney(amount);
+
+    if (
+      requestedAmount <= 0
+    ) {
+      throw new Error(
+        "Withdrawal allocation amount must be greater than 0"
+      );
+    }
+
+    const available =
+      roundMoney(
+        this.availableAmount
+      );
+
+    if (
+      requestedAmount >
+      available
+    ) {
+      throw new Error(
+        `Insufficient earning balance. Available: ${available}`
+      );
+    }
+
+    /*
+     * Same withdrawal must never be allocated twice
+     * to the same earning.
+     */
+    const existingAllocation =
+      this.withdrawalHistory?.find(
+        (entry) =>
+          String(
+            entry.withdrawal
+          ) ===
+          String(
+            withdrawalId
+          ) &&
+          entry.status !==
+            "released"
+      );
+
+    if (
+      existingAllocation
+    ) {
+      return this;
+    }
+
+    this.availableAmount =
+      roundMoney(
+        available -
+          requestedAmount
+      );
+
+    this.withdrawnAmount =
+      roundMoney(
+        toNumber(
+          this.withdrawnAmount,
+          0
+        ) +
+          requestedAmount
+      );
+
+    this.withdrawal =
+      withdrawalId;
+
+    this.withdrawalHistory.push({
+      withdrawal:
+        withdrawalId,
+
+      amount:
+        requestedAmount,
+
+      currency:
+        this.settlementCurrency ||
+        this.currency,
+
+      allocatedAt:
+        new Date(),
+
+      transactionReference:
+        transactionReference ||
+        null,
+
+      status:
+        "reserved",
+
+      processedAt:
+        null,
+
+      failureReason:
+        null,
+    });
+
+    /*
+     * If no balance remains, the earning is fully reserved.
+     *
+     * It is not necessary to wait until payout to classify
+     * the earning as withdrawn because available balance is zero.
+     */
+    if (
+      this.availableAmount <=
+      0
+    ) {
+      this.availableAmount =
+        0;
+
+      this.status =
+        "withdrawn";
+
+      this.withdrawnAt =
+        this.withdrawnAt ||
+        new Date();
+    }
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// MARK ALLOCATION PROCESSING
+// ============================================================
+
+earningSchema.methods.markWithdrawalAllocationProcessing =
+  async function (
+    withdrawalId,
+    transactionReference = null
+  ) {
+    if (!withdrawalId) {
+      throw new Error(
+        "Withdrawal id is required"
+      );
+    }
+
+    const allocation =
+      this.withdrawalHistory?.find(
+        (entry) =>
+          String(
+            entry.withdrawal
+          ) ===
+          String(
+            withdrawalId
+          )
+      );
+
+    if (!allocation) {
+      throw new Error(
+        "Withdrawal allocation not found"
+      );
+    }
+
+    if (
+      allocation.status ===
+      "paid"
+    ) {
+      return this;
+    }
+
+    if (
+      allocation.status ===
+        "released" ||
+      allocation.status ===
+        "failed"
+    ) {
+      throw new Error(
+        `Withdrawal allocation cannot enter processing from ${allocation.status}`
+      );
+    }
+
+    allocation.status =
+      "processing";
+
+    if (
+      transactionReference
+    ) {
+      allocation.transactionReference =
+        String(
+          transactionReference
+        ).trim();
+    }
+
+    allocation.processedAt =
+      new Date();
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// MARK ALLOCATION PAID
+// ============================================================
+
+earningSchema.methods.markWithdrawalAllocationPaid =
+  async function (
+    withdrawalId,
+    transactionReference = null
+  ) {
+    if (!withdrawalId) {
+      throw new Error(
+        "Withdrawal id is required"
+      );
+    }
+
+    const allocation =
+      this.withdrawalHistory?.find(
+        (entry) =>
+          String(
+            entry.withdrawal
+          ) ===
+          String(
+            withdrawalId
+          )
+      );
+
+    if (!allocation) {
+      throw new Error(
+        "Withdrawal allocation not found"
+      );
+    }
+
+    /*
+     * Idempotency.
+     */
+    if (
+      allocation.status ===
+      "paid"
+    ) {
+      return this;
+    }
+
+    if (
+      allocation.status ===
+        "released" ||
+      allocation.status ===
+        "failed"
+    ) {
+      throw new Error(
+        `Withdrawal allocation cannot be marked paid from ${allocation.status}`
+      );
+    }
+
+    allocation.status =
+      "paid";
+
+    if (
+      transactionReference
+    ) {
+      allocation.transactionReference =
+        String(
+          transactionReference
+        ).trim();
+    }
+
+    allocation.processedAt =
+      new Date();
+
+    allocation.failureReason =
+      null;
+
+    this.withdrawal =
+      withdrawalId;
+
+    /*
+     * The reserved amount is already included in
+     * withdrawnAmount.
+     *
+     * Therefore we DO NOT add it again here.
+     */
+    if (
+      this.availableAmount <=
+      0
+    ) {
+      this.availableAmount =
+        0;
+
+      this.status =
+        "withdrawn";
+
+      this.withdrawnAt =
+        this.withdrawnAt ||
+        new Date();
+    } else {
+      this.status =
+        "available";
+    }
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// RELEASE WITHDRAWAL ALLOCATION
+// ============================================================
+
+/**
+ * Release an amount reserved for a withdrawal.
+ *
+ * Used when:
+ *
+ * - withdrawal rejected
+ * - payout failed before money was sent
+ * - reservation rollback occurred
+ *
+ * IMPORTANT:
+ *
+ * This does NOT refund the traveler.
+ * It only restores provider's earning balance.
+ */
+earningSchema.methods.releaseWithdrawalAllocation =
+  async function (
+    withdrawalId,
+    reason = null
+  ) {
+    if (!withdrawalId) {
+      throw new Error(
+        "Withdrawal id is required"
+      );
+    }
+
+    const allocation =
+      this.withdrawalHistory?.find(
+        (entry) =>
+          String(
+            entry.withdrawal
+          ) ===
+          String(
+            withdrawalId
+          )
+      );
+
+    if (!allocation) {
+      throw new Error(
+        "Withdrawal allocation not found"
+      );
+    }
+
+    /*
+     * Paid money cannot simply be returned to available
+     * balance through this method.
+     */
+    if (
+      allocation.status ===
+      "paid"
+    ) {
+      throw new Error(
+        "A paid withdrawal allocation cannot be released"
+      );
+    }
+
+    /*
+     * Idempotency.
+     */
+    if (
+      allocation.status ===
+      "released"
+    ) {
+      return this;
+    }
+
+    const allocationAmount =
+      roundMoney(
+        allocation.amount
+      );
+
+    allocation.status =
+      "released";
+
+    allocation.processedAt =
+      new Date();
+
+    allocation.failureReason =
+      reason
+        ? String(reason)
+        : null;
+
+    /*
+     * Return exact amount to available.
+     */
+    this.withdrawnAmount =
+      roundMoney(
+        Math.max(
+          0,
+          toNumber(
+            this.withdrawnAmount,
+            0
+          ) -
+            allocationAmount
+        )
+      );
+
+    this.availableAmount =
+      roundMoney(
+        Math.min(
+          toNumber(
+            this.netAmount,
+            0
+          ) -
+            toNumber(
+              this.refundedAmount,
+              0
+            ),
+          toNumber(
+            this.availableAmount,
+            0
+          ) +
+            allocationAmount
+        )
+      );
+
+    /*
+     * If the earning was marked withdrawn only because
+     * the reservation consumed its available balance,
+     * return it to available state after release.
+     */
+    if (
+      this.status ===
+      "withdrawn"
+    ) {
+      this.status =
+        "available";
+
+      this.withdrawnAt =
+        null;
+    }
+
+    if (
+      reason
+    ) {
+      this.metadata.set(
+        `withdrawalFailure:${withdrawalId}`,
+        String(reason)
+      );
+    }
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// MARK ALLOCATION FAILED
+// ============================================================
+
+earningSchema.methods.markWithdrawalAllocationFailed =
+  async function (
+    withdrawalId,
+    reason = null
+  ) {
+    if (!withdrawalId) {
+      throw new Error(
+        "Withdrawal id is required"
+      );
+    }
+
+    const allocation =
+      this.withdrawalHistory?.find(
+        (entry) =>
+          String(
+            entry.withdrawal
+          ) ===
+          String(
+            withdrawalId
+          )
+      );
+
+    if (!allocation) {
+      throw new Error(
+        "Withdrawal allocation not found"
+      );
+    }
+
+    if (
+      allocation.status ===
+      "paid"
+    ) {
+      throw new Error(
+        "Paid withdrawal allocation cannot be marked failed"
+      );
+    }
+
+    if (
+      allocation.status ===
+      "released"
+    ) {
+      return this;
+    }
+
+    allocation.status =
+      "failed";
+
+    allocation.failureReason =
+      reason
+        ? String(reason)
+        : "Withdrawal payout failed";
+
+    allocation.processedAt =
+      new Date();
+
+    /*
+     * A failed payout before money is received must release
+     * the provider's earning.
+     */
+    const allocationAmount =
+      roundMoney(
+        allocation.amount
+      );
+
+    this.withdrawnAmount =
+      roundMoney(
+        Math.max(
+          0,
+          toNumber(
+            this.withdrawnAmount,
+            0
+          ) -
+            allocationAmount
+        )
+      );
+
+    this.availableAmount =
+      roundMoney(
+        Math.min(
+          toNumber(
+            this.netAmount,
+            0
+          ) -
+            toNumber(
+              this.refundedAmount,
+              0
+            ),
+          toNumber(
+            this.availableAmount,
+            0
+          ) +
+            allocationAmount
+        )
+      );
+
+    if (
+      this.availableAmount >
+      0
+    ) {
+      this.status =
+        "available";
+
+      this.withdrawnAt =
+        null;
+    }
+
+    if (
+      reason
+    ) {
+      this.metadata.set(
+        `withdrawalFailure:${withdrawalId}`,
+        String(reason)
+      );
+    }
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// BACKWARD-COMPATIBLE MARK AS WITHDRAWN
+// ============================================================
+
+/**
+ * Backward-compatible helper.
+ *
+ * New code should use:
+ *
+ * reserveForWithdrawal()
+ * markWithdrawalAllocationPaid()
+ *
+ * This method is retained so existing callers do not break.
+ */
+earningSchema.methods.markAsWithdrawn =
+  async function (
+    withdrawalId
+  ) {
+    if (
+      this.status !==
+      "available"
+    ) {
+      throw new Error(
+        "Only available earnings can be withdrawn"
+      );
+    }
+
+    const amount =
+      roundMoney(
+        this.availableAmount
+      );
+
+    if (
+      amount <= 0
+    ) {
+      throw new Error(
+        "No available earning balance remains"
+      );
+    }
+
+    await this.reserveForWithdrawal(
+      withdrawalId,
+      amount
+    );
+
+    await this.markWithdrawalAllocationPaid(
+      withdrawalId
+    );
+
+    return this;
+  };
+
+// ============================================================
+// MARK EARNING FAILED
+// ============================================================
+
+earningSchema.methods.markAsFailed =
+  async function (
+    reason = null
+  ) {
+    if (
+      this.status ===
+      "withdrawn"
+    ) {
+      /*
+       * A withdrawn earning has already been paid/allocated.
+       * Do not corrupt financial history.
+       */
+      throw new Error(
+        "Withdrawn earning cannot be marked as failed"
+      );
+    }
+
+    if (
+      this.status ===
+      "refunded"
+    ) {
+      throw new Error(
+        "Refunded earning cannot be marked as failed"
+      );
+    }
+
+    this.status =
+      "failed";
+
+    this.metadata.set(
+      "failureReason",
+      String(
+        reason ||
+          "Unknown earning failure"
+      )
+    );
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// MARK EARNING REFUNDED
+// ============================================================
+
+/**
+ * Mark part/all of an earning as refunded.
+ *
+ * IMPORTANT:
+ *
+ * This must only be called after the payment/refund service
+ * has confirmed the actual refund.
+ */
+earningSchema.methods.markAsRefunded =
+  async function (
+    refundAmount = null
+  ) {
+    if (
+      this.status ===
+      "withdrawn"
+    ) {
+      throw new Error(
+        "Withdrawn earning cannot be directly refunded"
+      );
+    }
+
+    const netAmount =
+      roundMoney(
+        this.netAmount
+      );
+
+    const alreadyRefunded =
+      roundMoney(
+        this.refundedAmount
+      );
+
+    const remainingRefundable =
+      roundMoney(
+        Math.max(
+          0,
+          netAmount -
+            alreadyRefunded
+        )
+      );
+
+    const requestedRefund =
+      refundAmount === null
+        ? remainingRefundable
+        : roundMoney(
+            refundAmount
+          );
+
+    if (
+      requestedRefund <=
+      0
+    ) {
+      throw new Error(
+        "Refund amount must be greater than 0"
+      );
+    }
+
+    if (
+      requestedRefund >
+      remainingRefundable
+    ) {
+      throw new Error(
+        `Refund amount exceeds remaining earning balance. Remaining refundable: ${remainingRefundable}`
+      );
+    }
+
+    /*
+     * Do not allow refund to consume money that is currently
+     * reserved for a withdrawal.
+     */
+    const activeReserved =
+      this.withdrawalHistory
+        ?.filter(
+          (entry) =>
+            entry.status ===
+              "reserved" ||
+            entry.status ===
+              "processing"
+        )
+        .reduce(
+          (sum, entry) =>
+            sum +
+            toNumber(
+              entry.amount,
+              0
+            ),
+          0
+        ) || 0;
+
+    const currentlyAvailable =
+      toNumber(
+        this.availableAmount,
+        0
+      );
+
+    const refundableAvailable =
+      roundMoney(
+        currentlyAvailable
+      );
+
+    /*
+     * If a refund would consume reserved funds, reject it.
+     */
+    if (
+      requestedRefund >
+      refundableAvailable
+    ) {
+      throw new Error(
+        "Refund cannot consume an active withdrawal reservation"
+      );
+    }
+
+    this.refundedAmount =
+      roundMoney(
+        alreadyRefunded +
+          requestedRefund
+      );
+
+    this.availableAmount =
+      roundMoney(
+        Math.max(
+          0,
+          currentlyAvailable -
+            requestedRefund
+        )
+      );
+
+    if (
+      this.refundedAmount >=
+      netAmount
+    ) {
+      this.status =
+        "refunded";
+
+      this.availableAmount =
+        0;
+    }
+
+    await this.save();
+
+    return this;
+  };
+
+// ============================================================
+// CALCULATE NET AMOUNT
+// ============================================================
+
+earningSchema.methods.calculateNetAmount =
+  function () {
+    const amount =
+      toNumber(
+        this.amount,
+        0
+      );
+
+    /*
+     * MVP platform fee.
+     */
+    this.platformFee =
+      0;
+
+    this.netAmount =
+      roundMoney(amount);
+
+    const withdrawn =
+      toNumber(
+        this.withdrawnAmount,
+        0
+      );
+
+    const refunded =
+      toNumber(
+        this.refundedAmount,
+        0
+      );
+
+    this.availableAmount =
+      roundMoney(
+        Math.max(
+          0,
+          this.netAmount -
+            withdrawn -
+            refunded
+        )
+      );
+
+    return this.netAmount;
+  };
+
+// ============================================================
+// STATIC: TOTAL EARNINGS
+// ============================================================
+
+earningSchema.statics.getTotalEarnings =
+  async function (
+    providerId
+  ) {
+    const providerObjectId =
+      toObjectId(
+        providerId
+      );
+
+    const result =
+      await this.aggregate([
+        {
+          $match: {
+            provider:
+              providerObjectId,
+
+            status: {
+              $in: [
+                "available",
+                "withdrawn",
+              ],
+            },
+          },
+        },
+
+        {
+          $group: {
+            _id: null,
+
+            grossTotal: {
+              $sum:
+                "$amount",
+            },
+
+            netTotal: {
+              $sum:
+                "$netAmount",
+            },
+
+            platformFees: {
+              $sum:
+                "$platformFee",
+            },
+
+            availableTotal: {
+              $sum:
+                "$availableAmount",
+            },
+
+            withdrawnTotal: {
+              $sum:
+                "$withdrawnAmount",
+            },
+
+            count: {
+              $sum: 1,
+            },
+          },
+        },
+      ]);
+
+    return (
+      result[0] || {
+        grossTotal: 0,
+        netTotal: 0,
+        platformFees: 0,
+        availableTotal: 0,
+        withdrawnTotal: 0,
+        count: 0,
+      }
+    );
+  };
+
+// ============================================================
+// STATIC: AVAILABLE EARNINGS
+// ============================================================
+
+earningSchema.statics.getAvailableEarnings =
+  async function (
+    providerId
+  ) {
+    const providerObjectId =
+      toObjectId(
+        providerId
+      );
+
+    const result =
+      await this.aggregate([
+        {
+          $match: {
+            provider:
+              providerObjectId,
+
+            status:
+              "available",
+
+            availableAmount: {
+              $gt: 0,
+            },
+          },
+        },
+
+        {
+          $group: {
+            _id: null,
+
+            total: {
+              $sum:
+                "$availableAmount",
+            },
+
+            count: {
+              $sum: 1,
+            },
+          },
+        },
+      ]);
+
+    return (
+      result[0] || {
+        total: 0,
+        count: 0,
+      }
+    );
+  };
+
+// ============================================================
+// STATIC: EARNINGS BY STATUS
+// ============================================================
+
+earningSchema.statics.getEarningsByStatus =
+  async function (
+    providerId,
+    status
+  ) {
+    const providerObjectId =
+      toObjectId(
+        providerId
+      );
+
+    const filter = {
+      provider:
+        providerObjectId,
+    };
+
+    if (
+      status
+    ) {
+      filter.status =
+        String(
+          status
+        ).toLowerCase();
+    }
+
+    return this.find(
+      filter
+    )
+      .populate(
+        "booking",
+        "bookingCode bookingNumber startDate endDate totalPrice status paymentStatus listing"
+      )
+      .populate(
+        "payment",
+        "amount currency status transactionId providerReference paidAt"
+      )
+      .populate(
+        "withdrawal",
+        "amount currency method status reference transactionReference createdAt paidAt"
+      )
+      .sort({
+        createdAt: -1,
+      });
+  };
+
+// ============================================================
+// STATIC: BY BOOKING
+// ============================================================
+
+earningSchema.statics.getByBooking =
+  async function (
+    bookingId
+  ) {
+    return this.findOne({
+      booking:
+        bookingId,
+    });
+  };
+
+// ============================================================
+// STATIC: BY PAYMENT
+// ============================================================
+
+earningSchema.statics.getByPayment =
+  async function (
+    paymentId
+  ) {
+    return this.findOne({
+      payment:
+        paymentId,
+    });
+  };
+
+// ============================================================
+// STATIC: PLATFORM FEES
+// ============================================================
+
+earningSchema.statics.getTotalPlatformFees =
+  async function () {
+    const result =
+      await this.aggregate([
+        {
+          $match: {
+            status: {
+              $in: [
+                "available",
+                "withdrawn",
+              ],
+            },
+          },
+        },
+
+        {
+          $group: {
+            _id: null,
+
+            totalFees: {
+              $sum:
+                "$platformFee",
+            },
+
+            count: {
+              $sum: 1,
+            },
+          },
+        },
+      ]);
+
+    return (
+      result[0] || {
+        totalFees: 0,
+        count: 0,
+      }
+    );
+  };
+
+// ============================================================
+// STATIC: DASHBOARD SUMMARY
+// ============================================================
+
+earningSchema.statics.getDashboardSummary =
+  async function (
+    providerId
+  ) {
+    const providerObjectId =
+      toObjectId(
+        providerId
+      );
+
+    const [
+      total,
+      available,
+      withdrawn,
+      pending,
+      refunded,
+      failed,
+    ] =
+      await Promise.all([
+        this.aggregate([
+          {
+            $match: {
+              provider:
+                providerObjectId,
+
+              status: {
+                $in: [
+                  "available",
+                  "withdrawn",
+                ],
+              },
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              total: {
+                $sum:
+                  "$netAmount",
+              },
+
+              availableAmount: {
+                $sum:
+                  "$availableAmount",
+              },
+
+              withdrawnAmount: {
+                $sum:
+                  "$withdrawnAmount",
+              },
+            },
+          },
+        ]),
+
+        this.aggregate([
+          {
+            $match: {
+              provider:
+                providerObjectId,
+
+              status:
+                "available",
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              total: {
+                $sum:
+                  "$availableAmount",
+              },
+            },
+          },
+        ]),
+
+        this.aggregate([
+          {
+            $match: {
+              provider:
+                providerObjectId,
+
+              status:
+                "withdrawn",
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              total: {
+                $sum:
+                  "$withdrawnAmount",
+              },
+            },
+          },
+        ]),
+
+        this.aggregate([
+          {
+            $match: {
+              provider:
+                providerObjectId,
+
+              status:
+                "pending",
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              total: {
+                $sum:
+                  "$netAmount",
+              },
+            },
+          },
+        ]),
+
+        this.aggregate([
+          {
+            $match: {
+              provider:
+                providerObjectId,
+
+              status:
+                "refunded",
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              total: {
+                $sum:
+                  "$refundedAmount",
+              },
+            },
+          },
+        ]),
+
+        this.aggregate([
+          {
+            $match: {
+              provider:
+                providerObjectId,
+
+              status:
+                "failed",
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              total: {
+                $sum:
+                  "$netAmount",
+              },
+            },
+          },
+        ]),
+      ]);
+
+    return {
+      totalEarnings:
+        total[0]?.total ||
+        0,
+
+      availableBalance:
+        available[0]?.total ||
+        0,
+
+      withdrawnTotal:
+        withdrawn[0]?.total ||
+        0,
+
+      pendingBalance:
+        pending[0]?.total ||
+        0,
+
+      refundedTotal:
+        refunded[0]?.total ||
+        0,
+
+      failedTotal:
+        failed[0]?.total ||
+        0,
+
+      platformFees:
+        0,
+    };
+  };
+
+// ============================================================
+// STATIC: DATE RANGE
+// ============================================================
+
+earningSchema.statics.getByDateRange =
+  function (
+    startDate,
+    endDate,
+    options = {}
+  ) {
+    const {
+      providerId,
+      status,
+      currency,
+      settlementCurrency,
+      limit = 100,
+      skip = 0,
+    } = options;
+
+    const query = {
+      createdAt: {
+        $gte:
+          new Date(
+            startDate
+          ),
+
+        $lte:
+          new Date(
+            endDate
+          ),
+      },
+    };
+
+    if (
+      providerId
+    ) {
+      query.provider =
+        providerId;
+    }
+
+    if (
+      status
+    ) {
+      query.status =
+        String(
+          status
+        ).toLowerCase();
+    }
+
+    if (
+      currency
+    ) {
+      query.currency =
+        String(
+          currency
+        ).toUpperCase();
+    }
+
+    if (
+      settlementCurrency
+    ) {
+      query.settlementCurrency =
+        String(
+          settlementCurrency
+        ).toUpperCase();
+    }
+
+    return this.find(
+      query
+    )
+      .sort({
+        createdAt: -1,
+      })
+      .skip(
+        Math.max(
+          0,
+          Number(skip)
+        )
+      )
+      .limit(
+        Math.min(
+          500,
+          Math.max(
+            1,
+            Number(limit)
+          )
+        )
+      )
+      .populate(
+        "provider",
+        "name email"
+      )
+      .populate(
+        "booking",
+        "bookingCode bookingNumber totalPrice status paymentStatus listing"
+      )
+      .populate(
+        "withdrawal",
+        "amount currency method status reference transactionReference"
+      );
+  };
+
+// ============================================================
+// VALIDATION MIDDLEWARE
+// ============================================================
+
+earningSchema.pre(
+  "validate",
+  function (next) {
+    try {
+      const amount =
+        toNumber(
+          this.amount,
+          0
+        );
+
+      const platformFee =
+        toNumber(
+          this.platformFee,
+          0
+        );
+
+      const netAmount =
+        toNumber(
+          this.netAmount,
+          0
+        );
+
+      const availableAmount =
+        toNumber(
+          this.availableAmount,
+          0
+        );
+
+      const withdrawnAmount =
+        toNumber(
+          this.withdrawnAmount,
+          0
+        );
+
+      const refundedAmount =
+        toNumber(
+          this.refundedAmount,
+          0
+        );
+
+      if (
+        amount <= 0
+      ) {
+        return next(
+          new Error(
+            "Earning amount must be greater than 0"
+          )
+        );
+      }
+
+      /*
+       * STRICT MVP RULE
+       */
+      if (
+        platformFee !== 0
+      ) {
+        return next(
+          new Error(
+            "AI Tour MVP platform fee must be 0"
+          )
+        );
+      }
+
+      if (
+        platformFee >
+        amount
+      ) {
+        return next(
+          new Error(
+            "Platform fee cannot exceed earning amount"
+          )
+        );
+      }
+
+      if (
+        netAmount < 0
+      ) {
+        return next(
+          new Error(
+            "Net earning amount is invalid"
+          )
+        );
+      }
+
+      if (
+        availableAmount < 0
+      ) {
+        return next(
+          new Error(
+            "Available earning amount cannot be negative"
+          )
+        );
+      }
+
+      if (
+        withdrawnAmount < 0
+      ) {
+        return next(
+          new Error(
+            "Withdrawn earning amount cannot be negative"
+          )
+        );
+      }
+
+      if (
+        refundedAmount < 0
+      ) {
+        return next(
+          new Error(
+            "Refunded earning amount cannot be negative"
+          )
+        );
+      }
+
+      const totalAllocated =
+        roundMoney(
+          availableAmount +
+            withdrawnAmount +
+            refundedAmount
+        );
+
+      if (
+        totalAllocated >
+        roundMoney(
+          netAmount
+        ) +
+          0.01
+      ) {
+        return next(
+          new Error(
+            "Earning financial allocations exceed net amount"
+          )
+        );
+      }
+
+      /*
+       * Settlement amount cannot be negative.
+       */
+      if (
+        toNumber(
+          this.settlementAmount,
+          0
+        ) < 0
+      ) {
+        return next(
+          new Error(
+            "Settlement amount cannot be negative"
+          )
+        );
+      }
+
+      /*
+       * Settlement fee cannot be negative.
+       */
+      if (
+        toNumber(
+          this.settlementFee,
+          0
+        ) < 0
+      ) {
+        return next(
+          new Error(
+            "Settlement fee cannot be negative"
+          )
+        );
+      }
+
+      /*
+       * Exchange rate must be positive when used.
+       */
+      const exchangeRate =
+        toNumber(
+          this.settlementExchangeRate,
+          1
+        );
+
+      if (
+        exchangeRate <= 0
+      ) {
+        return next(
+          new Error(
+            "Settlement exchange rate must be greater than 0"
+          )
+        );
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ============================================================
+// SAVE MIDDLEWARE
+// ============================================================
+
+earningSchema.pre(
+  "save",
+  function (next) {
+    try {
+      /*
+       * MVP platform commission is always zero.
+       */
+      this.platformFee =
+        0;
+
+      /*
+       * Normalize currency.
+       */
+      if (
+        this.currency
+      ) {
+        this.currency =
+          String(
+            this.currency
+          ).toUpperCase();
+      }
+
+      if (
+        this.settlementCurrency
+      ) {
+        this.settlementCurrency =
+          String(
+            this.settlementCurrency
+          ).toUpperCase();
+      }
+
+      /*
+       * Normalize status.
+       */
+      if (
+        this.status
+      ) {
+        this.status =
+          String(
+            this.status
+          ).toLowerCase();
+      }
+
+      /*
+       * Always maintain netAmount = amount in MVP.
+       */
+      this.netAmount =
+        roundMoney(
+          this.amount
+        );
+
+      /*
+       * IMPORTANT:
+       *
+       * Do NOT blindly recalculate availableAmount on every
+       * save.
+       *
+       * reserveForWithdrawal() intentionally changes:
+       *
+       * availableAmount
+       * withdrawnAmount
+       *
+       * and those values must survive save().
+       */
+      if (
+        this.isNew
+      ) {
+        this.withdrawnAmount =
+          0;
+
+        this.refundedAmount =
+          0;
+
+        if (
+          this.status ===
+          "available"
+        ) {
+          this.availableAmount =
+            this.netAmount;
+        } else {
+          this.availableAmount =
+            0;
+        }
+      }
+
+      /*
+       * Only recalculate available amount if the earning's
+       * base amount itself was intentionally changed.
+       */
+      if (
+        !this.isNew &&
+        (
+          this.isModified(
+            "amount"
+          ) ||
+          this.isModified(
+            "platformFee"
+          )
+        )
+      ) {
+        const withdrawn =
+          toNumber(
+            this.withdrawnAmount,
+            0
+          );
+
+        const refunded =
+          toNumber(
+            this.refundedAmount,
+            0
+          );
+
+        this.availableAmount =
+          roundMoney(
+            Math.max(
+              0,
+              this.netAmount -
+                withdrawn -
+                refunded
+            )
+          );
+      }
+
+      /*
+       * If no available amount remains but money is still
+       * allocated/withdrawn, classify as withdrawn.
+       */
+      if (
+        this.status ===
+          "available" &&
+        this.availableAmount <=
+          0 &&
+        this.withdrawnAmount >
+          0
+      ) {
+        this.availableAmount =
+          0;
+
+        this.status =
+          "withdrawn";
+
+        this.withdrawnAt =
+          this.withdrawnAt ||
+          new Date();
+      }
+
+      /*
+       * If all net earning has been refunded and there is
+       * no withdrawal allocation remaining, classify refunded.
+       */
+      if (
+        this.refundedAmount >=
+          this.netAmount &&
+        this.withdrawnAmount <=
+          0
+      ) {
+        this.availableAmount =
+          0;
+
+        this.status =
+          "refunded";
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ============================================================
+// MODEL
+// ============================================================
+
+const Earning =
+  mongoose.models.Earning ||
+  mongoose.model(
+    "Earning",
+    earningSchema
+  );
+
+// ============================================================
+// EXPORT
+// ============================================================
+
 export default Earning;
+
+export {
+  EARNING_STATUSES,
+  WITHDRAWAL_ALLOCATION_STATUSES,
+  BOOKING_TYPES,
+  CURRENCIES,
+};
+

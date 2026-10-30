@@ -1,701 +1,383 @@
 // frontend/src/services/reviewService.js
-// ✅ COMPLETE FIXED - All exports properly defined
-// ✅ ADDED: Response data extraction helper
-// ✅ ADDED: Retry logic for critical mutations
-// ✅ FIXED: Provider endpoints to match backend routes (/provider/reviews)
-// ✅ FIXED: getPublicReviews now supports providerId filtering
-// ✅ Better error handling, auth, and debugging
 
-import API from './api';
+import api from "./api";
 
-// ===============================
-// ✅ HELPER: Extract data from response
-// ===============================
-const extractData = (response) => {
-  // Handle different response structures
-  if (response?.data?.data) return response.data.data;
-  if (response?.data) return response.data;
-  return response;
+// ============================================================
+// RESPONSE HELPERS
+// ============================================================
+
+const normalizeProviderResponse = (response) => {
+  const payload = response?.data || {};
+
+  return {
+    success: payload.success ?? true,
+    reviews: payload.data || payload.reviews || [],
+    pagination: payload.pagination || {},
+    stats: payload.stats || {},
+    filters: payload.filters || {},
+  };
 };
 
-// ===============================
-// ✅ HELPER: Retry with exponential backoff
-// ===============================
-const withRetry = async (fn, maxRetries = 3, delay = 2000) => {
+const normalizeMyReviewsResponse = (response) => {
+  const payload = response?.data || {};
+
+  return {
+    success: payload.success ?? true,
+    reviews: payload.data || payload.reviews || [],
+    pagination: payload.pagination || {},
+    stats: payload.stats || {},
+  };
+};
+
+// ============================================================
+// RETRY
+// ============================================================
+
+const withRetry = async (requestFn, retries = 2, delay = 700) => {
   let lastError;
-  for (let i = 0; i < maxRetries; i++) {
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      return await fn();
+      return await requestFn();
     } catch (error) {
       lastError = error;
-      console.log(`⚠️ Attempt ${i + 1} failed:`, error.message);
-      if (i < maxRetries - 1) {
-        const waitTime = delay * (i + 1);
-        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+
+      const status = error?.response?.status;
+
+      const shouldRetry =
+        !status ||
+        status === 408 ||
+        status === 425 ||
+        status === 429 ||
+        status >= 500;
+
+      if (!shouldRetry || attempt === retries) {
+        throw error;
       }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, delay * (attempt + 1))
+      );
     }
   }
+
   throw lastError;
 };
 
 // ============================================================
-// PUBLIC ENDPOINTS (No Auth)
+// GENERIC RESPONSE
 // ============================================================
 
-/**
- * Get public reviews (for homepage, listings, provider profiles, etc.)
- * @param {Object} params - Query parameters
- * @param {string} params.providerId - Filter by provider ID
- * @param {string} params.listingId - Filter by listing ID
- * @param {number} params.limit - Number of results
- * @param {number} params.page - Page number
- * @param {string} params.sort - Sort order
- */
-export const getPublicReviews = async (params = {}) => {
-  try {
-    console.log('📤 [getPublicReviews] Fetching with params:', params);
-    const response = await API.get('/public/reviews', { params });
-    console.log('✅ [getPublicReviews] Response:', response.data);
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get public reviews error:', error);
-    throw error;
-  }
-};
+const extractData = (response) => {
+  const payload = response?.data;
 
-/**
- * Get public review by ID
- */
-export const getPublicReviewById = async (id) => {
-  try {
-    const response = await API.get(`/public/reviews/${id}`);
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get public review error:', error);
-    throw error;
+  if (payload && payload.data !== undefined) {
+    return payload.data;
   }
-};
 
-/**
- * Get reviews for a specific listing (public)
- */
-export const getListingReviews = async (listingId, params = {}) => {
-  try {
-    const response = await API.get(`/public/listings/${listingId}/reviews`, { params });
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get listing reviews error:', error);
-    throw error;
-  }
-};
-
-/**
- * Get reviews for a specific provider (public)
- */
-export const getProviderPublicReviews = async (providerId, params = {}) => {
-  try {
-    console.log('📤 [getProviderPublicReviews] Fetching for provider:', providerId, params);
-    const response = await API.get(`/public/providers/${providerId}/reviews`, { params });
-    console.log('✅ [getProviderPublicReviews] Response:', response.data);
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get provider public reviews error:', error);
-    throw error;
-  }
-};
-
-/**
- * Get review statistics for an entity
- */
-export const getReviewStats = async (entityType, entityId) => {
-  try {
-    const response = await API.get(`/public/stats/${entityType}/${entityId}`);
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get review stats error:', error);
-    throw error;
-  }
+  return payload;
 };
 
 // ============================================================
-// TRAVELER ENDPOINTS (Auth Required)
+// PUBLIC REVIEWS
 // ============================================================
 
-/**
- * Create a new review (immediately published) - WITH RETRY
- */
-export const createReview = async (data) => {
+const getPublicReviews = async (params = {}) => {
   return withRetry(async () => {
-    console.log('========== 📤 CREATE REVIEW ==========');
-    
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.error('❌ No token found - user not authenticated');
-      throw new Error('Authentication required. Please login.');
-    }
-
-    const userDataString = localStorage.getItem('user');
-    if (!userDataString) {
-      console.error('❌ No user data found in localStorage');
-      throw new Error('User data not found. Please login again.');
-    }
-
-    let userData;
-    try {
-      userData = JSON.parse(userDataString);
-    } catch (parseError) {
-      console.error('❌ Failed to parse user data:', parseError);
-      throw new Error('Invalid user data. Please login again.');
-    }
-
-    if (!userData || !userData._id) {
-      console.error('❌ No user ID found in user data:', userData);
-      throw new Error('User ID not found. Please login again.');
-    }
-
-    if (!data.bookingId) {
-      console.error('❌ No bookingId provided in request data');
-      throw new Error('Booking ID is required');
-    }
-
-    console.log('📤 Creating review with data:', {
-      bookingId: data.bookingId,
-      rating: data.rating,
-      title: data.title ? data.title.substring(0, 30) + '...' : 'No title',
-      commentLength: data.comment ? data.comment.length : 0,
-      userId: userData._id,
-      userEmail: userData.email,
-      tokenPresent: !!token
-    });
-
-    const response = await API.post('/reviews', {
-      bookingId: data.bookingId,
-      rating: data.rating,
-      title: data.title || '',
-      comment: data.comment || '',
-      images: data.images || []
-    });
-
-    console.log('✅ Review created successfully:', {
-      reviewId: response.data.review?._id,
-      status: response.status,
-      message: response.data.message
-    });
-    console.log('==========================================');
-
+    const response = await api.get("/public/reviews", { params });
     return extractData(response);
-  }, 3, 3000);
+  });
 };
 
-/**
- * Get my reviews (traveler)
- */
-export const getMyReviews = async (params = {}) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
+const getPublicReviewById = async (reviewId) => {
+  if (!reviewId) throw new Error("Review ID is required");
 
-    console.log('📤 Fetching my reviews with params:', params);
-
-    const response = await API.get('/reviews/my', { params });
-    
-    console.log('✅ My reviews fetched:', {
-      count: response.data.reviews?.length || 0,
-      total: response.data.pagination?.total || 0
-    });
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get my reviews error:', error);
-    throw error;
-  }
-};
-
-/**
- * Get review by ID
- */
-export const getReviewById = async (id) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Fetching review by ID:', id);
-
-    const response = await API.get(`/reviews/${id}`);
-    
-    console.log('✅ Review fetched:', {
-      reviewId: response.data.review?._id,
-      rating: response.data.review?.rating
-    });
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get review error:', error);
-    throw error;
-  }
-};
-
-/**
- * Get review by booking ID
- */
-export const getReviewByBooking = async (bookingId) => {
-  try {
-    if (!bookingId) {
-      console.log('ℹ️ No bookingId provided');
-      return { review: null };
-    }
-
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.log('ℹ️ No token found - user not authenticated');
-      return { review: null };
-    }
-
-    console.log('📤 Fetching review for booking:', bookingId);
-    
-    const response = await API.get(`/reviews/booking/${bookingId}`);
-    
-    console.log('✅ Review found for booking:', {
-      bookingId,
-      reviewId: response.data.review?._id,
-      rating: response.data.review?.rating
-    });
-    
-    return extractData(response);
-  } catch (error) {
-    if (error.response?.status === 404) {
-      console.log('ℹ️ No review found for booking:', bookingId);
-      return { review: null };
-    }
-    
-    if (error.response?.status === 401) {
-      console.log('ℹ️ User not authenticated - skipping review check');
-      return { review: null };
-    }
-    
-    if (error.response?.status === 403) {
-      console.warn('⚠️ User does not have permission to view review for booking:', bookingId);
-      throw new Error('You do not have permission to view this review');
-    }
-    
-    console.error('❌ Get review by booking error:', error);
-    throw error;
-  }
-};
-
-/**
- * Update a review (edit within window) - WITH RETRY
- */
-export const updateReview = async (id, data) => {
   return withRetry(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
+    const response = await api.get(`/public/reviews/${reviewId}`);
+    return response.data;
+  });
+};
 
-    console.log('📤 Updating review:', id, data);
+const getListingReviews = async (listingId, params = {}) => {
+  if (!listingId) throw new Error("Listing ID is required");
 
-    const updateData = {
-      rating: data.rating,
-      title: data.title,
-      comment: data.comment,
+  return withRetry(async () => {
+    const response = await api.get(
+      `/public/listings/${listingId}/reviews`,
+      { params }
+    );
+    return extractData(response);
+  });
+};
+
+const getPublicProviderReviews = async (providerId, params = {}) => {
+  if (!providerId) throw new Error("Provider ID is required");
+
+  return withRetry(async () => {
+    const response = await api.get(
+      `/public/providers/${providerId}/reviews`,
+      { params }
+    );
+    return extractData(response);
+  });
+};
+
+const getPublicReviewStats = async (entityType, entityId) => {
+  if (!entityType || !entityId) {
+    throw new Error("Entity type and entity ID are required");
+  }
+
+  return withRetry(async () => {
+    const response = await api.get(
+      `/public/stats/${entityType}/${entityId}`
+    );
+    return extractData(response);
+  });
+};
+
+// ============================================================
+// ✅ NEW: getProviderPublicReviews
+// ============================================================
+// Used by PublicProfile.jsx — public (no auth) reviews for a
+// provider's public profile page. Routes to the same endpoint
+// as getPublicProviderReviews but returns the full response
+// body so callers can read .reviews, .stats, .pagination.
+// ============================================================
+
+const getProviderPublicReviews = async (providerId, params = {}) => {
+  if (!providerId) throw new Error("Provider ID is required");
+
+  return withRetry(async () => {
+    const response = await api.get(
+      `/public/providers/${providerId}/reviews`,
+      { params }
+    );
+
+    const payload = response?.data || {};
+
+    return {
+      success: payload.success ?? true,
+      reviews: payload.reviews || payload.data || [],
+      pagination: payload.pagination || {},
+      stats: payload.stats || {},
     };
-
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] === undefined || updateData[key] === null) {
-        delete updateData[key];
-      }
-    });
-
-    const response = await API.put(`/reviews/${id}`, updateData);
-    
-    console.log('✅ Review updated:', {
-      reviewId: response.data.review?._id,
-      rating: response.data.review?.rating
-    });
-    
-    return extractData(response);
-  }, 3, 3000);
+  });
 };
 
-/**
- * Delete a review (soft delete) - WITH RETRY
- */
-export const deleteReview = async (id) => {
+// ============================================================
+// TRAVELER
+// ============================================================
+
+const createReview = async (reviewData) => {
+  if (!reviewData) throw new Error("Review data is required");
+
   return withRetry(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Deleting review:', id);
-
-    const response = await API.delete(`/reviews/${id}`);
-    
-    console.log('✅ Review deleted:', id);
-    
-    return extractData(response);
-  }, 3, 3000);
+    const response = await api.post("/reviews", reviewData);
+    return response.data;
+  });
 };
 
-/**
- * Toggle helpful on a review
- */
-export const toggleHelpful = async (id) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
+const getMyReviews = async (params = {}) => {
+  return withRetry(async () => {
+    const response = await api.get("/reviews/my", { params });
+    return normalizeMyReviewsResponse(response);
+  });
+};
 
-    console.log('📤 Toggling helpful for review:', id);
+const getReviewById = async (reviewId) => {
+  if (!reviewId) throw new Error("Review ID is required");
 
-    const response = await API.post(`/reviews/${id}/helpful`);
-    
-    console.log('✅ Helpful toggled:', {
-      reviewId: id,
-      helpfulCount: response.data.helpfulCount,
-      isHelpful: response.data.isHelpful
+  return withRetry(async () => {
+    const response = await api.get(`/reviews/${reviewId}`);
+    return response.data;
+  });
+};
+
+const getReviewByBooking = async (bookingId) => {
+  if (!bookingId) throw new Error("Booking ID is required");
+
+  return withRetry(async () => {
+    const response = await api.get(`/reviews/booking/${bookingId}`);
+    return response.data;
+  });
+};
+
+const updateReview = async (reviewId, reviewData) => {
+  if (!reviewId) throw new Error("Review ID is required");
+  if (!reviewData) throw new Error("Review data is required");
+
+  return withRetry(async () => {
+    const response = await api.put(`/reviews/${reviewId}`, reviewData);
+    return response.data;
+  });
+};
+
+const deleteReview = async (reviewId) => {
+  if (!reviewId) throw new Error("Review ID is required");
+
+  return withRetry(async () => {
+    const response = await api.delete(`/reviews/${reviewId}`);
+    return response.data;
+  });
+};
+
+const toggleHelpful = async (reviewId) => {
+  if (!reviewId) throw new Error("Review ID is required");
+
+  return withRetry(async () => {
+    const response = await api.post(`/reviews/${reviewId}/helpful`);
+    return response.data;
+  });
+};
+
+const reportReview = async (reviewId, reason) => {
+  if (!reviewId) throw new Error("Review ID is required");
+
+  return withRetry(async () => {
+    const response = await api.post(`/reviews/${reviewId}/report`, {
+      reason,
     });
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Toggle helpful error:', error);
-    throw error;
-  }
-};
-
-/**
- * Report a review
- */
-export const reportReview = async (id, reason) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Reporting review:', id);
-
-    const response = await API.post(`/reviews/${id}/report`, { reason });
-    
-    console.log('✅ Review reported:', id);
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Report review error:', error);
-    throw error;
-  }
+    return response.data;
+  });
 };
 
 // ============================================================
-// ✅ PROVIDER ENDPOINTS - FIXED ENDPOINTS
+// PROVIDER
 // ============================================================
 
-/**
- * Get provider reviews
- * ✅ CORRECT ENDPOINT: /provider/reviews (matches backend route)
- */
-export const getProviderReviews = async (params = {}) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 [getProviderReviews] Fetching with params:', params);
-    console.log('📤 [getProviderReviews] Endpoint: /provider/reviews');
-
-    // ✅ FIXED: Changed from '/reviews/provider' to '/provider/reviews'
-    const response = await API.get('/provider/reviews', { params });
-    
-    console.log('✅ [getProviderReviews] Response:', response.data);
-    console.log(`✅ [getProviderReviews] Found ${response.data?.reviews?.length || 0} reviews`);
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get provider reviews error:', error);
-    console.error('❌ Error response:', error.response?.data);
-    throw error;
-  }
-};
-
-/**
- * Get provider review stats
- * ✅ CORRECT ENDPOINT: /provider/reviews/stats (matches backend route)
- */
-export const getProviderReviewStats = async () => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 [getProviderReviewStats] Fetching stats');
-    console.log('📤 [getProviderReviewStats] Endpoint: /provider/reviews/stats');
-
-    // ✅ FIXED: Changed from '/reviews/provider/stats' to '/provider/reviews/stats'
-    const response = await API.get('/provider/reviews/stats');
-    
-    console.log('✅ [getProviderReviewStats] Response:', response.data);
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get provider review stats error:', error);
-    console.error('❌ Error response:', error.response?.data);
-    throw error;
-  }
-};
-
-/**
- * Add provider reply to a review - WITH RETRY
- * ✅ CORRECT ENDPOINT: /provider/reviews/:id/respond (matches backend route)
- */
-export const respondToReview = async (id, comment, token) => {
+const getProviderReviews = async (params = {}) => {
   return withRetry(async () => {
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    if (!comment || !comment.trim()) {
-      throw new Error('Reply comment is required');
-    }
-
-    console.log('📤 Responding to review:', id);
-
-    // ✅ FIXED: Changed from '/reviews/${id}/reply' to '/provider/reviews/${id}/respond'
-    const response = await API.post(
-      `/provider/reviews/${id}/respond`,
-      { reply: comment.trim() },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    
-    console.log('✅ Response added to review:', id);
-    
-    return extractData(response);
-  }, 3, 3000);
+    const response = await api.get("/reviews/provider", { params });
+    const normalized = normalizeProviderResponse(response);
+    console.log("📦 [reviewService] Provider reviews:", response.data);
+    console.log("📊 [reviewService] Review count:", normalized.reviews.length);
+    return normalized;
+  });
 };
 
-/**
- * Edit provider reply - WITH RETRY
- * ✅ CORRECT ENDPOINT: /provider/reviews/:id/respond (PUT)
- */
-export const editProviderReply = async (id, comment, token) => {
+const getProviderReviewStats = async (params = {}) => {
   return withRetry(async () => {
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    if (!comment || !comment.trim()) {
-      throw new Error('Reply comment is required');
-    }
-
-    console.log('📤 Editing response for review:', id);
-
-    // ✅ FIXED: Changed from '/reviews/${id}/reply' to '/provider/reviews/${id}/respond'
-    const response = await API.put(
-      `/provider/reviews/${id}/respond`,
-      { reply: comment.trim() },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    
-    console.log('✅ Response edited for review:', id);
-    
-    return extractData(response);
-  }, 3, 3000);
+    const response = await api.get("/reviews/provider/stats", { params });
+    console.log("📊 [reviewService] Provider stats:", response.data);
+    return response.data;
+  });
 };
 
-// ============================================================
-// ADMIN ENDPOINTS
-// ============================================================
+const respondToReview = async (reviewId, comment) => {
+  if (!reviewId) throw new Error("Review ID is required");
+  if (!comment || !comment.trim()) {
+    throw new Error("Reply comment is required");
+  }
 
-/**
- * Get all reviews (admin)
- */
-export const getAdminReviews = async (params = {}) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Fetching admin reviews with params:', params);
-
-    const response = await API.get('/admin/reviews', { params });
-    
-    console.log('✅ Admin reviews fetched:', {
-      count: response.data.reviews?.length || 0
+  return withRetry(async () => {
+    const response = await api.post(`/reviews/${reviewId}/reply`, {
+      comment: comment.trim(),
     });
-    
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get admin reviews error:', error);
-    throw error;
-  }
+    return response.data;
+  });
 };
 
-/**
- * Get review stats (admin)
- */
-export const getReviewStatsAdmin = async () => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    const response = await API.get('/admin/reviews/stats');
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get review stats admin error:', error);
-    throw error;
+const editProviderReply = async (reviewId, comment) => {
+  if (!reviewId) throw new Error("Review ID is required");
+  if (!comment || !comment.trim()) {
+    throw new Error("Reply comment is required");
   }
-};
 
-/**
- * ✅ UPDATE REVIEW STATUS - WITH RETRY
- */
-export const updateReviewStatus = async (id, status, moderationNotes) => {
   return withRetry(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Updating review status:', id, 'to', status);
-
-    const response = await API.put(`/admin/reviews/${id}/status`, { 
-      status, 
-      moderationNotes: moderationNotes || '' 
+    const response = await api.put(`/reviews/${reviewId}/reply`, {
+      comment: comment.trim(),
     });
-    
-    console.log('✅ Review status updated:', {
-      reviewId: id,
-      status: status
+    return response.data;
+  });
+};
+
+// ============================================================
+// ✅ NEW: ADMIN REVIEWS
+// ============================================================
+// Used by admin/Reviews.jsx — list and moderate reviews.
+// These call `/admin/reviews/*` endpoints that must exist on
+// the backend (added in the corrected reviewRoutes.js below).
+// ============================================================
+
+const getAdminReviews = async (params = {}) => {
+  return withRetry(async () => {
+    const response = await api.get("/admin/reviews", { params });
+
+    const payload = response?.data || {};
+
+    return {
+      success: payload.success ?? true,
+      reviews: payload.reviews || payload.data || [],
+      pagination: payload.pagination || {},
+      stats: payload.stats || {},
+      filters: payload.filters || {},
+    };
+  });
+};
+
+const updateReviewStatus = async (reviewId, status, moderationNote = "") => {
+  if (!reviewId) throw new Error("Review ID is required");
+  if (!status) throw new Error("Status is required");
+
+  return withRetry(async () => {
+    const response = await api.put(`/admin/reviews/${reviewId}/status`, {
+      status,
+      moderationNote,
     });
-    
-    return extractData(response);
-  }, 3, 3000);
-};
-
-/**
- * Alias for updateReviewStatus (for consistency)
- */
-export const updateReviewStatusAdmin = updateReviewStatus;
-
-/**
- * Hide review (admin) - WITH RETRY
- */
-export const hideReviewAdmin = async (id, reason) => {
-  return withRetry(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Hiding review:', id);
-
-    const response = await API.put(`/admin/reviews/${id}/hide`, { reason });
-    
-    console.log('✅ Review hidden:', id);
-    
-    return extractData(response);
-  }, 3, 3000);
-};
-
-/**
- * Restore review (admin) - WITH RETRY
- */
-export const restoreReviewAdmin = async (id) => {
-  return withRetry(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Restoring review:', id);
-
-    const response = await API.put(`/admin/reviews/${id}/restore`);
-    
-    console.log('✅ Review restored:', id);
-    
-    return extractData(response);
-  }, 3, 3000);
-};
-
-/**
- * Permanent delete review (admin) - WITH RETRY
- */
-export const permanentDeleteReviewAdmin = async (id, reason) => {
-  return withRetry(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('Authentication required');
-    }
-
-    console.log('📤 Permanently deleting review:', id);
-
-    const response = await API.delete(`/admin/reviews/${id}/permanent`, {
-      data: { reason }
-    });
-    
-    console.log('✅ Review permanently deleted:', id);
-    
-    return extractData(response);
-  }, 3, 3000);
+    return response.data;
+  });
 };
 
 // ============================================================
-// LEGACY FUNCTIONS (Keep for backward compatibility)
+// LEGACY COMPATIBILITY
 // ============================================================
 
-export const getTourReviews = async (tourId) => {
-  try {
-    console.warn('⚠️ getTourReviews is deprecated. Use getListingReviews instead.');
-    const response = await API.get(`/public/listings/${tourId}/reviews`);
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Get tour reviews error:', error);
-    throw error;
-  }
+const replyToReview = async (reviewId, comment) => {
+  return respondToReview(reviewId, comment);
 };
 
-export const replyToReview = async (id, reply) => {
-  try {
-    console.warn('⚠️ replyToReview is deprecated. Use respondToReview instead.');
-    const response = await API.post(`/reviews/${id}/reply`, { reply });
-    return extractData(response);
-  } catch (error) {
-    console.error('❌ Reply to review error:', error);
-    throw error;
-  }
+const fetchProviderReviews = async (filters = {}) => {
+  return getProviderReviews(filters);
+};
+
+const fetchProviderReviewStats = async (params = {}) => {
+  return getProviderReviewStats(params);
 };
 
 // ============================================================
-// HELPER FUNCTION - Check if user can review a booking
+// ERROR HELPER
 // ============================================================
-export const canReviewBooking = async (bookingId) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      return { canReview: false, reason: 'Authentication required' };
-    }
 
-    const result = await getReviewByBooking(bookingId);
-    
-    if (result.review) {
-      return { canReview: false, reason: 'Review already exists' };
-    }
+const getErrorMessage = (error) => {
+  if (!error) return "Something went wrong.";
 
-    return { canReview: true };
-  } catch (error) {
-    console.error('❌ canReviewBooking error:', error);
-    return { canReview: false, reason: error.message };
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+
+  if (typeof data === "string") return data;
+  if (data?.message) return data.message;
+  if (data?.error) return data.error;
+
+  switch (status) {
+    case 400:
+      return "Invalid review request.";
+    case 401:
+      return "Please log in again.";
+    case 403:
+      return "You do not have permission to perform this action.";
+    case 404:
+      return "Review or endpoint was not found.";
+    case 409:
+      return "This review action conflicts with the current review.";
+    case 429:
+      return "Too many requests. Please try again shortly.";
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return "The server is temporarily unavailable.";
+    default:
+      return error?.message || "Something went wrong. Please try again.";
   }
 };
 
@@ -703,13 +385,15 @@ export const canReviewBooking = async (bookingId) => {
 // DEFAULT EXPORT
 // ============================================================
 
-export default {
+const reviewService = {
   // Public
   getPublicReviews,
   getPublicReviewById,
   getListingReviews,
-  getProviderPublicReviews,
-  getReviewStats,
+  getPublicProviderReviews,
+  getProviderPublicReviews,     // ✅ NEW
+  getPublicReviewStats,
+
   // Traveler
   createReview,
   getMyReviews,
@@ -719,21 +403,66 @@ export default {
   deleteReview,
   toggleHelpful,
   reportReview,
+
   // Provider
   getProviderReviews,
   getProviderReviewStats,
   respondToReview,
   editProviderReply,
+
   // Admin
-  getAdminReviews,
-  getReviewStatsAdmin,
-  updateReviewStatus,
-  updateReviewStatusAdmin,
-  hideReviewAdmin,
-  restoreReviewAdmin,
-  permanentDeleteReviewAdmin,
+  getAdminReviews,              // ✅ NEW
+  updateReviewStatus,           // ✅ NEW
+
   // Legacy
-  getTourReviews,
   replyToReview,
-  canReviewBooking,
+  fetchProviderReviews,
+  fetchProviderReviewStats,
+
+  // Error
+  getErrorMessage,
+};
+
+export default reviewService;
+
+// ============================================================
+// NAMED EXPORTS
+// ============================================================
+
+export {
+  // Public
+  getPublicReviews,
+  getPublicReviewById,
+  getListingReviews,
+  getPublicProviderReviews,
+  getProviderPublicReviews,     // ✅ NEW
+  getPublicReviewStats,
+
+  // Traveler
+  createReview,
+  getMyReviews,
+  getReviewById,
+  getReviewByBooking,
+  updateReview,
+  deleteReview,
+  toggleHelpful,
+  reportReview,
+
+  // Provider
+  getProviderReviews,
+  getProviderReviewStats,
+  respondToReview,
+  editProviderReply,
+
+  // Admin
+  getAdminReviews,              // ✅ NEW
+  updateReviewStatus,           // ✅ NEW
+
+  // Legacy
+  replyToReview,
+  fetchProviderReviews,
+  fetchProviderReviewStats,
+
+  // Error
+  getErrorMessage,
 };

@@ -1,10 +1,11 @@
+
 // src/components/ui/VideoCard.jsx
 
 import React, { useRef, useState, useEffect } from "react";
-import { 
-  Play, 
-  Pause, 
-  Heart, 
+import {
+  Play,
+  Pause,
+  Heart,
   Maximize2,
   Loader2,
   AlertCircle,
@@ -12,107 +13,121 @@ import {
   VolumeX,
 } from "lucide-react";
 
-// ===============================
-// AI TOUR COLORS
-// ===============================
-// Teal  : #0D9488
-// Gold  : #F59E0B
-// Slate : #374151
-// ===============================
-
-const VideoCard = ({ 
-  video, 
+const VideoCard = ({
+  video,
   onClick,
   autoplay = false,
   showControls = true,
+  showLike = true,
   className = "",
 }) => {
   const videoRef = useRef(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
-  const [liked, setLiked] = useState(false);
+  const [liked, setLiked] = useState(Boolean(video?.isLiked));
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isMuted, setIsMuted] = useState(true);
-  const [isHovered, setIsHovered] = useState(false);
 
-  // Autoplay if enabled
-  useEffect(() => {
-    if (autoplay && videoRef.current) {
-      videoRef.current.play().catch(() => {});
-    }
-  }, [autoplay]);
+  const videoUrl = video?.url || video?.videoUrl || "";
+  const posterUrl =
+    video?.thumbnailUrl ||
+    video?.coverUrl ||
+    video?.poster ||
+    "";
 
-  // Handle video progress
+  const title = video?.title || "Tour video";
+  const location = video?.location || "AI Tour Rwanda";
+
   useEffect(() => {
-    const videoElement = videoRef.current;
-    if (!videoElement) return;
+    setLiked(Boolean(video?.isLiked));
+  }, [video?.id, video?._id, video?.isLiked]);
+
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element) return;
 
     const updateProgress = () => {
-      if (videoElement.duration) {
-        setProgress((videoElement.currentTime / videoElement.duration) * 100);
+      if (element.duration && Number.isFinite(element.duration)) {
+        setProgress((element.currentTime / element.duration) * 100);
       }
     };
 
-    videoElement.addEventListener('timeupdate', updateProgress);
-    return () => videoElement.removeEventListener('timeupdate', updateProgress);
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+
+    element.addEventListener("timeupdate", updateProgress);
+    element.addEventListener("play", handlePlay);
+    element.addEventListener("pause", handlePause);
+
+    return () => {
+      element.removeEventListener("timeupdate", updateProgress);
+      element.removeEventListener("play", handlePlay);
+      element.removeEventListener("pause", handlePause);
+    };
   }, []);
 
-  const handleMouseEnter = () => {
-    setIsHovered(true);
-    if (videoRef.current && !hasError) {
-      videoRef.current.play().catch(() => {});
-      setIsPlaying(true);
-    }
-  };
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element || !autoplay || !videoUrl) return;
 
-  const handleMouseLeave = () => {
-    setIsHovered(false);
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-      setIsPlaying(false);
-    }
-  };
+    element.play().catch(() => {
+      // Browsers may block autoplay.
+    });
+  }, [autoplay, videoUrl]);
 
-  const togglePlay = (e) => {
-    e.stopPropagation();
-    if (!videoRef.current || hasError) return;
+  const togglePlay = async (event) => {
+    event.stopPropagation();
 
-    if (isPlaying) {
-      videoRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      videoRef.current.play().catch(() => {});
-      setIsPlaying(true);
-    }
-  };
+    const element = videoRef.current;
+    if (!element || hasError || !videoUrl) return;
 
-  const toggleLike = (e) => {
-    e.stopPropagation();
-    setLiked(!liked);
-  };
-
-  const toggleMute = (e) => {
-    e.stopPropagation();
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const handleFullscreen = (e) => {
-    e.stopPropagation();
-    if (videoRef.current) {
-      if (videoRef.current.requestFullscreen) {
-        videoRef.current.requestFullscreen();
+    try {
+      if (element.paused) {
+        await element.play();
+      } else {
+        element.pause();
       }
+    } catch {
+      setHasError(true);
+      setIsLoading(false);
     }
   };
 
-  const handleVideoLoaded = () => {
-    setIsLoading(false);
-    setHasError(false);
+  const toggleMute = (event) => {
+    event.stopPropagation();
+
+    const element = videoRef.current;
+    if (!element) return;
+
+    element.muted = !element.muted;
+    setIsMuted(element.muted);
+  };
+
+  const toggleFullscreen = async (event) => {
+    event.stopPropagation();
+
+    const element = videoRef.current;
+    if (!element) return;
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      }
+    } catch (error) {
+      console.error("Unable to open fullscreen:", error);
+    }
+  };
+
+  const toggleLike = (event) => {
+    event.stopPropagation();
+
+    // This is local UI state only.
+    // Connect this to your likes API to persist likes.
+    setLiked((previous) => !previous);
   };
 
   const handleVideoError = () => {
@@ -121,220 +136,139 @@ const VideoCard = ({
   };
 
   return (
-    <div
+    <article
       onClick={() => onClick?.(video)}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
       className={`
-        relative
-        min-w-[280px]
-        w-full
-        h-[380px]
-        rounded-2xl
-        overflow-hidden
-        cursor-pointer
-        group
-        shadow-lg
-        bg-black
-        hover:scale-[1.02]
-        transition-all
-        duration-300
+        relative group w-full min-w-0 h-[380px]
+        overflow-hidden rounded-2xl bg-[#374151]
+        shadow-lg transition-transform duration-300
+        hover:scale-[1.01]
+        ${onClick ? "cursor-pointer" : ""}
         ${className}
       `}
     >
-      {/* VIDEO */}
-      {hasError ? (
-        <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-white p-4">
-          <AlertCircle className="w-12 h-12 text-red-500 mb-3" />
-          <p className="text-sm text-gray-400">Unable to load video</p>
+      {!videoUrl || hasError ? (
+        <div className="flex h-full flex-col items-center justify-center gap-3 bg-[#374151] p-5 text-center text-white">
+          <AlertCircle className="h-10 w-10 text-[#F59E0B]" />
+          <p className="text-sm text-white/80">
+            {videoUrl
+              ? "Unable to load this video."
+              : "Video is not available."}
+          </p>
         </div>
       ) : (
         <>
           <video
             ref={videoRef}
-            src={video.url}
-            className="w-full h-full object-cover"
+            src={videoUrl}
+            poster={posterUrl || undefined}
+            className="h-full w-full object-cover"
             muted={isMuted}
             loop
             playsInline
-            onLoadedData={handleVideoLoaded}
+            preload="metadata"
+            onLoadedData={() => {
+              setIsLoading(false);
+              setHasError(false);
+            }}
             onError={handleVideoError}
           />
 
-          {/* Loading Spinner */}
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <Loader2 className="w-10 h-10 text-white animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+              {posterUrl && (
+                <img
+                  src={posterUrl}
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              )}
+              <Loader2 className="relative z-10 h-9 w-9 animate-spin text-white" />
             </div>
           )}
         </>
       )}
 
-      {/* DARK OVERLAY - Only show on hover or when not playing */}
-      <div className={`
-        absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20
-        transition-opacity duration-300
-        ${isPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}
-      `} />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/10" />
 
-      {/* TITLE - Always visible, hidden when playing on hover */}
-      <div className={`
-        absolute bottom-4 left-4 right-4
-        transition-opacity duration-300
-        ${isPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}
-      `}>
-        <h3 className="text-white font-bold text-lg line-clamp-1">
-          {video.title}
+      <div className="absolute bottom-5 left-4 right-4">
+        <h3 className="line-clamp-1 text-lg font-bold text-white">
+          {title}
         </h3>
-        <p className="text-white/70 text-sm line-clamp-1">
-          {video.location || "AI Tour Rwanda"}
+        <p className="mt-1 line-clamp-1 text-sm text-white/75">
+          {location}
         </p>
       </div>
 
-      {/* PLAY BUTTON */}
-      {showControls && (
+      {showControls && videoUrl && !hasError && (
+        <>
+          <button
+            type="button"
+            onClick={togglePlay}
+            aria-label={isPlaying ? "Pause video" : "Play video"}
+            className="absolute left-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-[#0D9488]/90 text-white shadow-md transition hover:bg-[#0D9488]"
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : isPlaying ? (
+              <Pause size={18} />
+            ) : (
+              <Play size={18} />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleMute}
+            aria-label={isMuted ? "Unmute video" : "Mute video"}
+            className="absolute bottom-[76px] right-4 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition hover:bg-black/80 sm:opacity-0 sm:group-hover:opacity-100"
+          >
+            {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            aria-label="View fullscreen"
+            className="absolute bottom-[76px] right-16 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition hover:bg-black/80 sm:opacity-0 sm:group-hover:opacity-100"
+          >
+            <Maximize2 size={16} />
+          </button>
+
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+            <div
+              className="h-full bg-[#0D9488] transition-[width] duration-150"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </>
+      )}
+
+      {showLike && (
         <button
-          onClick={togglePlay}
-          disabled={hasError}
-          className={`
-            absolute
-            top-4
-            left-4
-            w-10
-            h-10
-            rounded-full
-            bg-white/20
-            backdrop-blur-md
-            flex
-            items-center
-            justify-center
-            text-white
-            hover:bg-white/30
-            transition
-            disabled:opacity-50
-            disabled:cursor-not-allowed
-          `}
+          type="button"
+          onClick={toggleLike}
+          aria-label={liked ? "Unlike video" : "Like video"}
+          aria-pressed={liked}
+          className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition hover:bg-black/60"
         >
-          {isLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : isPlaying ? (
-            <Pause size={18} />
-          ) : (
-            <Play size={18} />
-          )}
+          <Heart
+            size={18}
+            className={
+              liked
+                ? "fill-[#F59E0B] text-[#F59E0B]"
+                : "text-white"
+            }
+          />
         </button>
       )}
 
-      {/* LIKE BUTTON */}
-      <button
-        onClick={toggleLike}
-        className="
-          absolute
-          top-4
-          right-4
-          w-10
-          h-10
-          rounded-full
-          bg-white/20
-          backdrop-blur-md
-          flex
-          items-center
-          justify-center
-          hover:bg-white/30
-          transition
-        "
-      >
-        <Heart
-          size={18}
-          className={`transition-colors duration-300 ${
-            liked ? "text-[#F59E0B] fill-[#F59E0B]" : "text-white hover:text-[#F59E0B]"
-          }`}
-        />
-      </button>
-
-      {/* MUTE BUTTON - Shows on hover */}
-      <button
-        onClick={toggleMute}
-        className={`
-          absolute
-          bottom-16
-          right-4
-          w-8
-          h-8
-          rounded-full
-          bg-black/50
-          backdrop-blur-md
-          flex
-          items-center
-          justify-center
-          text-white
-          hover:bg-black/70
-          transition
-          opacity-0
-          group-hover:opacity-100
-        `}
-      >
-        {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-      </button>
-
-      {/* FULLSCREEN BUTTON - Shows on hover */}
-      <button
-        onClick={handleFullscreen}
-        className="
-          absolute
-          bottom-16
-          right-14
-          w-8
-          h-8
-          rounded-full
-          bg-black/50
-          backdrop-blur-md
-          flex
-          items-center
-          justify-center
-          text-white
-          hover:bg-black/70
-          transition
-          opacity-0
-          group-hover:opacity-100
-        "
-      >
-        <Maximize2 size={14} />
-      </button>
-
-      {/* PROGRESS BAR - Shows on hover */}
-      <div className="
-        absolute
-        bottom-0
-        left-0
-        right-0
-        h-1
-        bg-white/20
-        opacity-0
-        group-hover:opacity-100
-        transition-opacity
-        duration-300
-      ">
-        <div 
-          className="h-full bg-[#0D9488] transition-all duration-300"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-
-      {/* AI BADGE */}
-      <div className="absolute bottom-16 left-4">
-        <span className="bg-[#0D9488] text-white text-xs px-3 py-1 rounded-full shadow-lg">
+      {video?.isAIPreview === true && (
+        <div className="absolute bottom-[76px] left-4 rounded-full bg-[#0D9488] px-3 py-1 text-xs font-semibold text-white shadow">
           AI Preview
-        </span>
-      </div>
-
-      {/* VIEWS COUNT - Optional */}
-      {video.views && (
-        <div className="absolute top-4 left-20 text-white/70 text-xs">
-          👁️ {video.views}
         </div>
       )}
-    </div>
+    </article>
   );
 };
 

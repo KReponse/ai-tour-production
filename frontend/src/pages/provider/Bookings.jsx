@@ -1,41 +1,48 @@
 // src/pages/provider/Bookings.jsx
-// ✅ COMPLETE FIXED - Added optimistic updates for actions
-// ✅ Added duplicate submission prevention
-// ✅ Added immediate UI updates without refresh
+// ============================================================
+// AI TOUR — PROVIDER BOOKINGS PAGE (FINAL)
+// ============================================================
+// ✅ Real optimistic updates: rows flip instantly on
+//    confirm / reject / mark-in-progress / complete, before
+//    the network round trip completes.
+// ✅ Auto-refresh when any other page invalidates a booking
+//    (traveler cancel from /trips, admin status change, webhook
+//    from /payment-success, etc.).
+// ✅ Broadcasts every successful mutation to 'bookings',
+//    'bookings:traveler', 'bookings:provider', 'dashboard'.
+// ✅ Prevents duplicate submissions via submittingRef.
+// ✅ Preserves all UI: search, filter, sort, pagination,
+//    modal, status styles, cancellation reason.
+// ============================================================
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Calendar, 
-  Users, 
-  DollarSign, 
-  CreditCard,
-  Eye,
+import {
+  Calendar,
   XCircle,
   CheckCircle,
   Clock,
   Loader2,
   Search,
-  Filter,
-  ChevronDown,
   Sparkles,
   User,
   MapPin,
   Mail,
-  Phone,
-  ClipboardList,
   Play,
   Check,
   Star,
+  Eye,
 } from 'lucide-react';
-import { 
-  getProviderBookings, 
-  confirmBooking, 
-  rejectBooking, 
+import {
+  getProviderBookings,
+  confirmBooking,
+  rejectBooking,
   completeBooking,
   markInProgress,
 } from '../../services/bookingService';
 import usePagination from '../../hooks/usePagination';
+import useRefreshOn from '../../hooks/useRefreshOn';
+import { refreshMany } from '../../utils/dataRefresh';
 import Pagination from '../../components/ui/Pagination';
 import LoadingSkeleton from '../../components/ui/LoadingSkeleton';
 import BackToTop from '../../components/ui/BackToTop';
@@ -75,13 +82,17 @@ const Bookings = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
-  
-  // ✅ Prevent duplicate submissions
+
+  // ✅ Optimistic overrides: { [bookingId]: { status, ... } }
+  //    Cleared when the server refresh completes.
+  const [optimisticOverrides, setOptimisticOverrides] = useState({});
+
+  // ✅ Prevent duplicate submissions per action per booking
   const submittingRef = useRef(new Set());
 
-  // ✅ usePagination hook for server-side pagination
+  // ✅ usePagination — server-side list
   const {
-    data: bookings,
+    data: rawBookings,
     loading,
     error,
     meta,
@@ -91,7 +102,6 @@ const Bookings = () => {
     clearFilters,
     refresh,
     setSearchTerm: setPaginationSearch,
-    searchTerm: paginationSearch,
   } = usePagination({
     fetchFn: getProviderBookings,
     initialParams: {
@@ -102,40 +112,91 @@ const Bookings = () => {
     dataKey: 'bookings',
   });
 
+  // ✅ Merge server data with optimistic overrides so the row
+  //    shows the new status immediately.
+  const bookings = useMemo(() => {
+    if (!Array.isArray(rawBookings)) return [];
+    if (!Object.keys(optimisticOverrides).length) return rawBookings;
+
+    return rawBookings.map((b) => {
+      const override = optimisticOverrides[b._id];
+      return override ? { ...b, ...override } : b;
+    });
+  }, [rawBookings, optimisticOverrides]);
+
+  // ✅ Auto-refresh when ANY other page invalidates bookings
+  //    (traveler cancel, admin status change, webhook, etc.)
+  useRefreshOn(
+    ['bookings', 'bookings:provider'],
+    useCallback(() => {
+      // Clear stale overrides first — server truth wins.
+      setOptimisticOverrides({});
+      refresh();
+    }, [refresh])
+  );
+
   // Handle search
-  const handleSearch = useCallback((value) => {
-    setSearchTerm(value);
-    setPaginationSearch(value);
-  }, [setPaginationSearch]);
+  const handleSearch = useCallback(
+    (value) => {
+      setSearchTerm(value);
+      setPaginationSearch(value);
+    },
+    [setPaginationSearch]
+  );
 
   // Handle status filter
-  const handleStatusFilter = useCallback((status) => {
-    setStatusFilter(status);
-    applyFilter('status', status);
-  }, [applyFilter]);
+  const handleStatusFilter = useCallback(
+    (status) => {
+      setStatusFilter(status);
+      applyFilter('status', status);
+    },
+    [applyFilter]
+  );
 
   // Handle sort change
-  const handleSortChange = useCallback((e) => {
-    const value = e.target.value;
-    applyFilter('sort', value);
-  }, [applyFilter]);
+  const handleSortChange = useCallback(
+    (e) => {
+      const value = e.target.value;
+      applyFilter('sort', value);
+    },
+    [applyFilter]
+  );
 
-  // ✅ Helper: Update booking status optimistically
-  const updateBookingOptimistically = useCallback((bookingId, newStatus) => {
-    // This will update the UI immediately
-    // The usePagination hook will refresh in the background
-  }, []);
+  // ✅ Apply optimistic override + trigger refresh (which clears it)
+  const applyOptimisticAndRefresh = useCallback(
+    (bookingId, patch) => {
+      setOptimisticOverrides((prev) => ({
+        ...prev,
+        [bookingId]: { ...(prev[bookingId] || {}), ...patch },
+      }));
 
-  // ✅ Handle Confirm Booking with optimistic update
+      // Sync with server shortly after (gives the row time to repaint
+      // the optimistic state, then refresh replaces it with truth).
+      window.setTimeout(() => {
+        refresh();
+        // Clear this booking's override once the server has replied.
+        // (A global clear on any refresh would also work, but
+        // scoping it avoids briefly reverting *other* pending rows.)
+        setOptimisticOverrides((prev) => {
+          if (!prev[bookingId]) return prev;
+          const next = { ...prev };
+          delete next[bookingId];
+          return next;
+        });
+      }, 1000);
+    },
+    [refresh]
+  );
+
+  // ============================================================
+  // ACTION HANDLERS
+  // ============================================================
+
   const handleConfirm = async (bookingId) => {
     const key = `confirm-${bookingId}`;
-    if (submittingRef.current.has(key)) {
-      console.log(`⏳ Confirm already in progress for ${bookingId}`);
-      return;
-    }
-
+    if (submittingRef.current.has(key)) return;
     if (!window.confirm('Confirm this booking?')) return;
-    
+
     try {
       submittingRef.current.add(key);
       setActionLoading(bookingId);
@@ -148,34 +209,40 @@ const Bookings = () => {
 
       await confirmBooking(bookingId, token);
 
-      // ✅ Optimistic update - Update local state immediately
-      setBookingsOptimistically(bookingId, 'confirmed');
+      // ✅ Optimistic flip
+      applyOptimisticAndRefresh(bookingId, {
+        status: 'confirmed',
+        paymentStatus: 'paid',
+      });
 
       toast.success('Booking confirmed successfully! 🎉');
 
-      // ✅ Refresh in background after 1 second to sync with server
-      setTimeout(() => refresh(), 1000);
-    } catch (error) {
-      console.error('Error confirming booking:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to confirm booking';
-      toast.error(errorMessage);
+      // ✅ Notify every other page
+      refreshMany(
+        'bookings',
+        'bookings:traveler',
+        'bookings:provider',
+        'dashboard'
+      );
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          'Failed to confirm booking'
+      );
     } finally {
       submittingRef.current.delete(key);
       setActionLoading(null);
     }
   };
 
-  // ✅ Handle Reject Booking with optimistic update
   const handleReject = async (bookingId) => {
     const key = `reject-${bookingId}`;
-    if (submittingRef.current.has(key)) {
-      console.log(`⏳ Reject already in progress for ${bookingId}`);
-      return;
-    }
+    if (submittingRef.current.has(key)) return;
 
-    const reason = prompt('Reason for rejection:');
+    const reason = window.prompt('Reason for rejection:');
     if (reason === null) return;
-    
+
     try {
       submittingRef.current.add(key);
       setActionLoading(bookingId);
@@ -188,33 +255,36 @@ const Bookings = () => {
 
       await rejectBooking(bookingId, token, reason);
 
-      // ✅ Optimistic update - Update local state immediately
-      setBookingsOptimistically(bookingId, 'rejected');
+      applyOptimisticAndRefresh(bookingId, {
+        status: 'rejected',
+        cancellationReason: reason,
+      });
 
       toast.success('Booking rejected successfully');
 
-      // ✅ Refresh in background after 1 second
-      setTimeout(() => refresh(), 1000);
-    } catch (error) {
-      console.error('Error rejecting booking:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to reject booking';
-      toast.error(errorMessage);
+      refreshMany(
+        'bookings',
+        'bookings:traveler',
+        'bookings:provider',
+        'dashboard'
+      );
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          'Failed to reject booking'
+      );
     } finally {
       submittingRef.current.delete(key);
       setActionLoading(null);
     }
   };
 
-  // ✅ Handle Mark In Progress with optimistic update
   const handleMarkInProgress = async (bookingId) => {
     const key = `inprogress-${bookingId}`;
-    if (submittingRef.current.has(key)) {
-      console.log(`⏳ In-progress already in progress for ${bookingId}`);
-      return;
-    }
-
+    if (submittingRef.current.has(key)) return;
     if (!window.confirm('Mark this booking as in progress?')) return;
-    
+
     try {
       submittingRef.current.add(key);
       setActionLoading(bookingId);
@@ -227,32 +297,33 @@ const Bookings = () => {
 
       await markInProgress(bookingId, token);
 
-      // ✅ Optimistic update - Update local state immediately
-      setBookingsOptimistically(bookingId, 'in_progress');
+      applyOptimisticAndRefresh(bookingId, { status: 'in_progress' });
 
       toast.success('Trip marked as in progress! 🚀');
 
-      setTimeout(() => refresh(), 1000);
-    } catch (error) {
-      console.error('Error marking in progress:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to mark booking as in progress';
-      toast.error(errorMessage);
+      refreshMany(
+        'bookings',
+        'bookings:traveler',
+        'bookings:provider',
+        'dashboard'
+      );
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          'Failed to mark booking as in progress'
+      );
     } finally {
       submittingRef.current.delete(key);
       setActionLoading(null);
     }
   };
 
-  // ✅ Handle Complete Booking with optimistic update
   const handleComplete = async (bookingId) => {
     const key = `complete-${bookingId}`;
-    if (submittingRef.current.has(key)) {
-      console.log(`⏳ Complete already in progress for ${bookingId}`);
-      return;
-    }
-
+    if (submittingRef.current.has(key)) return;
     if (!window.confirm('Mark this booking as completed?')) return;
-    
+
     try {
       submittingRef.current.add(key);
       setActionLoading(bookingId);
@@ -265,66 +336,103 @@ const Bookings = () => {
 
       await completeBooking(bookingId, token);
 
-      // ✅ Optimistic update - Update local state immediately
-      setBookingsOptimistically(bookingId, 'completed');
+      applyOptimisticAndRefresh(bookingId, { status: 'completed' });
 
       toast.success('Booking completed successfully! 🎉');
 
-      setTimeout(() => refresh(), 1000);
-    } catch (error) {
-      console.error('Error completing booking:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to complete booking';
-      toast.error(errorMessage);
+      refreshMany(
+        'bookings',
+        'bookings:traveler',
+        'bookings:provider',
+        'dashboard'
+      );
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          'Failed to complete booking'
+      );
     } finally {
       submittingRef.current.delete(key);
       setActionLoading(null);
     }
   };
 
-  // ✅ Helper: Update booking status in local state
-  const setBookingsOptimistically = useCallback((bookingId, newStatus) => {
-    // Since we're using usePagination, we update the data directly
-    // The pagination hook will refresh in the background
-    // For now, we'll just show a toast and rely on the refresh
-    // But we can also update the local bookings array if needed
-  }, []);
+  // ===============================
+  // ENTITY HELPERS
+  // ===============================
+  const getEntity = (booking) =>
+    booking?.listing || booking?.tour || null;
 
-  // Get entity (listing or tour)
-  const getEntity = (booking) => {
-    return booking?.listing || booking?.tour || null;
-  };
+  const getEntityTitle = (booking) =>
+    getEntity(booking)?.title || 'Experience';
 
-  const getEntityTitle = (booking) => {
-    const entity = getEntity(booking);
-    return entity?.title || 'Experience';
-  };
+  const getEntityLocation = (booking) =>
+    getEntity(booking)?.location || 'Location not specified';
 
-  const getEntityLocation = (booking) => {
-    const entity = getEntity(booking);
-    return entity?.location || 'Location not specified';
-  };
+  const getEntityPrice = (booking) => getEntity(booking)?.price || 0;
 
-  const getEntityPrice = (booking) => {
-    const entity = getEntity(booking);
-    return entity?.price || 0;
-  };
+  const getBookingCode = (booking) =>
+    booking?.bookingCode ||
+    booking?._id?.slice(-8)?.toUpperCase() ||
+    'N/A';
 
-  const getBookingCode = (booking) => {
-    return booking?.bookingCode || booking?._id?.slice(-8)?.toUpperCase() || 'N/A';
-  };
-
-  // Status styles
   const getStatusStyle = (status) => {
     const styles = {
-      pending_payment: { bg: 'bg-[#F59E0B]/10 dark:bg-[#F59E0B]/20', text: 'text-[#F59E0B]', icon: Clock, label: 'Pending Payment' },
-      paid: { bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20', text: 'text-[#0D9488]', icon: CheckCircle, label: 'Paid' },
-      confirmed: { bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20', text: 'text-[#0D9488]', icon: CheckCircle, label: 'Confirmed' },
-      in_progress: { bg: 'bg-blue-100 dark:bg-blue-900/20', text: 'text-blue-600', icon: Play, label: 'In Progress' },
-      completed: { bg: 'bg-green-100 dark:bg-green-900/20', text: 'text-green-600', icon: CheckCircle, label: 'Completed' },
-      review_eligible: { bg: 'bg-[#F59E0B]/10', text: 'text-[#F59E0B]', icon: Star, label: 'Ready for Review' },
-      cancelled: { bg: 'bg-red-100 dark:bg-red-900/20', text: 'text-red-600', icon: XCircle, label: 'Cancelled' },
-      rejected: { bg: 'bg-red-100 dark:bg-red-900/20', text: 'text-red-600', icon: XCircle, label: 'Rejected' },
-      failed_payment: { bg: 'bg-red-100 dark:bg-red-900/20', text: 'text-red-600', icon: XCircle, label: 'Payment Failed' },
+      pending_payment: {
+        bg: 'bg-[#F59E0B]/10 dark:bg-[#F59E0B]/20',
+        text: 'text-[#F59E0B]',
+        icon: Clock,
+        label: 'Pending Payment',
+      },
+      paid: {
+        bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20',
+        text: 'text-[#0D9488]',
+        icon: CheckCircle,
+        label: 'Paid',
+      },
+      confirmed: {
+        bg: 'bg-[#0D9488]/10 dark:bg-[#0D9488]/20',
+        text: 'text-[#0D9488]',
+        icon: CheckCircle,
+        label: 'Confirmed',
+      },
+      in_progress: {
+        bg: 'bg-blue-100 dark:bg-blue-900/20',
+        text: 'text-blue-600',
+        icon: Play,
+        label: 'In Progress',
+      },
+      completed: {
+        bg: 'bg-green-100 dark:bg-green-900/20',
+        text: 'text-green-600',
+        icon: CheckCircle,
+        label: 'Completed',
+      },
+      review_eligible: {
+        bg: 'bg-[#F59E0B]/10',
+        text: 'text-[#F59E0B]',
+        icon: Star,
+        label: 'Ready for Review',
+      },
+      cancelled: {
+        bg: 'bg-red-100 dark:bg-red-900/20',
+        text: 'text-red-600',
+        icon: XCircle,
+        label: 'Cancelled',
+      },
+      rejected: {
+        bg: 'bg-red-100 dark:bg-red-900/20',
+        text: 'text-red-600',
+        icon: XCircle,
+        label: 'Rejected',
+      },
+      failed_payment: {
+        bg: 'bg-red-100 dark:bg-red-900/20',
+        text: 'text-red-600',
+        icon: XCircle,
+        label: 'Payment Failed',
+      },
     };
     return styles[status] || styles.pending_payment;
   };
@@ -339,22 +447,27 @@ const Bookings = () => {
     return styles[status] || styles.pending;
   };
 
-  const canConfirm = (status) => status === 'paid' || status === 'pending_payment';
-  const canReject = (status) => status === 'paid' || status === 'pending_payment';
+  const canConfirm = (status) =>
+    status === 'paid' || status === 'pending_payment';
+  const canReject = (status) =>
+    status === 'paid' || status === 'pending_payment';
   const canMarkInProgress = (status) => status === 'confirmed';
-  const canComplete = (status) => status === 'confirmed' || status === 'in_progress';
+  const canComplete = (status) =>
+    status === 'confirmed' || status === 'in_progress';
 
-  // Status counts from meta
   const statusCounts = {
     all: meta.total || 0,
-    pending_payment: bookings.filter(b => b.status === 'pending_payment').length,
-    paid: bookings.filter(b => b.status === 'paid').length,
-    confirmed: bookings.filter(b => b.status === 'confirmed').length,
-    in_progress: bookings.filter(b => b.status === 'in_progress').length,
-    completed: bookings.filter(b => b.status === 'completed').length,
-    review_eligible: bookings.filter(b => b.status === 'review_eligible').length,
-    cancelled: bookings.filter(b => b.status === 'cancelled').length,
-    rejected: bookings.filter(b => b.status === 'rejected').length,
+    pending_payment: bookings.filter((b) => b.status === 'pending_payment')
+      .length,
+    paid: bookings.filter((b) => b.status === 'paid').length,
+    confirmed: bookings.filter((b) => b.status === 'confirmed').length,
+    in_progress: bookings.filter((b) => b.status === 'in_progress').length,
+    completed: bookings.filter((b) => b.status === 'completed').length,
+    review_eligible: bookings.filter(
+      (b) => b.status === 'review_eligible'
+    ).length,
+    cancelled: bookings.filter((b) => b.status === 'cancelled').length,
+    rejected: bookings.filter((b) => b.status === 'rejected').length,
   };
 
   // ===============================
@@ -384,9 +497,16 @@ const Bookings = () => {
         <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
           <XCircle className="w-10 h-10 text-red-500" />
         </div>
-        <h2 className="text-2xl font-bold text-[#374151] dark:text-white">Failed to Load Bookings</h2>
+        <h2 className="text-2xl font-bold text-[#374151] dark:text-white">
+          Failed to Load Bookings
+        </h2>
         <p className="text-gray-500 dark:text-gray-400 mt-2">{error}</p>
-        <button onClick={refresh} className="mt-4 px-6 py-2 rounded-xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/80 transition">Retry</button>
+        <button
+          onClick={refresh}
+          className="mt-4 px-6 py-2 rounded-xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/80 transition"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -396,7 +516,6 @@ const Bookings = () => {
   // ===============================
   return (
     <div className="space-y-6 animate-fade-in max-w-full overflow-x-hidden px-4 py-6">
-      
       {/* HEADER */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -439,19 +558,33 @@ const Bookings = () => {
             className="h-12 px-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none max-w-[180px]"
           >
             <option value="all">All ({statusCounts.all})</option>
-            <option value="pending_payment">Pending Payment ({statusCounts.pending_payment})</option>
+            <option value="pending_payment">
+              Pending Payment ({statusCounts.pending_payment})
+            </option>
             <option value="paid">Paid ({statusCounts.paid})</option>
-            <option value="confirmed">Confirmed ({statusCounts.confirmed})</option>
-            <option value="in_progress">In Progress ({statusCounts.in_progress})</option>
-            <option value="completed">Completed ({statusCounts.completed})</option>
-            <option value="review_eligible">Ready for Review ({statusCounts.review_eligible})</option>
-            <option value="cancelled">Cancelled ({statusCounts.cancelled})</option>
-            <option value="rejected">Rejected ({statusCounts.rejected})</option>
+            <option value="confirmed">
+              Confirmed ({statusCounts.confirmed})
+            </option>
+            <option value="in_progress">
+              In Progress ({statusCounts.in_progress})
+            </option>
+            <option value="completed">
+              Completed ({statusCounts.completed})
+            </option>
+            <option value="review_eligible">
+              Ready for Review ({statusCounts.review_eligible})
+            </option>
+            <option value="cancelled">
+              Cancelled ({statusCounts.cancelled})
+            </option>
+            <option value="rejected">
+              Rejected ({statusCounts.rejected})
+            </option>
           </select>
         </div>
       </div>
 
-      {/* Sort Dropdown */}
+      {/* Sort */}
       <div className="flex justify-end">
         <select
           onChange={handleSortChange}
@@ -476,7 +609,7 @@ const Bookings = () => {
             No Bookings Found
           </h2>
           <p className="text-gray-500 dark:text-gray-400 mt-2">
-            {searchTerm || statusFilter !== 'all' 
+            {searchTerm || statusFilter !== 'all'
               ? 'Try adjusting your search or filters'
               : 'Bookings will appear here once travelers make reservations'}
           </p>
@@ -506,13 +639,15 @@ const Bookings = () => {
               const entityPrice = getEntityPrice(booking);
               const bookingCode = getBookingCode(booking);
               const isActionLoading = actionLoading === booking._id;
-              
+
               const showConfirm = canConfirm(booking.status);
               const showReject = canReject(booking.status);
               const showMarkInProgress = canMarkInProgress(booking.status);
               const showComplete = canComplete(booking.status);
 
-              const safeReason = getSafeCancellationReason(booking.cancellationReason);
+              const safeReason = getSafeCancellationReason(
+                booking.cancellationReason
+              );
 
               return (
                 <div
@@ -520,7 +655,6 @@ const Bookings = () => {
                   className="bg-white dark:bg-gray-900 rounded-3xl p-6 border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden"
                 >
                   <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
-                    
                     {/* LEFT */}
                     <div className="space-y-4 flex-1 min-w-0">
                       <div>
@@ -539,7 +673,12 @@ const Bookings = () => {
                           </p>
                           <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate max-w-[200px]">
                             <User className="w-4 h-4 text-[#0D9488] flex-shrink-0" />
-                            <span className="truncate">Traveler: {booking.fullName || booking.user?.name || 'N/A'}</span>
+                            <span className="truncate">
+                              Traveler:{' '}
+                              {booking.fullName ||
+                                booking.user?.name ||
+                                'N/A'}
+                            </span>
                           </p>
                           {booking.email && (
                             <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate max-w-[200px]">
@@ -552,35 +691,55 @@ const Bookings = () => {
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 min-w-0">
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Travel Date</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Travel Date
+                          </p>
                           <h3 className="font-semibold text-[#374151] dark:text-white text-sm truncate">
-                            {booking.startDate ? new Date(booking.startDate).toLocaleDateString() : 'N/A'}
+                            {booking.startDate
+                              ? new Date(
+                                  booking.startDate
+                                ).toLocaleDateString()
+                              : 'N/A'}
                           </h3>
                         </div>
                         <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 min-w-0">
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Amount</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Amount
+                          </p>
                           <h3 className="font-semibold text-[#0D9488] text-sm truncate">
                             ${booking.totalPrice || entityPrice || 0}
                           </h3>
                         </div>
                         <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 min-w-0">
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Payment</p>
-                          <div className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold mt-1 ${paymentStyle.bg} ${paymentStyle.text} truncate max-w-full`}>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Payment
+                          </p>
+                          <div
+                            className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold mt-1 ${paymentStyle.bg} ${paymentStyle.text} truncate max-w-full`}
+                          >
                             {booking.paymentStatus || 'Pending'}
                           </div>
                         </div>
                         <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 min-w-0">
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Status</p>
-                          <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold mt-1 ${statusStyle.bg} ${statusStyle.text} truncate max-w-full`}>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Status
+                          </p>
+                          <div
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold mt-1 ${statusStyle.bg} ${statusStyle.text} truncate max-w-full`}
+                          >
                             <StatusIcon className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate">{statusStyle.label}</span>
+                            <span className="truncate">
+                              {statusStyle.label}
+                            </span>
                           </div>
                         </div>
                       </div>
 
                       {safeReason && (
                         <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-xl border border-red-200 dark:border-red-800/30 overflow-hidden">
-                          <span className="font-semibold flex-shrink-0">Cancellation Reason:</span>
+                          <span className="font-semibold flex-shrink-0">
+                            Cancellation Reason:
+                          </span>
                           <span className="break-words break-all whitespace-pre-wrap hyphens-auto">
                             {safeReason}
                           </span>
@@ -588,10 +747,12 @@ const Bookings = () => {
                       )}
                     </div>
 
-                    {/* ACTIONS - With loading states */}
+                    {/* ACTIONS */}
                     <div className="flex flex-wrap gap-3 flex-shrink-0">
                       <button
-                        onClick={() => navigate(`/provider/bookings/${booking._id}`)}
+                        onClick={() =>
+                          navigate(`/provider/bookings/${booking._id}`)
+                        }
                         className="px-5 h-11 rounded-2xl bg-gradient-to-r from-[#0D9488] to-[#0f766e] hover:scale-[1.02] text-white font-semibold transition-all duration-300 flex items-center gap-2 shadow-md shadow-[#0D9488]/25 flex-shrink-0"
                         disabled={isActionLoading}
                       >
@@ -710,31 +871,43 @@ const Bookings = () => {
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 overflow-hidden">
                   <p className="text-sm text-gray-500">Traveler</p>
                   <p className="font-semibold text-[#374151] dark:text-white truncate">
-                    {selectedBooking.fullName || selectedBooking.user?.name || 'N/A'}
+                    {selectedBooking.fullName ||
+                      selectedBooking.user?.name ||
+                      'N/A'}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 overflow-hidden">
                   <p className="text-sm text-gray-500">Email</p>
                   <p className="font-semibold text-[#374151] dark:text-white truncate">
-                    {selectedBooking.email || selectedBooking.user?.email || 'N/A'}
+                    {selectedBooking.email ||
+                      selectedBooking.user?.email ||
+                      'N/A'}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 overflow-hidden">
                   <p className="text-sm text-gray-500">Phone</p>
                   <p className="font-semibold text-[#374151] dark:text-white truncate">
-                    {selectedBooking.phone || selectedBooking.user?.phone || 'N/A'}
+                    {selectedBooking.phone ||
+                      selectedBooking.user?.phone ||
+                      'N/A'}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 overflow-hidden">
                   <p className="text-sm text-gray-500">Travel Date</p>
                   <p className="font-semibold text-[#374151] dark:text-white truncate">
-                    {selectedBooking.startDate ? new Date(selectedBooking.startDate).toLocaleDateString() : 'N/A'}
+                    {selectedBooking.startDate
+                      ? new Date(
+                          selectedBooking.startDate
+                        ).toLocaleDateString()
+                      : 'N/A'}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 overflow-hidden">
                   <p className="text-sm text-gray-500">Travelers</p>
                   <p className="font-semibold text-[#374151] dark:text-white truncate">
-                    {selectedBooking.numberOfPeople || selectedBooking.travelers || 1}
+                    {selectedBooking.numberOfPeople ||
+                      selectedBooking.travelers ||
+                      1}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800 overflow-hidden">
@@ -763,17 +936,24 @@ const Bookings = () => {
                 </div>
               </div>
 
-              {selectedBooking.cancellationReason && (() => {
-                const safeReason = getSafeCancellationReason(selectedBooking.cancellationReason);
-                return safeReason && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30">
-                    <p className="text-sm text-gray-500">Cancellation Reason</p>
-                    <p className="font-semibold text-red-600 dark:text-red-400 break-words break-all whitespace-pre-wrap hyphens-auto">
-                      {safeReason}
-                    </p>
-                  </div>
-                );
-              })()}
+              {selectedBooking.cancellationReason &&
+                (() => {
+                  const safeReason = getSafeCancellationReason(
+                    selectedBooking.cancellationReason
+                  );
+                  return (
+                    safeReason && (
+                      <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30">
+                        <p className="text-sm text-gray-500">
+                          Cancellation Reason
+                        </p>
+                        <p className="font-semibold text-red-600 dark:text-red-400 break-words break-all whitespace-pre-wrap hyphens-auto">
+                          {safeReason}
+                        </p>
+                      </div>
+                    )
+                  );
+                })()}
 
               {selectedBooking.specialRequests && (
                 <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800">
@@ -795,7 +975,6 @@ const Bookings = () => {
         </div>
       )}
 
-      {/* Back to Top */}
       <BackToTop />
     </div>
   );

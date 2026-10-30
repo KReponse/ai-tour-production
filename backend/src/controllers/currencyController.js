@@ -1,1259 +1,2711 @@
 // backend/src/controllers/currencyController.js
-// ✅ COMPLETE FIXED - Multi-Currency Controller with Full CRUD
-// ✅ Added missing Payment import
-// ✅ Added provider settlement currency endpoints
-// ✅ Added user preferred currency endpoints
-// ✅ Added currency validation and error handling
-// ✅ Added debug logging for convertAmount
+// ✅ FIXED - Multi-Currency Controller
+// ✅ Aligned with current currencyService API
+// ✅ convertAmount() handled as numeric result
+// ✅ formatAmount() correctly awaited
+// ✅ getCurrency() used instead of missing getCurrencyByCode()
+// ✅ Active currency validation aligned with currencyService
+// ✅ Default currency uses getDefaultCurrencyCode()
+// ✅ MVP platform commission enforced at 0%
+// ✅ Exchange-rate history direction normalized to FOREIGN -> RWF
+// ✅ Settlement currency endpoints preserved
+// ✅ User preferred currency endpoints preserved
 
 import Currency from "../models/Currency.js";
 import ExchangeRate from "../models/ExchangeRate.js";
 import Payment from "../models/Payment.js";
 import User from "../models/User.js";
+
 import currencyService from "../services/currencyService.js";
 import exchangeRateService from "../services/exchangeRateService.js";
 import settlementService from "../services/settlementService.js";
-import { createNotification } from "../utils/notificationService.js";
 
 // ============================================================
-// ✅ GET ALL CURRENCIES
+// HELPERS
 // ============================================================
 
-export const getCurrencies = async (req, res) => {
+const normalizeCode = (code) => {
+  return String(code || "")
+    .trim()
+    .toUpperCase();
+};
+
+const getUserId = (req) => {
+  return (
+    req.user?._id ||
+    req.user?.id ||
+    req.user?.userId ||
+    null
+  );
+};
+
+const getUserEmail = (req) => {
+  return req.user?.email || "unknown";
+};
+
+const clearCurrencyCaches = () => {
   try {
-    const { active = null } = req.query;
-
-    let currencies;
-    if (active === 'true') {
-      currencies = await currencyService.getActiveCurrencies();
-    } else if (active === 'false') {
-      currencies = await Currency.find({ isActive: false });
-    } else {
-      currencies = await Currency.find().sort({ isDefault: -1, code: 1 });
+    if (
+      typeof currencyService?.clearCache ===
+      "function"
+    ) {
+      currencyService.clearCache();
     }
 
-    const formattedCurrencies = currencies.map(c => ({
-      ...c.toObject ? c.toObject() : c,
-      formattedRate: currencyService.formatAmount(1, c.code),
-      isDefault: c.isDefault || false,
-      isBase: c.isBaseCurrency || false,
-    }));
+    if (
+      typeof exchangeRateService?.clearCache ===
+      "function"
+    ) {
+      exchangeRateService.clearCache();
+    }
+  } catch (error) {
+    console.warn(
+      "⚠️ Failed to clear currency caches:",
+      error.message
+    );
+  }
+};
 
-    res.json({
+const getCurrencyInfo = async (code) => {
+  const normalized = normalizeCode(code);
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    typeof currencyService?.getCurrency ===
+    "function"
+  ) {
+    return currencyService.getCurrency(
+      normalized
+    );
+  }
+
+  const currency =
+    await Currency.findOne({
+      code: normalized,
+      isActive: true,
+    }).lean();
+
+  return currency || null;
+};
+
+const isCurrencySupported = async (code) => {
+  const normalized = normalizeCode(code);
+
+  if (!normalized) {
+    return false;
+  }
+
+  try {
+    const currency =
+      await getCurrencyInfo(normalized);
+
+    return Boolean(
+      currency &&
+      currency.isActive !== false
+    );
+  } catch (error) {
+    console.warn(
+      `⚠️ Currency support check failed for ${normalized}:`,
+      error.message
+    );
+
+    return false;
+  }
+};
+
+const formatCurrencyAmount = async (
+  amount,
+  currency
+) => {
+  try {
+    if (
+      typeof currencyService?.formatAmount ===
+      "function"
+    ) {
+      return await currencyService.formatAmount(
+        amount,
+        currency
+      );
+    }
+
+    return `${currency} ${amount}`;
+  } catch (error) {
+    console.warn(
+      `⚠️ Currency formatting failed for ${currency}:`,
+      error.message
+    );
+
+    return `${currency} ${amount}`;
+  }
+};
+
+// ============================================================
+// GET ALL CURRENCIES
+// ============================================================
+
+export const getCurrencies = async (
+  req,
+  res
+) => {
+  try {
+    const { active = null } =
+      req.query;
+
+    let currencies;
+
+    if (active === "true") {
+      currencies =
+        await currencyService.getActiveCurrencies();
+    } else if (active === "false") {
+      currencies =
+        await Currency.find({
+          isActive: false,
+        }).sort({
+          code: 1,
+        });
+    } else {
+      currencies =
+        await Currency.find().sort({
+          isDefault: -1,
+          code: 1,
+        });
+    }
+
+    const formattedCurrencies =
+      await Promise.all(
+        currencies.map(
+          async (currency) => {
+            const plain =
+              typeof currency?.toObject ===
+              "function"
+                ? currency.toObject()
+                : currency;
+
+            return {
+              ...plain,
+
+              formattedRate:
+                await formatCurrencyAmount(
+                  1,
+                  currency.code
+                ),
+
+              isDefault:
+                Boolean(
+                  currency.isDefault
+                ),
+
+              isBase:
+                Boolean(
+                  currency.isBaseCurrency
+                ),
+            };
+          }
+        )
+      );
+
+    return res.json({
       success: true,
-      currencies: formattedCurrencies,
-      total: currencies.length,
+      currencies:
+        formattedCurrencies,
+      total:
+        formattedCurrencies.length,
     });
   } catch (error) {
-    console.error("❌ Get currencies error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get currencies error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to load currencies",
     });
   }
 };
 
 // ============================================================
-// ✅ GET CURRENCY BY CODE
+// GET CURRENCY BY CODE
 // ============================================================
 
-export const getCurrencyByCode = async (req, res) => {
+export const getCurrencyByCode = async (
+  req,
+  res
+) => {
   try {
-    const { code } = req.params;
+    const code =
+      normalizeCode(
+        req.params?.code
+      );
 
     if (!code) {
       return res.status(400).json({
         success: false,
-        message: "Currency code is required"
+        message:
+          "Currency code is required",
       });
     }
 
-    const currency = await currencyService.getCurrencyByCode(code);
+    const currency =
+      await getCurrencyInfo(code);
 
     if (!currency) {
       return res.status(404).json({
         success: false,
-        message: `Currency ${code} not found`
+        message:
+          `Currency ${code} not found`,
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       currency: {
         ...currency,
-        formattedRate: currencyService.formatAmount(1, currency.code),
+
+        formattedRate:
+          await formatCurrencyAmount(
+            1,
+            currency.code
+          ),
       },
     });
   } catch (error) {
-    console.error("❌ Get currency by code error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get currency by code error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to get currency",
     });
   }
 };
 
 // ============================================================
-// ✅ GET DEFAULT CURRENCY
+// GET DEFAULT CURRENCY
 // ============================================================
 
-export const getDefaultCurrency = async (req, res) => {
+export const getDefaultCurrency = async (
+  req,
+  res
+) => {
   try {
-    const currency = await currencyService.getDefaultCurrency();
+    const defaultCode =
+      typeof currencyService?.getDefaultCurrencyCode ===
+      "function"
+        ? await currencyService.getDefaultCurrencyCode()
+        : "RWF";
+
+    const currency =
+      await getCurrencyInfo(
+        defaultCode
+      );
 
     if (!currency) {
       return res.status(404).json({
         success: false,
-        message: "No default currency found"
+        message:
+          "No default currency found",
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
+
       currency: {
         ...currency,
-        formattedRate: currencyService.formatAmount(1, currency.code),
+
+        formattedRate:
+          await formatCurrencyAmount(
+            1,
+            currency.code
+          ),
       },
     });
   } catch (error) {
-    console.error("❌ Get default currency error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get default currency error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to get default currency",
     });
   }
 };
 
 // ============================================================
-// ✅ CREATE CURRENCY (Admin Only)
+// CREATE CURRENCY
+// ADMIN ONLY
 // ============================================================
 
-export const createCurrency = async (req, res) => {
+export const createCurrency = async (
+  req,
+  res
+) => {
   try {
     const {
       code,
       symbol,
       name,
+
       decimalPlaces = 2,
       exchangeRate = 1,
-      platformFeePercentage = 10,
+
+      // ✅ MVP = 0%
+      platformFeePercentage = 0,
+
       paymentMethods = [],
       settlementAllowed = true,
       isActive = true,
       isDefault = false,
       isBaseCurrency = false,
+
       format = {},
       countryCodes = [],
     } = req.body;
 
-    // ✅ Validate required fields
-    if (!code || !symbol || !name) {
+    if (
+      !code ||
+      !symbol ||
+      !name
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Code, symbol, and name are required"
+        message:
+          "Code, symbol, and name are required",
       });
     }
 
-    const upperCode = code.toUpperCase();
+    const upperCode =
+      normalizeCode(code);
 
-    // ✅ Check if currency already exists
-    const existing = await Currency.findOne({ code: upperCode });
+    const numericExchangeRate =
+      Number(exchangeRate);
+
+    if (
+      !Number.isFinite(
+        numericExchangeRate
+      ) ||
+      numericExchangeRate <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Exchange rate must be greater than 0",
+      });
+    }
+
+    const existing =
+      await Currency.findOne({
+        code: upperCode,
+      });
+
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: `Currency ${upperCode} already exists`
+        message:
+          `Currency ${upperCode} already exists`,
       });
     }
 
-    // ✅ Create currency
-    const currency = new Currency({
-      code: upperCode,
-      symbol,
-      name,
-      decimalPlaces,
-      exchangeRate,
-      platformFeePercentage,
-      paymentMethods,
-      settlementAllowed,
-      isActive,
-      isDefault,
-      isBaseCurrency,
-      format: {
-        locale: format.locale || 'en-US',
-        currencyDisplay: format.currencyDisplay || 'symbol',
-        position: format.position || 'before',
-      },
-      countryCodes,
-      createdBy: req.user._id,
-    });
+    const userId =
+      getUserId(req);
+
+    const currency =
+      new Currency({
+        code: upperCode,
+        symbol,
+        name,
+        decimalPlaces,
+
+        exchangeRate:
+          numericExchangeRate,
+
+        // ✅ Never allow platform commission
+        platformFeePercentage: 0,
+
+        paymentMethods,
+        settlementAllowed,
+        isActive,
+        isDefault,
+        isBaseCurrency,
+
+        format: {
+          locale:
+            format.locale ||
+            "en-US",
+
+          currencyDisplay:
+            format.currencyDisplay ||
+            "symbol",
+
+          position:
+            format.position ||
+            "before",
+        },
+
+        countryCodes,
+
+        createdBy:
+          userId || undefined,
+      });
 
     await currency.save();
 
-    // ✅ If this is the base currency, update exchange rate history
-    if (isBaseCurrency) {
-      await ExchangeRate.setRate(
-        upperCode,
-        'USD',
-        exchangeRate,
-        {
-          source: 'admin',
-          sourceProvider: 'manual',
-          createdBy: req.user._id,
-          metadata: { created: true },
-        }
-      );
+    // ----------------------------------------------------------
+    // EXCHANGE RATE HISTORY
+    // ----------------------------------------------------------
+    //
+    // Currency.exchangeRate is interpreted as:
+    //
+    // 1 FOREIGN CURRENCY = X RWF
+    //
+    // Therefore history is stored as:
+    //
+    // FOREIGN -> RWF
+    //
+    // Never RWF -> FOREIGN with the same numeric value.
+    // ----------------------------------------------------------
+
+    if (
+      isBaseCurrency &&
+      upperCode !== "RWF"
+    ) {
+      try {
+        await ExchangeRate.setRate(
+          upperCode,
+          "RWF",
+          numericExchangeRate,
+          {
+            source:
+              "admin",
+
+            sourceProvider:
+              "manual",
+
+            createdBy:
+              userId || undefined,
+
+            metadata: {
+              created: true,
+              baseCurrency: true,
+            },
+          }
+        );
+      } catch (rateError) {
+        console.warn(
+          "⚠️ Base currency exchange-rate history update failed:",
+          rateError.message
+        );
+      }
     }
 
-    // ✅ Clear cache
-    currencyService.clearCache();
+    clearCurrencyCaches();
 
-    // ✅ Log creation
-    console.log(`✅ Currency created: ${upperCode} by ${req.user.email}`);
+    console.log(
+      `✅ Currency created: ${upperCode} by ${getUserEmail(req)}`
+    );
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      message: `Currency ${upperCode} created successfully`,
+
+      message:
+        `Currency ${upperCode} created successfully`,
+
       currency: {
         ...currency.toObject(),
-        formattedRate: currencyService.formatAmount(1, currency.code),
+
+        formattedRate:
+          await formatCurrencyAmount(
+            1,
+            currency.code
+          ),
       },
     });
   } catch (error) {
-    console.error("❌ Create currency error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Create currency error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to create currency",
     });
   }
 };
 
 // ============================================================
-// ✅ UPDATE CURRENCY (Admin Only)
+// UPDATE CURRENCY
+// ADMIN ONLY
 // ============================================================
 
-export const updateCurrency = async (req, res) => {
+export const updateCurrency = async (
+  req,
+  res
+) => {
   try {
-    const { code } = req.params;
-    const updates = req.body;
+    const code =
+      normalizeCode(
+        req.params?.code
+      );
+
+    const updates = {
+      ...(req.body || {}),
+    };
 
     if (!code) {
       return res.status(400).json({
         success: false,
-        message: "Currency code is required"
+        message:
+          "Currency code is required",
       });
     }
 
-    const upperCode = code.toUpperCase();
-    const currency = await Currency.findOne({ code: upperCode });
+    const currency =
+      await Currency.findOne({
+        code,
+      });
 
     if (!currency) {
       return res.status(404).json({
         success: false,
-        message: `Currency ${upperCode} not found`
+        message:
+          `Currency ${code} not found`,
       });
     }
 
-    // ✅ Prevent changing code
+    // Never change currency code.
     delete updates.code;
 
-    // ✅ Track what changed for logging
     const changes = [];
-    const oldExchangeRate = currency.exchangeRate;
 
-    // ✅ Apply updates
-    Object.keys(updates).forEach(key => {
-      if (updates[key] !== undefined && updates[key] !== null) {
-        if (key === 'exchangeRate' && updates[key] !== oldExchangeRate) {
-          changes.push(`exchangeRate: ${oldExchangeRate} → ${updates[key]}`);
-        }
-        currency[key] = updates[key];
+    const oldExchangeRate =
+      Number(currency.exchangeRate);
+
+    // ----------------------------------------------------------
+    // MVP COMMISSION PROTECTION
+    // ----------------------------------------------------------
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        updates,
+        "platformFeePercentage"
+      )
+    ) {
+      const requestedFee =
+        Number(
+          updates.platformFeePercentage
+        );
+
+      if (
+        Number.isFinite(
+          requestedFee
+        ) &&
+        requestedFee !== 0
+      ) {
+        changes.push(
+          `platformFeePercentage: ${requestedFee} → 0`
+        );
+      }
+
+      updates.platformFeePercentage =
+        0;
+    }
+
+    // ----------------------------------------------------------
+    // EXCHANGE RATE
+    // ----------------------------------------------------------
+
+    if (
+      updates.exchangeRate !==
+      undefined
+    ) {
+      const numericRate =
+        Number(
+          updates.exchangeRate
+        );
+
+      if (
+        !Number.isFinite(
+          numericRate
+        ) ||
+        numericRate <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Exchange rate must be greater than 0",
+        });
+      }
+
+      if (
+        numericRate !==
+        oldExchangeRate
+      ) {
+        changes.push(
+          `exchangeRate: ${oldExchangeRate} → ${numericRate}`
+        );
+
+        updates.exchangeRate =
+          numericRate;
+      }
+    }
+
+    // ----------------------------------------------------------
+    // APPLY SAFE UPDATES
+    // ----------------------------------------------------------
+
+    Object.keys(
+      updates
+    ).forEach((key) => {
+      const value =
+        updates[key];
+
+      if (
+        value !== undefined &&
+        value !== null
+      ) {
+        currency[key] =
+          value;
       }
     });
 
-    // ✅ If exchange rate changed, update history
-    if (updates.exchangeRate && updates.exchangeRate !== oldExchangeRate) {
+    // ----------------------------------------------------------
+    // SAVE RATE HISTORY
+    // ----------------------------------------------------------
+
+    if (
+      updates.exchangeRate !==
+        undefined &&
+      Number(
+        updates.exchangeRate
+      ) !== oldExchangeRate
+    ) {
       await ExchangeRate.setRate(
-        currency.code,
-        'USD',
-        updates.exchangeRate,
+        code,
+        "RWF",
+        Number(
+          updates.exchangeRate
+        ),
         {
-          source: 'admin',
-          sourceProvider: 'manual',
-          createdBy: req.user._id,
-          metadata: { updated: true, oldRate: oldExchangeRate },
+          source:
+            "admin",
+
+          sourceProvider:
+            "manual",
+
+          createdBy:
+            getUserId(req) ||
+            undefined,
+
+          metadata: {
+            updated: true,
+            oldRate:
+              oldExchangeRate,
+          },
         }
       );
-      currency.exchangeRateUpdatedAt = new Date();
-      currency.exchangeRateSource = 'admin';
+
+      currency.exchangeRateUpdatedAt =
+        new Date();
+
+      currency.exchangeRateSource =
+        "admin";
     }
 
-    currency.updatedBy = req.user._id;
+    currency.updatedBy =
+      getUserId(req) ||
+      undefined;
+
     await currency.save();
 
-    // ✅ Clear cache
-    currencyService.clearCache();
+    clearCurrencyCaches();
 
-    // ✅ Log update
-    console.log(`✅ Currency updated: ${upperCode} by ${req.user.email}`);
-    if (changes.length > 0) {
-      console.log(`📝 Changes: ${changes.join(', ')}`);
+    console.log(
+      `✅ Currency updated: ${code} by ${getUserEmail(req)}`
+    );
+
+    if (
+      changes.length > 0
+    ) {
+      console.log(
+        `📝 Changes: ${changes.join(", ")}`
+      );
     }
 
-    res.json({
+    return res.json({
       success: true,
-      message: `Currency ${upperCode} updated successfully`,
+
+      message:
+        `Currency ${code} updated successfully`,
+
       currency: {
         ...currency.toObject(),
-        formattedRate: currencyService.formatAmount(1, currency.code),
+
+        formattedRate:
+          await formatCurrencyAmount(
+            1,
+            currency.code
+          ),
       },
+
       changes,
     });
   } catch (error) {
-    console.error("❌ Update currency error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Update currency error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to update currency",
     });
   }
 };
 
 // ============================================================
-// ✅ UPDATE EXCHANGE RATE (Admin Only)
+// UPDATE EXCHANGE RATE
+// ADMIN ONLY
 // ============================================================
 
-export const updateExchangeRate = async (req, res) => {
+export const updateExchangeRate = async (
+  req,
+  res
+) => {
   try {
-    const { code } = req.params;
-    const { rate, source = 'admin' } = req.body;
+    const code =
+      normalizeCode(
+        req.params?.code
+      );
 
-    if (!code || !rate) {
+    const {
+      rate,
+      source = "admin",
+    } = req.body;
+
+    if (
+      !code ||
+      rate === undefined ||
+      rate === null
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Currency code and rate are required"
+        message:
+          "Currency code and rate are required",
       });
     }
 
-    if (rate <= 0) {
+    const numericRate =
+      Number(rate);
+
+    if (
+      !Number.isFinite(
+        numericRate
+      ) ||
+      numericRate <= 0
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Exchange rate must be greater than 0"
+        message:
+          "Exchange rate must be greater than 0",
       });
     }
 
-    const upperCode = code.toUpperCase();
-    const currency = await Currency.findOne({ code: upperCode });
+    // RWF is the base currency in this architecture.
+    if (code === "RWF") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "RWF is the base currency and does not require an exchange-rate update",
+      });
+    }
+
+    const currency =
+      await Currency.findOne({
+        code,
+      });
 
     if (!currency) {
       return res.status(404).json({
         success: false,
-        message: `Currency ${upperCode} not found`
+        message:
+          `Currency ${code} not found`,
       });
     }
 
-    const oldRate = currency.exchangeRate;
+    const oldRate =
+      Number(currency.exchangeRate);
 
-    // ✅ Update currency
-    currency.exchangeRate = rate;
-    currency.exchangeRateUpdatedAt = new Date();
-    currency.exchangeRateSource = source;
-    currency.updatedBy = req.user._id;
+    currency.exchangeRate =
+      numericRate;
+
+    currency.exchangeRateUpdatedAt =
+      new Date();
+
+    currency.exchangeRateSource =
+      source;
+
+    currency.updatedBy =
+      getUserId(req) ||
+      undefined;
+
     await currency.save();
 
-    // ✅ Save to exchange rate history
+    // ✅ Correct direction:
+    // FOREIGN -> RWF
     await ExchangeRate.setRate(
-      'RWF',
-      upperCode,
-      rate,
+      code,
+      "RWF",
+      numericRate,
       {
-        source: source,
-        sourceProvider: source === 'manual' ? 'manual' : source,
-        createdBy: req.user._id,
-        metadata: { oldRate, updatedBy: req.user.email },
+        source,
+
+        sourceProvider:
+          source === "manual"
+            ? "manual"
+            : source,
+
+        createdBy:
+          getUserId(req) ||
+          undefined,
+
+        metadata: {
+          oldRate,
+          updatedBy:
+            getUserEmail(req),
+        },
       }
     );
 
-    // ✅ Clear cache
-    currencyService.clearCache();
-    exchangeRateService.clearCache();
+    clearCurrencyCaches();
 
-    // ✅ Log update
-    console.log(`✅ Exchange rate updated: ${upperCode} ${oldRate} → ${rate} by ${req.user.email}`);
+    console.log(
+      `✅ Exchange rate updated: ${code} ${oldRate} → ${numericRate} by ${getUserEmail(req)}`
+    );
 
-    res.json({
+    return res.json({
       success: true,
-      message: `Exchange rate for ${upperCode} updated from ${oldRate} to ${rate}`,
+
+      message:
+        `Exchange rate for ${code} updated from ${oldRate} to ${numericRate}`,
+
       currency: {
-        code: currency.code,
-        exchangeRate: currency.exchangeRate,
+        code:
+          currency.code,
+
+        exchangeRate:
+          currency.exchangeRate,
+
         oldRate,
-        updatedAt: currency.exchangeRateUpdatedAt,
-        source: currency.exchangeRateSource,
-        formatted: currencyService.formatAmount(rate, currency.code),
+
+        updatedAt:
+          currency.exchangeRateUpdatedAt,
+
+        source:
+          currency.exchangeRateSource,
+
+        formatted:
+          await formatCurrencyAmount(
+            1,
+            code
+          ),
       },
     });
   } catch (error) {
-    console.error("❌ Update exchange rate error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================================================
-// ✅ GET EXCHANGE RATE HISTORY
-// ============================================================
-
-export const getExchangeRateHistory = async (req, res) => {
-  try {
-    const { code } = req.params;
-    const { limit = 30, days = 30 } = req.query;
-
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        message: "Currency code is required"
-      });
-    }
-
-    const upperCode = code.toUpperCase();
-    const history = await exchangeRateService.getRateHistory(
-      'RWF',
-      upperCode,
-      { limit: parseInt(limit), days: parseInt(days) }
+    console.error(
+      "❌ Update exchange rate error:",
+      error
     );
 
-    res.json({
-      success: true,
-      currency: upperCode,
-      history: history.map(h => ({
-        rate: h.rate,
-        effectiveDate: h.effectiveDate,
-        source: h.source,
-        sourceProvider: h.sourceProvider,
-      })),
-      total: history.length,
-    });
-  } catch (error) {
-    console.error("❌ Get exchange rate history error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to update exchange rate",
     });
   }
 };
 
 // ============================================================
-// ✅ TOGGLE CURRENCY STATUS (Admin Only)
+// GET EXCHANGE RATE HISTORY
 // ============================================================
 
-export const toggleCurrencyStatus = async (req, res) => {
-  try {
-    const { code } = req.params;
+export const getExchangeRateHistory =
+  async (req, res) => {
+    try {
+      const code =
+        normalizeCode(
+          req.params?.code
+        );
 
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        message: "Currency code is required"
-      });
-    }
+      const {
+        limit = 30,
+        days = 30,
+      } = req.query;
 
-    const upperCode = code.toUpperCase();
-    const currency = await Currency.findOne({ code: upperCode });
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Currency code is required",
+        });
+      }
 
-    if (!currency) {
-      return res.status(404).json({
-        success: false,
-        message: `Currency ${upperCode} not found`
-      });
-    }
-
-    // ✅ Prevent deactivating default currency
-    if (currency.isDefault && currency.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot deactivate the default currency"
-      });
-    }
-
-    currency.isActive = !currency.isActive;
-    currency.updatedBy = req.user._id;
-    await currency.save();
-
-    // ✅ Clear cache
-    currencyService.clearCache();
-
-    const status = currency.isActive ? 'activated' : 'deactivated';
-
-    // ✅ Log action
-    console.log(`✅ Currency ${upperCode} ${status} by ${req.user.email}`);
-
-    res.json({
-      success: true,
-      message: `Currency ${upperCode} ${status}`,
-      currency: {
-        code: currency.code,
-        isActive: currency.isActive,
-        status,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Toggle currency status error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================================================
-// ✅ SET DEFAULT CURRENCY (Admin Only)
-// ============================================================
-
-export const setDefaultCurrency = async (req, res) => {
-  try {
-    const { code } = req.params;
-
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        message: "Currency code is required"
-      });
-    }
-
-    const upperCode = code.toUpperCase();
-    const currency = await Currency.findOne({ code: upperCode });
-
-    if (!currency) {
-      return res.status(404).json({
-        success: false,
-        message: `Currency ${upperCode} not found`
-      });
-    }
-
-    if (!currency.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: `Currency ${upperCode} is not active`
-      });
-    }
-
-    // ✅ Remove default from all others
-    await Currency.updateMany(
-      { _id: { $ne: currency._id }, isDefault: true },
-      { isDefault: false }
-    );
-
-    currency.isDefault = true;
-    currency.updatedBy = req.user._id;
-    await currency.save();
-
-    // ✅ Clear cache
-    currencyService.clearCache();
-
-    // ✅ Log action
-    console.log(`✅ Default currency set to ${upperCode} by ${req.user.email}`);
-
-    res.json({
-      success: true,
-      message: `Default currency set to ${upperCode}`,
-      currency: {
-        code: currency.code,
-        isDefault: currency.isDefault,
-        formatted: currencyService.formatAmount(1, currency.code),
-      },
-    });
-  } catch (error) {
-    console.error("❌ Set default currency error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================================================
-// ✅ SET BASE CURRENCY (Admin Only)
-// ============================================================
-
-export const setBaseCurrency = async (req, res) => {
-  try {
-    const { code } = req.params;
-
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        message: "Currency code is required"
-      });
-    }
-
-    const upperCode = code.toUpperCase();
-    const currency = await Currency.findOne({ code: upperCode });
-
-    if (!currency) {
-      return res.status(404).json({
-        success: false,
-        message: `Currency ${upperCode} not found`
-      });
-    }
-
-    if (!currency.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: `Currency ${upperCode} is not active`
-      });
-    }
-
-    // ✅ Remove base from all others
-    await Currency.updateMany(
-      { _id: { $ne: currency._id }, isBaseCurrency: true },
-      { isBaseCurrency: false }
-    );
-
-    currency.isBaseCurrency = true;
-    currency.updatedBy = req.user._id;
-    await currency.save();
-
-    // ✅ Clear cache
-    currencyService.clearCache();
-
-    // ✅ Log action
-    console.log(`✅ Base currency set to ${upperCode} by ${req.user.email}`);
-
-    res.json({
-      success: true,
-      message: `Base currency set to ${upperCode}`,
-      currency: {
-        code: currency.code,
-        isBaseCurrency: currency.isBaseCurrency,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Set base currency error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================================================
-// ✅ BULK UPDATE EXCHANGE RATES (Admin Only)
-// ============================================================
-
-export const bulkUpdateExchangeRates = async (req, res) => {
-  try {
-    const { rates, source = 'admin' } = req.body;
-
-    if (!rates || typeof rates !== 'object') {
-      return res.status(400).json({
-        success: false,
-        message: "Rates object is required"
-      });
-    }
-
-    const results = [];
-    const errors = [];
-
-    for (const [code, rate] of Object.entries(rates)) {
-      try {
-        if (rate <= 0) {
-          errors.push({ code, error: 'Rate must be greater than 0' });
-          continue;
-        }
-
-        const upperCode = code.toUpperCase();
-        const currency = await Currency.findOne({ code: upperCode });
-
-        if (!currency) {
-          errors.push({ code, error: 'Currency not found' });
-          continue;
-        }
-
-        const oldRate = currency.exchangeRate;
-
-        currency.exchangeRate = rate;
-        currency.exchangeRateUpdatedAt = new Date();
-        currency.exchangeRateSource = source;
-        currency.updatedBy = req.user._id;
-        await currency.save();
-
-        // ✅ Save to exchange rate history
-        await ExchangeRate.setRate(
-          'RWF',
-          upperCode,
-          rate,
+      const history =
+        await exchangeRateService.getRateHistory(
+          code,
+          "RWF",
           {
-            source: source,
-            sourceProvider: source === 'manual' ? 'manual' : source,
-            createdBy: req.user._id,
-            metadata: { oldRate, bulkUpdate: true },
+            limit:
+              Math.min(
+                Math.max(
+                  Number(limit) || 30,
+                  1
+                ),
+                200
+              ),
+
+            days:
+              Math.min(
+                Math.max(
+                  Number(days) || 30,
+                  1
+                ),
+                3650
+              ),
           }
         );
 
-        results.push({
-          code: upperCode,
-          oldRate,
-          newRate: rate,
-          success: true,
-        });
-      } catch (error) {
-        errors.push({ code, error: error.message });
-      }
+      const formattedHistory =
+        Array.isArray(history)
+          ? history.map(
+              (item) => ({
+                rate:
+                  item.rate,
+
+                effectiveDate:
+                  item.effectiveDate,
+
+                source:
+                  item.source,
+
+                sourceProvider:
+                  item.sourceProvider,
+              })
+            )
+          : [];
+
+      return res.json({
+        success: true,
+
+        currency:
+          code,
+
+        history:
+          formattedHistory,
+
+        total:
+          formattedHistory.length,
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get exchange rate history error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Failed to get exchange-rate history",
+      });
     }
-
-    // ✅ Clear cache
-    currencyService.clearCache();
-    exchangeRateService.clearCache();
-
-    // ✅ Log action
-    console.log(`✅ Bulk exchange rates updated: ${results.length} currencies by ${req.user.email}`);
-
-    res.json({
-      success: true,
-      message: `Updated ${results.length} currencies`,
-      results,
-      errors,
-      totalProcessed: results.length + errors.length,
-      successful: results.length,
-      failed: errors.length,
-    });
-  } catch (error) {
-    console.error("❌ Bulk update exchange rates error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+  };
 
 // ============================================================
-// ✅ GET CURRENCY STATISTICS (Admin Only)
+// TOGGLE CURRENCY STATUS
+// ADMIN ONLY
 // ============================================================
 
-export const getCurrencyStats = async (req, res) => {
+export const toggleCurrencyStatus =
+  async (req, res) => {
+    try {
+      const code =
+        normalizeCode(
+          req.params?.code
+        );
+
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Currency code is required",
+        });
+      }
+
+      const currency =
+        await Currency.findOne({
+          code,
+        });
+
+      if (!currency) {
+        return res.status(404).json({
+          success: false,
+          message:
+            `Currency ${code} not found`,
+        });
+      }
+
+      if (
+        currency.isDefault &&
+        currency.isActive
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Cannot deactivate the default currency",
+        });
+      }
+
+      currency.isActive =
+        !currency.isActive;
+
+      currency.updatedBy =
+        getUserId(req) ||
+        undefined;
+
+      await currency.save();
+
+      clearCurrencyCaches();
+
+      const status =
+        currency.isActive
+          ? "activated"
+          : "deactivated";
+
+      console.log(
+        `✅ Currency ${code} ${status} by ${getUserEmail(req)}`
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          `Currency ${code} ${status}`,
+
+        currency: {
+          code:
+            currency.code,
+
+          isActive:
+            currency.isActive,
+
+          status,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Toggle currency status error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Failed to toggle currency status",
+      });
+    }
+  };
+
+// ============================================================
+// SET DEFAULT CURRENCY
+// ADMIN ONLY
+// ============================================================
+
+export const setDefaultCurrency =
+  async (req, res) => {
+    try {
+      const code =
+        normalizeCode(
+          req.params?.code
+        );
+
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Currency code is required",
+        });
+      }
+
+      const currency =
+        await Currency.findOne({
+          code,
+        });
+
+      if (!currency) {
+        return res.status(404).json({
+          success: false,
+          message:
+            `Currency ${code} not found`,
+        });
+      }
+
+      if (!currency.isActive) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `Currency ${code} is not active`,
+        });
+      }
+
+      await Currency.updateMany(
+        {
+          _id: {
+            $ne:
+              currency._id,
+          },
+
+          isDefault:
+            true,
+        },
+
+        {
+          isDefault:
+            false,
+        }
+      );
+
+      currency.isDefault =
+        true;
+
+      currency.updatedBy =
+        getUserId(req) ||
+        undefined;
+
+      await currency.save();
+
+      clearCurrencyCaches();
+
+      console.log(
+        `✅ Default currency set to ${code} by ${getUserEmail(req)}`
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          `Default currency set to ${code}`,
+
+        currency: {
+          code:
+            currency.code,
+
+          isDefault:
+            currency.isDefault,
+
+          formatted:
+            await formatCurrencyAmount(
+              1,
+              currency.code
+            ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Set default currency error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Failed to set default currency",
+      });
+    }
+  };
+
+// ============================================================
+// SET BASE CURRENCY
+// ADMIN ONLY
+// ============================================================
+
+export const setBaseCurrency =
+  async (req, res) => {
+    try {
+      const code =
+        normalizeCode(
+          req.params?.code
+        );
+
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Currency code is required",
+        });
+      }
+
+      const currency =
+        await Currency.findOne({
+          code,
+        });
+
+      if (!currency) {
+        return res.status(404).json({
+          success: false,
+          message:
+            `Currency ${code} not found`,
+        });
+      }
+
+      if (!currency.isActive) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `Currency ${code} is not active`,
+        });
+      }
+
+      await Currency.updateMany(
+        {
+          _id: {
+            $ne:
+              currency._id,
+          },
+
+          isBaseCurrency:
+            true,
+        },
+
+        {
+          isBaseCurrency:
+            false,
+        }
+      );
+
+      currency.isBaseCurrency =
+        true;
+
+      currency.updatedBy =
+        getUserId(req) ||
+        undefined;
+
+      await currency.save();
+
+      clearCurrencyCaches();
+
+      console.log(
+        `✅ Base currency set to ${code} by ${getUserEmail(req)}`
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          `Base currency set to ${code}`,
+
+        currency: {
+          code:
+            currency.code,
+
+          isBaseCurrency:
+            currency.isBaseCurrency,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Set base currency error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Failed to set base currency",
+      });
+    }
+  };
+
+// ============================================================
+// BULK UPDATE EXCHANGE RATES
+// ADMIN ONLY
+// ============================================================
+
+export const bulkUpdateExchangeRates =
+  async (req, res) => {
+    try {
+      const {
+        rates,
+        source = "admin",
+      } = req.body;
+
+      if (
+        !rates ||
+        typeof rates !== "object" ||
+        Array.isArray(rates)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Rates object is required",
+        });
+      }
+
+      const results = [];
+      const errors = [];
+
+      for (
+        const [
+          code,
+          rawRate,
+        ] of Object.entries(rates)
+      ) {
+        try {
+          const upperCode =
+            normalizeCode(code);
+
+          const numericRate =
+            Number(rawRate);
+
+          if (
+            !upperCode
+          ) {
+            errors.push({
+              code,
+              error:
+                "Currency code is required",
+            });
+
+            continue;
+          }
+
+          if (
+            upperCode === "RWF"
+          ) {
+            errors.push({
+              code:
+                upperCode,
+
+              error:
+                "RWF is the base currency",
+            });
+
+            continue;
+          }
+
+          if (
+            !Number.isFinite(
+              numericRate
+            ) ||
+            numericRate <= 0
+          ) {
+            errors.push({
+              code:
+                upperCode,
+
+              error:
+                "Rate must be greater than 0",
+            });
+
+            continue;
+          }
+
+          const currency =
+            await Currency.findOne({
+              code:
+                upperCode,
+            });
+
+          if (!currency) {
+            errors.push({
+              code:
+                upperCode,
+
+              error:
+                "Currency not found",
+            });
+
+            continue;
+          }
+
+          const oldRate =
+            Number(
+              currency.exchangeRate
+            );
+
+          currency.exchangeRate =
+            numericRate;
+
+          currency.exchangeRateUpdatedAt =
+            new Date();
+
+          currency.exchangeRateSource =
+            source;
+
+          currency.updatedBy =
+            getUserId(req) ||
+            undefined;
+
+          await currency.save();
+
+          // ✅ FOREIGN -> RWF
+          await ExchangeRate.setRate(
+            upperCode,
+            "RWF",
+            numericRate,
+            {
+              source,
+
+              sourceProvider:
+                source ===
+                "manual"
+                  ? "manual"
+                  : source,
+
+              createdBy:
+                getUserId(req) ||
+                undefined,
+
+              metadata: {
+                oldRate,
+                bulkUpdate:
+                  true,
+              },
+            }
+          );
+
+          results.push({
+            code:
+              upperCode,
+
+            oldRate,
+
+            newRate:
+              numericRate,
+
+            success:
+              true,
+          });
+        } catch (error) {
+          errors.push({
+            code,
+            error:
+              error.message,
+          });
+        }
+      }
+
+      clearCurrencyCaches();
+
+      console.log(
+        `✅ Bulk exchange rates updated: ${results.length} currencies by ${getUserEmail(req)}`
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          `Updated ${results.length} currencies`,
+
+        results,
+        errors,
+
+        totalProcessed:
+          results.length +
+          errors.length,
+
+        successful:
+          results.length,
+
+        failed:
+          errors.length,
+      });
+    } catch (error) {
+      console.error(
+        "❌ Bulk update exchange rates error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Failed to update exchange rates",
+      });
+    }
+  };
+
+// ============================================================
+// GET CURRENCY STATISTICS
+// ADMIN ONLY
+// ============================================================
+
+export const getCurrencyStats = async (
+  req,
+  res
+) => {
   try {
-    const stats = await currencyService.getCurrencyStats();
+    const stats =
+      await currencyService.getCurrencyStats();
 
-    // ✅ Get exchange rate stats
-    const rateStats = await exchangeRateService.getRateStats();
+    const rateStats =
+      await exchangeRateService.getRateStats();
 
-    // ✅ Get settlement stats
-    const settlementStats = await settlementService.getSettlementStats();
+    const settlementStats =
+      await settlementService.getSettlementStats();
 
-    res.json({
+    return res.json({
       success: true,
+
       stats: {
         ...stats,
-        exchangeRates: rateStats,
-        settlement: settlementStats,
-        lastUpdated: new Date().toISOString(),
+
+        exchangeRates:
+          rateStats,
+
+        settlement:
+          settlementStats,
+
+        lastUpdated:
+          new Date().toISOString(),
       },
     });
   } catch (error) {
-    console.error("❌ Get currency stats error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get currency stats error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to get currency statistics",
     });
   }
 };
 
 // ============================================================
-// ✅ GET SUPPORTED CURRENCIES (Public)
+// GET SUPPORTED CURRENCIES
+// PUBLIC
 // ============================================================
 
-export const getSupportedCurrencies = async (req, res) => {
+export const getSupportedCurrencies =
+  async (req, res) => {
+    try {
+      const currencies =
+        await currencyService.getActiveCurrencies();
+
+      const formattedCurrencies =
+        await Promise.all(
+          currencies.map(
+            async (currency) => ({
+              code:
+                currency.code,
+
+              symbol:
+                currency.symbol,
+
+              name:
+                currency.name,
+
+              decimalPlaces:
+                currency.decimalPlaces,
+
+              isDefault:
+                Boolean(
+                  currency.isDefault
+                ),
+
+              paymentMethods:
+                currency.paymentMethods ||
+                [],
+
+              settlementAllowed:
+                currency.settlementAllowed !==
+                false,
+
+              formatted:
+                await formatCurrencyAmount(
+                  1,
+                  currency.code
+                ),
+            })
+          )
+        );
+
+      const defaultCurrency =
+        typeof currencyService?.getDefaultCurrencyCode ===
+        "function"
+          ? await currencyService.getDefaultCurrencyCode()
+          : "RWF";
+
+      return res.json({
+        success: true,
+
+        currencies:
+          formattedCurrencies,
+
+        defaultCurrency:
+          normalizeCode(
+            defaultCurrency
+          ),
+
+        total:
+          formattedCurrencies.length,
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get supported currencies error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Failed to get supported currencies",
+      });
+    }
+  };
+
+// ============================================================
+// CONVERT AMOUNT
+// PUBLIC
+// ============================================================
+
+export const convertAmount = async (
+  req,
+  res
+) => {
   try {
-    const currencies = await currencyService.getActiveCurrencies();
+    const {
+      amount,
+      from,
+      to,
+      round = "true",
+    } = req.query;
 
-    const formattedCurrencies = currencies.map(c => ({
-      code: c.code,
-      symbol: c.symbol,
-      name: c.name,
-      decimalPlaces: c.decimalPlaces,
-      isDefault: c.isDefault || false,
-      paymentMethods: c.paymentMethods || [],
-      settlementAllowed: c.settlementAllowed !== false,
-      formatted: currencyService.formatAmount(1, c.code),
-    }));
+    console.log(
+      "🔍 Convert amount request:",
+      {
+        amount,
+        from,
+        to,
+        round,
+      }
+    );
 
-    res.json({
-      success: true,
-      currencies: formattedCurrencies,
-      defaultCurrency: await currencyService.getDefaultCurrency().then(c => c?.code || 'RWF'),
-      total: formattedCurrencies.length,
-    });
-  } catch (error) {
-    console.error("❌ Get supported currencies error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+    // ----------------------------------------------------------
+    // VALIDATION
+    // ----------------------------------------------------------
 
-// ============================================================
-// ✅ CONVERT AMOUNT (Public) - WITH DEBUG LOGGING
-// ============================================================
-
-export const convertAmount = async (req, res) => {
-  try {
-    const { amount, from, to, round = true } = req.query;
-
-    // ✅ Log the received parameters for debugging
-    console.log('🔍 Convert amount request:', { amount, from, to, round });
-
-    // ✅ Validate required parameters
-    if (!amount) {
-      console.warn('⚠️ Amount is missing');
+    if (
+      amount === undefined ||
+      amount === null ||
+      amount === ""
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Amount is required"
+        message:
+          "Amount is required",
       });
     }
 
     if (!from) {
-      console.warn('⚠️ From currency is missing');
       return res.status(400).json({
         success: false,
-        message: "From currency is required"
+        message:
+          "From currency is required",
       });
     }
 
     if (!to) {
-      console.warn('⚠️ To currency is missing');
       return res.status(400).json({
         success: false,
-        message: "To currency is required"
+        message:
+          "To currency is required",
       });
     }
 
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      console.warn(`⚠️ Invalid amount: ${amount}`);
+    const amountNum =
+      Number(amount);
+
+    if (
+      !Number.isFinite(
+        amountNum
+      ) ||
+      amountNum <= 0
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Amount must be a positive number"
+        message:
+          "Amount must be a positive number",
       });
     }
 
-    // ✅ Validate currencies
-    const fromCurrency = from.toUpperCase();
-    const toCurrency = to.toUpperCase();
+    const fromCurrency =
+      normalizeCode(from);
 
-    console.log(`🔍 Converting ${amountNum} from ${fromCurrency} to ${toCurrency}`);
+    const toCurrency =
+      normalizeCode(to);
 
-    // ✅ Check if currencies are supported
-    const isFromSupported = await currencyService.isCurrencyActive(fromCurrency);
-    const isToSupported = await currencyService.isCurrencyActive(toCurrency);
-
-    if (!isFromSupported && fromCurrency !== 'USD') {
-      console.warn(`⚠️ Currency ${fromCurrency} is not supported`);
+    if (
+      !fromCurrency ||
+      !toCurrency
+    ) {
       return res.status(400).json({
         success: false,
-        message: `Currency ${fromCurrency} is not supported`
+        message:
+          "Invalid currency code",
       });
     }
 
-    if (!isToSupported && toCurrency !== 'USD') {
-      console.warn(`⚠️ Currency ${toCurrency} is not supported`);
-      return res.status(400).json({
-        success: false,
-        message: `Currency ${toCurrency} is not supported`
-      });
-    }
-
-    const result = await currencyService.convertAmount(
-      amountNum,
-      fromCurrency,
-      toCurrency,
-      { round: round === 'true' }
+    console.log(
+      `🔍 Converting ${amountNum} from ${fromCurrency} to ${toCurrency}`
     );
 
-    if (!result || result.error) {
-      console.warn(`⚠️ Conversion failed: ${result?.error || 'Unknown error'}`);
-      return res.status(404).json({
+    // ----------------------------------------------------------
+    // SUPPORTED CURRENCIES
+    // ----------------------------------------------------------
+
+    const [
+      fromSupported,
+      toSupported,
+    ] = await Promise.all([
+      isCurrencySupported(
+        fromCurrency
+      ),
+      isCurrencySupported(
+        toCurrency
+      ),
+    ]);
+
+    if (!fromSupported) {
+      return res.status(400).json({
         success: false,
-        message: result?.error || `Exchange rate not found for ${fromCurrency}/${toCurrency}`
+        message:
+          `Currency ${fromCurrency} is not supported`,
       });
     }
 
-    console.log(`✅ Conversion successful: ${amountNum} ${fromCurrency} = ${result.convertedAmount} ${toCurrency}`);
+    if (!toSupported) {
+      return res.status(400).json({
+        success: false,
+        message:
+          `Currency ${toCurrency} is not supported`,
+      });
+    }
 
-    res.json({
+    // ----------------------------------------------------------
+    // SAME CURRENCY
+    // ----------------------------------------------------------
+
+    if (
+      fromCurrency ===
+      toCurrency
+    ) {
+      const formatted =
+        await formatCurrencyAmount(
+          amountNum,
+          toCurrency
+        );
+
+      console.log(
+        `✅ Conversion successful: ${amountNum} ${fromCurrency} = ${amountNum} ${toCurrency}`
+      );
+
+      return res.json({
+        success: true,
+
+        from:
+          fromCurrency,
+
+        to:
+          toCurrency,
+
+        amount:
+          amountNum,
+
+        convertedAmount:
+          amountNum,
+
+        rate:
+          1,
+
+        effectiveDate:
+          new Date(),
+
+        source:
+          "same_currency",
+
+        formatted: {
+          from:
+            await formatCurrencyAmount(
+              amountNum,
+              fromCurrency
+            ),
+
+          to:
+            formatted,
+        },
+      });
+    }
+
+    // ----------------------------------------------------------
+    // CURRENT CURRENCYSERVICE CONTRACT
+    // ----------------------------------------------------------
+    //
+    // IMPORTANT:
+    //
+    // currencyService.convertAmount()
+    //
+    // returns:
+    //
+    // NUMBER
+    //
+    // It does NOT return:
+    //
+    // {
+    //   convertedAmount,
+    //   rate
+    // }
+    //
+    // Therefore:
+    //
+    // 1. ask exchangeRateService for rate
+    // 2. ask currencyService for converted amount
+    //
+    // ----------------------------------------------------------
+
+    const rateResult =
+      await exchangeRateService.getRate(
+        fromCurrency,
+        toCurrency
+      );
+
+    const rate =
+      typeof rateResult ===
+      "object"
+        ? Number(
+            rateResult?.rate
+          )
+        : Number(rateResult);
+
+    if (
+      !Number.isFinite(rate) ||
+      rate <= 0
+    ) {
+      return res.status(404).json({
+        success: false,
+        message:
+          `Exchange rate not found for ${fromCurrency}/${toCurrency}`,
+      });
+    }
+
+    const shouldRound =
+      String(round)
+        .toLowerCase() !==
+      "false";
+
+    const convertedRaw =
+      await currencyService.convertAmount(
+        amountNum,
+        fromCurrency,
+        toCurrency,
+        {
+          round:
+            shouldRound,
+        }
+      );
+
+    const convertedAmount =
+      Number(
+        convertedRaw
+      );
+
+    if (
+      !Number.isFinite(
+        convertedAmount
+      )
+    ) {
+      throw new Error(
+        "Currency conversion produced an invalid amount"
+      );
+    }
+
+    const effectiveDate =
+      typeof rateResult ===
+      "object"
+        ? rateResult?.effectiveDate ||
+          null
+        : null;
+
+    const source =
+      typeof rateResult ===
+      "object"
+        ? rateResult?.source ||
+          "exchange_rate_service"
+        : "exchange_rate_service";
+
+    console.log(
+      `✅ Conversion successful: ${amountNum} ${fromCurrency} = ${convertedAmount} ${toCurrency} @ ${rate}`
+    );
+
+    return res.json({
       success: true,
-      from: fromCurrency,
-      to: toCurrency,
-      amount: amountNum,
-      convertedAmount: result.convertedAmount,
-      rate: result.rate,
-      effectiveDate: result.effectiveDate,
-      source: result.source,
+
+      from:
+        fromCurrency,
+
+      to:
+        toCurrency,
+
+      amount:
+        amountNum,
+
+      convertedAmount,
+
+      rate,
+
+      effectiveDate,
+
+      source,
+
       formatted: {
-        from: currencyService.formatAmount(amountNum, fromCurrency),
-        to: currencyService.formatAmount(result.convertedAmount, toCurrency),
+        from:
+          await formatCurrencyAmount(
+            amountNum,
+            fromCurrency
+          ),
+
+        to:
+          await formatCurrencyAmount(
+            convertedAmount,
+            toCurrency
+          ),
       },
     });
   } catch (error) {
-    console.error("❌ Convert amount error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Convert amount error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message || "Failed to convert amount"
+      message:
+        error.message ||
+        "Failed to convert amount",
     });
   }
 };
 
 // ============================================================
-// ✅ DELETE CURRENCY (Admin Only)
+// DELETE CURRENCY
+// ADMIN ONLY
 // ============================================================
 
-export const deleteCurrency = async (req, res) => {
+export const deleteCurrency = async (
+  req,
+  res
+) => {
   try {
-    const { code } = req.params;
+    const code =
+      normalizeCode(
+        req.params?.code
+      );
 
     if (!code) {
       return res.status(400).json({
         success: false,
-        message: "Currency code is required"
+        message:
+          "Currency code is required",
       });
     }
 
-    const upperCode = code.toUpperCase();
-    const currency = await Currency.findOne({ code: upperCode });
+    const currency =
+      await Currency.findOne({
+        code,
+      });
 
     if (!currency) {
       return res.status(404).json({
         success: false,
-        message: `Currency ${upperCode} not found`
+        message:
+          `Currency ${code} not found`,
       });
     }
 
-    // ✅ Prevent deleting default currency
-    if (currency.isDefault) {
+    if (
+      currency.isDefault
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete the default currency"
+        message:
+          "Cannot delete the default currency",
       });
     }
 
-    // ✅ Prevent deleting base currency
-    if (currency.isBaseCurrency) {
+    if (
+      currency.isBaseCurrency
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete the base currency"
+        message:
+          "Cannot delete the base currency",
       });
     }
 
-    // ✅ Check if currency has payments
-    const hasPayments = await Payment.findOne({ currency: upperCode });
+    const hasPayments =
+      await Payment.findOne({
+        currency:
+          code,
+      });
+
     if (hasPayments) {
       return res.status(400).json({
         success: false,
-        message: `Cannot delete ${upperCode} because it has payments`
+        message:
+          `Cannot delete ${code} because it has payments`,
       });
     }
 
-    await Currency.deleteOne({ _id: currency._id });
+    await Currency.deleteOne({
+      _id:
+        currency._id,
+    });
 
-    // ✅ Clear cache
-    currencyService.clearCache();
+    clearCurrencyCaches();
 
-    // ✅ Log action
-    console.log(`✅ Currency ${upperCode} deleted by ${req.user.email}`);
+    console.log(
+      `✅ Currency ${code} deleted by ${getUserEmail(req)}`
+    );
 
-    res.json({
+    return res.json({
       success: true,
-      message: `Currency ${upperCode} deleted successfully`,
+      message:
+        `Currency ${code} deleted successfully`,
     });
   } catch (error) {
-    console.error("❌ Delete currency error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Delete currency error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to delete currency",
     });
   }
 };
 
 // ============================================================
-// ✅ GET PLATFORM FEES BY CURRENCY (Admin/Public)
+// GET PLATFORM FEES
+// ADMIN / PUBLIC
 // ============================================================
 
-export const getPlatformFees = async (req, res) => {
-  try {
-    const currencies = await Currency.find({ isActive: true })
-      .select('code symbol name platformFeePercentage')
-      .lean();
+export const getPlatformFees =
+  async (req, res) => {
+    try {
+      const currencies =
+        await Currency.find({
+          isActive: true,
+        })
+          .select(
+            "code symbol name platformFeePercentage"
+          )
+          .lean();
 
-    const fees = currencies.map(c => ({
-      code: c.code,
-      symbol: c.symbol,
-      name: c.name,
-      percentage: c.platformFeePercentage || 0,
-      formatted: `${c.platformFeePercentage || 0}%`,
-    }));
+      const fees =
+        currencies.map(
+          (currency) => ({
+            code:
+              currency.code,
 
-    res.json({
-      success: true,
-      fees,
-    });
-  } catch (error) {
-    console.error("❌ Get platform fees error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+            symbol:
+              currency.symbol,
 
-// ============================================================
-// ✅ GET PROVIDER SETTLEMENT CURRENCY (Provider)
-// ============================================================
+            name:
+              currency.name,
 
-export const getProviderSettlementCurrency = async (req, res) => {
-  try {
-    const providerId = req.user._id;
-    
-    // ✅ Check if user is a provider
-    if (req.user.role !== 'provider' && req.user.role !== 'admin') {
-      return res.status(403).json({
+            // ✅ MVP = 0%
+            percentage:
+              0,
+
+            formatted:
+              "0%",
+          })
+        );
+
+      return res.json({
+        success: true,
+        fees,
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get platform fees error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Only providers can access settlement currency"
+        message:
+          error.message ||
+          "Failed to get platform fees",
       });
     }
-
-    const currency = await settlementService.getProviderSettlementCurrency(providerId);
-    
-    // Get currency details
-    const currencyInfo = await currencyService.getCurrencyByCode(currency);
-
-    res.json({
-      success: true,
-      currency,
-      currencyInfo: {
-        code: currencyInfo?.code || currency,
-        symbol: currencyInfo?.symbol || currency,
-        name: currencyInfo?.name || currency,
-        formatted: currencyService.formatAmount(1, currency),
-      },
-      supportedCurrencies: await settlementService.getAllowedSettlementCurrencies(),
-    });
-  } catch (error) {
-    console.error("❌ Get provider settlement currency error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+  };
 
 // ============================================================
-// ✅ UPDATE PROVIDER SETTLEMENT CURRENCY (Provider)
+// GET PROVIDER SETTLEMENT CURRENCY
+// PROVIDER / ADMIN
 // ============================================================
 
-export const updateProviderSettlementCurrency = async (req, res) => {
-  try {
-    const providerId = req.user._id;
-    const { currency } = req.body;
+export const getProviderSettlementCurrency =
+  async (req, res) => {
+    try {
+      const providerId =
+        getUserId(req);
 
-    if (!currency) {
-      return res.status(400).json({
+      if (
+        req.user?.role !==
+          "provider" &&
+        req.user?.role !==
+          "admin"
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only providers can access settlement currency",
+        });
+      }
+
+      if (!providerId) {
+        return res.status(401).json({
+          success: false,
+          message:
+            "Authentication required",
+        });
+      }
+
+      const currency =
+        normalizeCode(
+          await settlementService.getProviderSettlementCurrency(
+            providerId
+          )
+        );
+
+      const currencyInfo =
+        await getCurrencyInfo(
+          currency
+        );
+
+      return res.json({
+        success: true,
+
+        currency,
+
+        currencyInfo: {
+          code:
+            currencyInfo?.code ||
+            currency,
+
+          symbol:
+            currencyInfo?.symbol ||
+            currency,
+
+          name:
+            currencyInfo?.name ||
+            currency,
+
+          formatted:
+            await formatCurrencyAmount(
+              1,
+              currency
+            ),
+        },
+
+        supportedCurrencies:
+          await settlementService.getAllowedSettlementCurrencies(),
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get provider settlement currency error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Currency is required"
+        message:
+          error.message ||
+          "Failed to get provider settlement currency",
       });
     }
+  };
 
-    // ✅ Check if user is a provider
-    if (req.user.role !== 'provider' && req.user.role !== 'admin') {
-      return res.status(403).json({
+// ============================================================
+// UPDATE PROVIDER SETTLEMENT CURRENCY
+// PROVIDER / ADMIN
+// ============================================================
+
+export const updateProviderSettlementCurrency =
+  async (req, res) => {
+    try {
+      const providerId =
+        getUserId(req);
+
+      const {
+        currency,
+      } = req.body;
+
+      if (
+        !currency
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Currency is required",
+        });
+      }
+
+      if (
+        req.user?.role !==
+          "provider" &&
+        req.user?.role !==
+          "admin"
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Only providers can update settlement currency",
+        });
+      }
+
+      const upperCode =
+        normalizeCode(
+          currency
+        );
+
+      const isAllowed =
+        await settlementService.isCurrencyAllowedForSettlement(
+          upperCode
+        );
+
+      if (!isAllowed) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `Currency ${upperCode} is not allowed for settlement`,
+        });
+      }
+
+      await settlementService.updateProviderSettlementCurrency(
+        providerId,
+        upperCode
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          `Settlement currency updated to ${upperCode}`,
+
+        currency:
+          upperCode,
+
+        updatedAt:
+          new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(
+        "❌ Update provider settlement currency error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Only providers can update settlement currency"
+        message:
+          error.message ||
+          "Failed to update settlement currency",
       });
     }
+  };
 
-    const upperCode = currency.toUpperCase();
-    
-    // ✅ Validate currency is allowed for settlement
-    const isAllowed = await settlementService.isCurrencyAllowedForSettlement(upperCode);
-    if (!isAllowed) {
-      return res.status(400).json({
+// ============================================================
+// GET USER PREFERRED CURRENCY
+// USER
+// ============================================================
+
+export const getUserPreferredCurrency =
+  async (req, res) => {
+    try {
+      const userId =
+        getUserId(req);
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message:
+            "Authentication required",
+        });
+      }
+
+      const user =
+        await User.findById(
+          userId
+        ).select(
+          "preferredCurrency"
+        );
+
+      const currency =
+        normalizeCode(
+          user?.preferredCurrency ||
+          "RWF"
+        );
+
+      const currencyInfo =
+        await getCurrencyInfo(
+          currency
+        );
+
+      return res.json({
+        success: true,
+
+        currency,
+
+        currencyInfo: {
+          code:
+            currencyInfo?.code ||
+            currency,
+
+          symbol:
+            currencyInfo?.symbol ||
+            currency,
+
+          name:
+            currencyInfo?.name ||
+            currency,
+
+          formatted:
+            await formatCurrencyAmount(
+              1,
+              currency
+            ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get user preferred currency error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: `Currency ${upperCode} is not allowed for settlement`
+        message:
+          error.message ||
+          "Failed to get preferred currency",
       });
     }
-
-    const result = await settlementService.updateProviderSettlementCurrency(providerId, upperCode);
-
-    res.json({
-      success: true,
-      message: `Settlement currency updated to ${upperCode}`,
-      currency: upperCode,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("❌ Update provider settlement currency error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+  };
 
 // ============================================================
-// ✅ GET USER PREFERRED CURRENCY (User)
+// UPDATE USER PREFERRED CURRENCY
+// USER
 // ============================================================
 
-export const getUserPreferredCurrency = async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    const user = await User.findById(userId).select('preferredCurrency');
-    
-    const currency = user?.preferredCurrency || 'RWF';
-    
-    // Get currency details
-    const currencyInfo = await currencyService.getCurrencyByCode(currency);
+export const updateUserPreferredCurrency =
+  async (req, res) => {
+    try {
+      const userId =
+        getUserId(req);
 
-    res.json({
-      success: true,
-      currency,
-      currencyInfo: {
-        code: currencyInfo?.code || currency,
-        symbol: currencyInfo?.symbol || currency,
-        name: currencyInfo?.name || currency,
-        formatted: currencyService.formatAmount(1, currency),
-      },
-    });
-  } catch (error) {
-    console.error("❌ Get user preferred currency error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+      const {
+        currency,
+      } = req.body;
 
-// ============================================================
-// ✅ UPDATE USER PREFERRED CURRENCY (User)
-// ============================================================
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message:
+            "Authentication required",
+        });
+      }
 
-export const updateUserPreferredCurrency = async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { currency } = req.body;
+      if (!currency) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Currency is required",
+        });
+      }
 
-    if (!currency) {
-      return res.status(400).json({
+      const upperCode =
+        normalizeCode(
+          currency
+        );
+
+      const isSupported =
+        await isCurrencySupported(
+          upperCode
+        );
+
+      if (!isSupported) {
+        return res.status(400).json({
+          success: false,
+          message:
+            `Currency ${upperCode} is not supported`,
+        });
+      }
+
+      await User.findByIdAndUpdate(
+        userId,
+
+        {
+          preferredCurrency:
+            upperCode,
+        },
+
+        {
+          new: true,
+        }
+      );
+
+      return res.json({
+        success: true,
+
+        message:
+          `Preferred currency updated to ${upperCode}`,
+
+        currency:
+          upperCode,
+
+        updatedAt:
+          new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error(
+        "❌ Update user preferred currency error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Currency is required"
+        message:
+          error.message ||
+          "Failed to update preferred currency",
       });
     }
+  };
 
-    const upperCode = currency.toUpperCase();
-    
-    // ✅ Validate currency is supported
-    const isSupported = await currencyService.isCurrencyActive(upperCode);
-    if (!isSupported) {
-      return res.status(400).json({
+// ============================================================
+// GET ALLOWED SETTLEMENT CURRENCIES
+// PUBLIC / PROVIDER
+// ============================================================
+
+export const getAllowedSettlementCurrencies =
+  async (req, res) => {
+    try {
+      const currencies =
+        await settlementService.getAllowedSettlementCurrencies();
+
+      const formattedCurrencies =
+        await Promise.all(
+          currencies.map(
+            async (currency) => ({
+              code:
+                currency.code,
+
+              symbol:
+                currency.symbol,
+
+              name:
+                currency.name,
+
+              decimalPlaces:
+                currency.decimalPlaces,
+
+              formatted:
+                await formatCurrencyAmount(
+                  1,
+                  currency.code
+                ),
+            })
+          )
+        );
+
+      return res.json({
+        success: true,
+
+        currencies:
+          formattedCurrencies,
+
+        total:
+          formattedCurrencies.length,
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get allowed settlement currencies error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: `Currency ${upperCode} is not supported`
+        message:
+          error.message ||
+          "Failed to get settlement currencies",
       });
     }
-
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { preferredCurrency: upperCode },
-      { new: true }
-    ).select('preferredCurrency');
-
-    res.json({
-      success: true,
-      message: `Preferred currency updated to ${upperCode}`,
-      currency: upperCode,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("❌ Update user preferred currency error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+  };
 
 // ============================================================
-// ✅ GET ALLOWED SETTLEMENT CURRENCIES (Public/Provider)
+// GET CURRENCY EXCHANGE RATE
+// PUBLIC
 // ============================================================
 
-export const getAllowedSettlementCurrencies = async (req, res) => {
-  try {
-    const currencies = await settlementService.getAllowedSettlementCurrencies();
-    
-    const formattedCurrencies = currencies.map(c => ({
-      code: c.code,
-      symbol: c.symbol,
-      name: c.name,
-      decimalPlaces: c.decimalPlaces,
-      formatted: currencyService.formatAmount(1, c.code),
-    }));
+export const getCurrencyExchangeRate =
+  async (req, res) => {
+    try {
+      const {
+        from,
+        to,
+      } = req.query;
 
-    res.json({
-      success: true,
-      currencies: formattedCurrencies,
-      total: formattedCurrencies.length,
-    });
-  } catch (error) {
-    console.error("❌ Get allowed settlement currencies error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+      const fromCurrency =
+        normalizeCode(from);
 
-// ============================================================
-// ✅ GET CURRENCY EXCHANGE RATE (Public)
-// ============================================================
+      const toCurrency =
+        normalizeCode(to);
 
-export const getCurrencyExchangeRate = async (req, res) => {
-  try {
-    const { from, to } = req.query;
+      if (
+        !fromCurrency ||
+        !toCurrency
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Both 'from' and 'to' currencies are required",
+        });
+      }
 
-    if (!from || !to) {
-      return res.status(400).json({
+      const rateResult =
+        await exchangeRateService.getRate(
+          fromCurrency,
+          toCurrency
+        );
+
+      const numericRate =
+        typeof rateResult ===
+        "object"
+          ? Number(
+              rateResult?.rate
+            )
+          : Number(rateResult);
+
+      if (
+        !Number.isFinite(
+          numericRate
+        ) ||
+        numericRate <= 0
+      ) {
+        return res.status(404).json({
+          success: false,
+          message:
+            `Exchange rate not found for ${fromCurrency}/${toCurrency}`,
+        });
+      }
+
+      const effectiveDate =
+        typeof rateResult ===
+        "object"
+          ? rateResult?.effectiveDate ||
+            null
+          : null;
+
+      const source =
+        typeof rateResult ===
+        "object"
+          ? rateResult?.source ||
+            "exchange_rate_service"
+          : "exchange_rate_service";
+
+      const expiresAt =
+        typeof rateResult ===
+        "object"
+          ? rateResult?.expiresAt ||
+            null
+          : null;
+
+      return res.json({
+        success: true,
+
+        from:
+          fromCurrency,
+
+        to:
+          toCurrency,
+
+        rate:
+          numericRate,
+
+        inverseRate:
+          1 / numericRate,
+
+        effectiveDate,
+
+        source,
+
+        expiresAt,
+
+        formatted: {
+          from:
+            await formatCurrencyAmount(
+              1,
+              fromCurrency
+            ),
+
+          to:
+            await formatCurrencyAmount(
+              numericRate,
+              toCurrency
+            ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        "❌ Get currency exchange rate error:",
+        error
+      );
+
+      return res.status(500).json({
         success: false,
-        message: "Both 'from' and 'to' currencies are required"
+        message:
+          error.message ||
+          "Failed to get exchange rate",
       });
     }
-
-    const rate = await exchangeRateService.getRate(from, to);
-
-    if (!rate) {
-      return res.status(404).json({
-        success: false,
-        message: `Exchange rate not found for ${from}/${to}`
-      });
-    }
-
-    res.json({
-      success: true,
-      from: from.toUpperCase(),
-      to: to.toUpperCase(),
-      rate: rate.rate,
-      inverseRate: rate.inverseRate || 1 / rate.rate,
-      effectiveDate: rate.effectiveDate,
-      source: rate.source,
-      expiresAt: rate.expiresAt,
-      formatted: {
-        from: currencyService.formatAmount(1, from),
-        to: currencyService.formatAmount(rate.rate, to),
-      },
-    });
-  } catch (error) {
-    console.error("❌ Get currency exchange rate error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+  };

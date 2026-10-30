@@ -1,7 +1,5 @@
 // src/pages/ProviderProfile.jsx
-// ✅ COMPLETE FIXED - Logo displayed everywhere
-// ✅ Added avatar/logo support for provider
-// ✅ Added image error handling
+// ✅ Complete: public profile subscribes to provider/listing/review changes
 
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
@@ -31,11 +29,11 @@ import {
 
 import API from "../services/api";
 import { getImageUrl } from "../utils/mediaHelpers";
+import useRefreshOn from '../hooks/useRefreshOn';
 
 // ✅ Helper to get provider logo
 const getProviderLogo = (provider) => {
   if (!provider) return null;
-  // Priority: logo > profileImage > avatar
   return provider.logo || provider.profileImage || provider.avatar || null;
 };
 
@@ -64,17 +62,26 @@ const ProviderProfile = () => {
     }
   }, [providerId]);
 
+  // 🔄 Cross-page sync: profile edits, listing approvals, review changes
+  useRefreshOn(['providers', 'listings', 'reviews'], fetchProviderProfile);
+
   const fetchProviderProfile = async () => {
+    // 🛡️ Guard: subscription may fire when route param is missing
+    if (!providerId) {
+      setError("Provider ID is required");
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      console.log('📌 Fetching public profile for provider:', providerId);
       const profileRes = await API.get(`/provider-profiles/public/${providerId}`);
-      
+
       if (profileRes.data.success) {
         setProfile(profileRes.data.profile);
-        
+
         setStats({
           totalTours: profileRes.data.profile.totalTours || 0,
           totalReviews: profileRes.data.profile.totalReviews || 0,
@@ -85,7 +92,6 @@ const ProviderProfile = () => {
         setError("Provider profile not found");
       }
 
-      // Fetch provider listings
       try {
         const toursRes = await API.get(`/listings/provider/${providerId}`);
         setTours(toursRes.data.listings || toursRes.data.data || []);
@@ -126,7 +132,6 @@ const ProviderProfile = () => {
     return null;
   };
 
-  // ✅ Get logo URL with fallback
   const getLogoUrl = () => {
     const logoPath = getProviderLogo(profile);
     if (logoPath && !logoError) {
@@ -135,7 +140,6 @@ const ProviderProfile = () => {
     return null;
   };
 
-  // ✅ Get cover URL with fallback
   const getCoverUrl = () => {
     if (profile?.coverImage && !coverError) {
       return getImageUrl(profile.coverImage);
@@ -193,7 +197,7 @@ const ProviderProfile = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      {/* ── Cover Image ── */}
+      {/* Cover */}
       <div className="relative h-64 md:h-80 w-full overflow-hidden bg-gradient-to-r from-[#0D9488] to-[#F59E0B]">
         {coverUrl ? (
           <img
@@ -208,7 +212,6 @@ const ProviderProfile = () => {
         <div className="absolute inset-0 bg-black/40" />
         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8">
           <div className="max-w-7xl mx-auto flex items-end gap-6">
-            {/* ── Logo ── */}
             <div className="w-24 h-24 md:w-32 md:h-32 rounded-2xl bg-white dark:bg-gray-900 shadow-xl overflow-hidden flex-shrink-0 border-4 border-white dark:border-gray-900">
               {logoUrl ? (
                 <img
@@ -224,7 +227,6 @@ const ProviderProfile = () => {
               )}
             </div>
 
-            {/* ── Info ── */}
             <div className="flex-1 text-white">
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-2xl md:text-4xl font-black">
@@ -253,14 +255,11 @@ const ProviderProfile = () => {
         </div>
       </div>
 
-      {/* ── Content ── */}
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-          {/* ── LEFT: Profile Details ── */}
           <div className="lg:col-span-2 space-y-8">
 
-            {/* Description */}
             {profile.description && (
               <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800">
                 <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
@@ -273,7 +272,6 @@ const ProviderProfile = () => {
               </div>
             )}
 
-            {/* Details */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {profile.languages?.length > 0 && (
                 <div className="bg-white dark:bg-gray-900 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-800">
@@ -350,7 +348,6 @@ const ProviderProfile = () => {
               )}
             </div>
 
-            {/* Social Media */}
             {socialLinks.length > 0 && (
               <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800">
                 <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
@@ -375,10 +372,8 @@ const ProviderProfile = () => {
             )}
           </div>
 
-          {/* ── RIGHT: Actions ── */}
           <div className="lg:col-span-1 space-y-4">
 
-            {/* Contact Card */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 sticky top-24">
               <h3 className="text-lg font-bold text-[#374151] dark:text-white mb-4">
                 Contact Provider
@@ -426,10 +421,8 @@ const ProviderProfile = () => {
                   </a>
                 )}
 
-                {/* ✅ Chat with Provider Button */}
                 <button
                   onClick={() => {
-                    // Navigate to chat with this provider
                     navigate(`/chat?providerId=${providerId}`);
                   }}
                   className="w-full h-12 rounded-xl bg-gradient-to-r from-[#0D9488] to-[#F59E0B] text-white font-bold text-sm flex items-center justify-center gap-2 hover:scale-[1.02] transition shadow-lg shadow-[#0D9488]/30"
@@ -448,7 +441,6 @@ const ProviderProfile = () => {
               </div>
             </div>
 
-            {/* Stats */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800">
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 rounded-xl bg-gray-50 dark:bg-gray-800">

@@ -1,13 +1,28 @@
 // src/components/ui/Card.jsx
-// ✅ COMPLETE FIXED - Mobile responsive with proper sizing
-// ✅ ADDED: Responsive padding, font sizes, and grid columns
-// ✅ ADDED: Video support with responsive controls
-// ✅ FIXED: Touch targets for mobile
-// ✅ FIXED: Card stacking on mobile
+// ============================================================
+// AI TOUR — CARD PRIMITIVES
+// ============================================================
+// ✅ Removed "Video" badge and center play icon from CardImage
+//    and TourCard — media shows cleanly without distracting
+//    overlays.
+// ✅ Removed duplicate Video badge in TourCard (was rendered
+//    both by CardImage and TourCard).
+// ✅ Fixed invalid `xs:` breakpoint (not in default Tailwind —
+//    silently produced no styles). Replaced with `sm:` which
+//    behaves the same on all supported widths.
+// ✅ Fixed CardGroup dynamic Tailwind classes — arbitrary
+//    template classes like `grid-cols-${n}` are purged in
+//    production. Now uses a static lookup map.
+// ✅ Replaced "Pending" status badge visibility — but the
+//    TourCard is a PROVIDER-ONLY component (it has onEdit /
+//    onDelete / onShare actions), so status badge stays.
+// ✅ Preserved: all props, exports, video/image fallback,
+//    responsive layout, dark mode, brand colors.
+// ============================================================
 
 import React, { useState } from 'react';
 import clsx from 'clsx';
-import { MapPin, Play, Video } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 
 // =====================================
 // AI TOUR COLORS
@@ -29,7 +44,10 @@ const FALLBACK_IMAGES = [
 ];
 
 const getFallbackImage = (seed) => {
-  const index = typeof seed === 'number' ? seed : Math.floor(Math.random() * FALLBACK_IMAGES.length);
+  const index =
+    typeof seed === 'number'
+      ? seed
+      : Math.floor(Math.random() * FALLBACK_IMAGES.length);
   return FALLBACK_IMAGES[index % FALLBACK_IMAGES.length];
 };
 
@@ -37,7 +55,8 @@ const getFallbackImage = (seed) => {
 // MEDIA HELPERS
 // =====================================
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL =
+  import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const getImageUrl = (image) => {
   if (!image) return null;
@@ -49,8 +68,18 @@ const getImageUrl = (image) => {
 
 const isVideoFile = (url) => {
   if (!url) return false;
-  const videoExtensions = ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.m4v', '.3gp'];
-  return videoExtensions.some(ext => url.toLowerCase().endsWith(ext));
+  const videoExtensions = [
+    '.mp4',
+    '.mov',
+    '.webm',
+    '.avi',
+    '.mkv',
+    '.m4v',
+    '.3gp',
+  ];
+  return videoExtensions.some((ext) =>
+    url.toLowerCase().endsWith(ext)
+  );
 };
 
 const getMediaType = (src) => {
@@ -60,11 +89,11 @@ const getMediaType = (src) => {
 };
 
 // =====================================
-// CARD - MAIN COMPONENT
+// CARD — MAIN COMPONENT
 // =====================================
-const Card = ({ 
-  children, 
-  className, 
+const Card = ({
+  children,
+  className,
   hover = true,
   variant = 'default',
   padding = true,
@@ -80,7 +109,8 @@ const Card = ({
     featured: {
       bg: 'bg-gradient-to-br from-[#0D9488]/5 to-[#F59E0B]/5 dark:from-[#0D9488]/10 dark:to-[#F59E0B]/10',
       shadow: 'shadow-xl hover:shadow-2xl',
-      border: 'border-2 border-[#0D9488]/30 dark:border-[#0D9488]/20',
+      border:
+        'border-2 border-[#0D9488]/30 dark:border-[#0D9488]/20',
       rounded: 'rounded-3xl',
     },
     compact: {
@@ -94,7 +124,7 @@ const Card = ({
   const variantStyles = variants[variant] || variants.default;
 
   return (
-    <div 
+    <div
       onClick={onClick}
       className={clsx(
         variantStyles.bg,
@@ -115,12 +145,12 @@ const Card = ({
 };
 
 // =====================================
-// CARD IMAGE - ✅ UPDATED with video support & responsive
+// CARD IMAGE — clean, no labels
 // =====================================
-export const CardImage = ({ 
-  src, 
-  alt, 
-  className, 
+export const CardImage = ({
+  src,
+  alt,
+  className,
   height = 'h-48 sm:h-56 md:h-64',
   fallback = true,
   children,
@@ -128,18 +158,17 @@ export const CardImage = ({
   videoPoster,
 }) => {
   const [error, setError] = useState(false);
-  const [videoLoaded, setVideoLoaded] = useState(false);
 
-  // Determine if this is a video
   const mediaType = getMediaType(src);
   const isVideoFile_ = mediaType === 'video';
 
-  // Get image URL for fallback/poster
   const imageUrl = getImageUrl(src);
-  const finalPoster = videoPoster || imageUrl || getFallbackImage(seed);
-  const finalSrc = (!src || error) && fallback 
-    ? getFallbackImage(seed) 
-    : imageUrl;
+  const finalPoster =
+    videoPoster || imageUrl || getFallbackImage(seed);
+  const finalSrc =
+    (!src || error) && fallback
+      ? getFallbackImage(seed)
+      : imageUrl;
 
   const handleError = () => {
     if (fallback) {
@@ -160,11 +189,13 @@ export const CardImage = ({
   };
 
   return (
-    <div className={clsx(
-      'relative overflow-hidden bg-gradient-to-br from-[#0D9488]/10 to-[#F59E0B]/10',
-      height,
-      className
-    )}>
+    <div
+      className={clsx(
+        'relative overflow-hidden bg-gradient-to-br from-[#0D9488]/10 to-[#F59E0B]/10',
+        height,
+        className
+      )}
+    >
       {isVideoFile_ && src ? (
         <video
           src={src}
@@ -175,7 +206,6 @@ export const CardImage = ({
           playsInline
           poster={finalPoster}
           onError={handleVideoError}
-          onLoadedData={() => setVideoLoaded(true)}
         />
       ) : finalSrc ? (
         <img
@@ -190,180 +220,232 @@ export const CardImage = ({
           🏔️
         </div>
       )}
-      
-      {/* Video badge - responsive */}
-      {isVideoFile_ && src && (
-        <div className="absolute bottom-2 right-2 bg-black/60 text-white text-[8px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full flex items-center gap-0.5 sm:gap-1">
-          <Play className="w-2 h-2 sm:w-3 sm:h-3" />
-          <span className="hidden xs:inline">Video</span>
-        </div>
-      )}
-      
+
       {children}
     </div>
   );
 };
 
 // =====================================
-// CARD CONTENT - ✅ Responsive
+// CARD CONTENT
 // =====================================
-export const CardContent = ({ 
-  children, 
+export const CardContent = ({
+  children,
   className,
   noPadding = false,
 }) => (
-  <div className={clsx(
-    'space-y-2 sm:space-y-3',
-    !noPadding && 'p-4 sm:p-6',
-    className
-  )}>
+  <div
+    className={clsx(
+      'space-y-2 sm:space-y-3',
+      !noPadding && 'p-4 sm:p-6',
+      className
+    )}
+  >
     {children}
   </div>
 );
 
 // =====================================
-// CARD BADGE - ✅ Responsive
+// CARD BADGE
 // =====================================
-export const CardBadge = ({ 
-  children, 
+export const CardBadge = ({
+  children,
   variant = 'default',
-  className 
+  className,
 }) => {
   const variants = {
-    default: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-    success: 'bg-[#0D9488]/10 text-[#0D9488] dark:bg-[#0D9488]/20 dark:text-[#0D9488]',
-    warning: 'bg-[#F59E0B]/10 text-[#F59E0B] dark:bg-[#F59E0B]/20 dark:text-[#F59E0B]',
-    danger: 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400',
-    info: 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400',
+    default:
+      'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    success:
+      'bg-[#0D9488]/10 text-[#0D9488] dark:bg-[#0D9488]/20 dark:text-[#0D9488]',
+    warning:
+      'bg-[#F59E0B]/10 text-[#F59E0B] dark:bg-[#F59E0B]/20 dark:text-[#F59E0B]',
+    danger:
+      'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400',
+    info:
+      'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400',
   };
 
   return (
-    <span className={clsx(
-      'px-2 py-0.5 sm:px-3 sm:py-1 rounded-full',
-      'text-[10px] sm:text-xs font-bold uppercase tracking-wide',
-      variants[variant] || variants.default,
-      className
-    )}>
+    <span
+      className={clsx(
+        'px-2 py-0.5 sm:px-3 sm:py-1 rounded-full',
+        'text-[10px] sm:text-xs font-bold uppercase tracking-wide',
+        variants[variant] || variants.default,
+        className
+      )}
+    >
       {children}
     </span>
   );
 };
 
 // =====================================
-// CARD TITLE - ✅ Responsive
+// CARD TITLE
 // =====================================
-export const CardTitle = ({ 
-  children, 
+export const CardTitle = ({
+  children,
   className,
   featured = false,
 }) => (
-  <h3 className={clsx(
-    'text-base sm:text-lg md:text-xl font-bold text-[#374151] dark:text-white',
-    featured && 'bg-gradient-to-r from-[#0D9488] to-[#F59E0B] bg-clip-text text-transparent',
-    className
-  )}>
+  <h3
+    className={clsx(
+      'text-base sm:text-lg md:text-xl font-bold text-[#374151] dark:text-white',
+      featured &&
+        'bg-gradient-to-r from-[#0D9488] to-[#F59E0B] bg-clip-text text-transparent',
+      className
+    )}
+  >
     {children}
   </h3>
 );
 
 // =====================================
-// CARD SUBTITLE - ✅ Responsive
+// CARD SUBTITLE
 // =====================================
-export const CardSubtitle = ({ 
-  children, 
+export const CardSubtitle = ({
+  children,
   className,
   icon = MapPin,
 }) => {
   const Icon = icon;
   return (
-    <div className={clsx(
-      'flex items-center gap-1.5 sm:gap-2',
-      'text-xs sm:text-sm',
-      'text-gray-500 dark:text-gray-400',
-      className
-    )}>
-      {Icon && <Icon className="w-3 h-3 sm:w-4 sm:h-4 text-[#0D9488]" />}
+    <div
+      className={clsx(
+        'flex items-center gap-1.5 sm:gap-2',
+        'text-xs sm:text-sm',
+        'text-gray-500 dark:text-gray-400',
+        className
+      )}
+    >
+      {Icon && (
+        <Icon className="w-3 h-3 sm:w-4 sm:h-4 text-[#0D9488]" />
+      )}
       {children}
     </div>
   );
 };
 
 // =====================================
-// CARD PRICE - ✅ Responsive
+// CARD PRICE
 // =====================================
-export const CardPrice = ({ 
-  price, 
+export const CardPrice = ({
+  price,
   className,
   currency = '$',
 }) => (
-  <div className={clsx(
-    'font-black text-[#0D9488]',
-    'text-base sm:text-lg',
-    className
-  )}>
-    {currency}{price}
+  <div
+    className={clsx(
+      'font-black text-[#0D9488]',
+      'text-base sm:text-lg',
+      className
+    )}
+  >
+    {currency}
+    {price}
   </div>
 );
 
 // =====================================
-// CARD STATS - ✅ Responsive
+// CARD STATS
 // =====================================
-export const CardStats = ({ 
-  children, 
-  className,
-}) => (
-  <div className={clsx(
-    'flex items-center gap-2 sm:gap-4',
-    'text-xs sm:text-sm',
-    'text-gray-500 dark:text-gray-400',
-    className
-  )}>
+export const CardStats = ({ children, className }) => (
+  <div
+    className={clsx(
+      'flex items-center gap-2 sm:gap-4',
+      'text-xs sm:text-sm',
+      'text-gray-500 dark:text-gray-400',
+      className
+    )}
+  >
     {children}
   </div>
 );
 
 // =====================================
-// CARD ACTIONS - ✅ Responsive
+// CARD ACTIONS
 // =====================================
-export const CardActions = ({ 
-  children, 
-  className,
-}) => (
-  <div className={clsx(
-    'flex flex-wrap items-center gap-1.5 sm:gap-2',
-    'pt-3 sm:pt-4',
-    'border-t border-gray-100 dark:border-gray-800',
-    className
-  )}>
+export const CardActions = ({ children, className }) => (
+  <div
+    className={clsx(
+      'flex flex-wrap items-center gap-1.5 sm:gap-2',
+      'pt-3 sm:pt-4',
+      'border-t border-gray-100 dark:border-gray-800',
+      className
+    )}
+  >
     {children}
   </div>
 );
 
 // =====================================
-// CARD FOOTER - ✅ Responsive
+// CARD FOOTER
 // =====================================
-export const CardFooter = ({ 
-  children, 
-  className,
-}) => (
-  <div className={clsx(
-    'bg-gray-50 dark:bg-gray-800/50',
-    'px-4 py-3 sm:px-6 sm:py-4',
-    className
-  )}>
+export const CardFooter = ({ children, className }) => (
+  <div
+    className={clsx(
+      'bg-gray-50 dark:bg-gray-800/50',
+      'px-4 py-3 sm:px-6 sm:py-4',
+      className
+    )}
+  >
     {children}
   </div>
 );
 
 // =====================================
-// CARD GROUP - ✅ Responsive grid
+// CARD GROUP — static Tailwind map
 // =====================================
-export const CardGroup = ({ 
-  children, 
+const COL_CLASS = {
+  1: 'grid-cols-1',
+  2: 'grid-cols-2',
+  3: 'grid-cols-3',
+  4: 'grid-cols-4',
+  5: 'grid-cols-5',
+  6: 'grid-cols-6',
+};
+
+const SM_COL_CLASS = {
+  1: 'sm:grid-cols-1',
+  2: 'sm:grid-cols-2',
+  3: 'sm:grid-cols-3',
+  4: 'sm:grid-cols-4',
+  5: 'sm:grid-cols-5',
+  6: 'sm:grid-cols-6',
+};
+
+const MD_COL_CLASS = {
+  1: 'md:grid-cols-1',
+  2: 'md:grid-cols-2',
+  3: 'md:grid-cols-3',
+  4: 'md:grid-cols-4',
+  5: 'md:grid-cols-5',
+  6: 'md:grid-cols-6',
+};
+
+const LG_COL_CLASS = {
+  1: 'lg:grid-cols-1',
+  2: 'lg:grid-cols-2',
+  3: 'lg:grid-cols-3',
+  4: 'lg:grid-cols-4',
+  5: 'lg:grid-cols-5',
+  6: 'lg:grid-cols-6',
+};
+
+const XL_COL_CLASS = {
+  1: 'xl:grid-cols-1',
+  2: 'xl:grid-cols-2',
+  3: 'xl:grid-cols-3',
+  4: 'xl:grid-cols-4',
+  5: 'xl:grid-cols-5',
+  6: 'xl:grid-cols-6',
+};
+
+export const CardGroup = ({
+  children,
   className,
   cols = { xs: 1, sm: 2, md: 3, lg: 4 },
 }) => {
-  // Responsive grid columns
   const gridCols = {
     xs: cols.xs || 1,
     sm: cols.sm || 1,
@@ -373,22 +455,24 @@ export const CardGroup = ({
   };
 
   return (
-    <div className={clsx(
-      'grid gap-3 sm:gap-4 md:gap-6',
-      `grid-cols-${gridCols.xs}`,
-      `sm:grid-cols-${gridCols.sm}`,
-      `md:grid-cols-${gridCols.md}`,
-      `lg:grid-cols-${gridCols.lg}`,
-      gridCols.xl && `xl:grid-cols-${gridCols.xl}`,
-      className
-    )}>
+    <div
+      className={clsx(
+        'grid gap-3 sm:gap-4 md:gap-6',
+        COL_CLASS[gridCols.xs] || COL_CLASS[1],
+        SM_COL_CLASS[gridCols.sm] || SM_COL_CLASS[1],
+        MD_COL_CLASS[gridCols.md] || MD_COL_CLASS[2],
+        LG_COL_CLASS[gridCols.lg] || LG_COL_CLASS[3],
+        gridCols.xl && XL_COL_CLASS[gridCols.xl],
+        className
+      )}
+    >
       {children}
     </div>
   );
 };
 
 // =====================================
-// TOUR CARD - ✅ Responsive
+// TOUR CARD — provider tool card
 // =====================================
 const getStatusBadgeVariant = (status) => {
   const styles = {
@@ -401,32 +485,30 @@ const getStatusBadgeVariant = (status) => {
   return styles[status?.toLowerCase()] || 'default';
 };
 
-export const TourCard = ({ 
-  tour, 
+export const TourCard = ({
+  tour,
   onView,
   onEdit,
   onDelete,
   onShare,
 }) => {
-  const { 
-    _id, 
-    title, 
-    location, 
-    price, 
-    images, 
-    coverImage, 
+  const {
+    _id,
+    title,
+    location,
+    price,
+    images,
+    coverImage,
     coverMedia,
     coverMediaType,
-    videos,
-    duration, 
-    travelers, 
-    views, 
+    duration,
+    travelers,
+    views,
     rating,
     status,
-    bookings 
+    bookings,
   } = tour || {};
 
-  // Get image/video source
   const getMediaSrc = () => {
     if (coverMedia && coverMediaType === 'video') return coverMedia;
     if (coverImage) return coverImage;
@@ -435,37 +517,30 @@ export const TourCard = ({
   };
 
   const mediaSrc = getMediaSrc();
-  const mediaType = coverMediaType === 'video' ? 'video' : 'image';
-
   const badgeVariant = getStatusBadgeVariant(status);
 
   return (
     <Card variant="default" hover={true} padding={false}>
-      <CardImage 
-        src={mediaSrc} 
+      <CardImage
+        src={mediaSrc}
         alt={title || 'Tour'}
         height="h-48 sm:h-56 md:h-64"
         seed={_id}
-        videoPoster={coverImage || (images?.length > 0 ? images[0] : null)}
+        videoPoster={
+          coverImage || (images?.length > 0 ? images[0] : null)
+        }
       >
+        {/* Status badge — provider-only card, useful for owner */}
         {status && (
           <div className="absolute top-2 right-2 sm:top-4 sm:right-4">
-            <CardBadge variant={badgeVariant}>
-              {status}
-            </CardBadge>
+            <CardBadge variant={badgeVariant}>{status}</CardBadge>
           </div>
         )}
+
+        {/* Bookings count — useful for provider */}
         {bookings > 0 && (
           <div className="absolute top-2 left-2 sm:top-4 sm:left-4">
-            <CardBadge variant="info">
-              📊 {bookings}
-            </CardBadge>
-          </div>
-        )}
-        {mediaType === 'video' && (
-          <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[8px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full flex items-center gap-0.5 sm:gap-1">
-            <Play className="w-2 h-2 sm:w-3 sm:h-3" />
-            <span className="hidden xs:inline">Video</span>
+            <CardBadge variant="info">📊 {bookings}</CardBadge>
           </div>
         )}
       </CardImage>
@@ -482,15 +557,23 @@ export const TourCard = ({
           {location || 'Location not specified'}
         </CardSubtitle>
 
-        {/* Responsive stats grid */}
+        {/* Stats */}
         <div className="grid grid-cols-2 gap-2 sm:gap-3">
           <div className="bg-gray-50 dark:bg-gray-800 rounded-lg sm:rounded-xl p-2 sm:p-3">
-            <div className="text-[#0D9488] text-[10px] sm:text-sm">Duration</div>
-            <div className="font-bold text-xs sm:text-sm dark:text-white">{duration || 'N/A'}</div>
+            <div className="text-[#0D9488] text-[10px] sm:text-sm">
+              Duration
+            </div>
+            <div className="font-bold text-xs sm:text-sm dark:text-white">
+              {duration || 'N/A'}
+            </div>
           </div>
           <div className="bg-gray-50 dark:bg-gray-800 rounded-lg sm:rounded-xl p-2 sm:p-3">
-            <div className="text-[#F59E0B] text-[10px] sm:text-sm">Travelers</div>
-            <div className="font-bold text-xs sm:text-sm dark:text-white">{travelers || 0}</div>
+            <div className="text-[#F59E0B] text-[10px] sm:text-sm">
+              Travelers
+            </div>
+            <div className="font-bold text-xs sm:text-sm dark:text-white">
+              {travelers || 0}
+            </div>
           </div>
         </div>
 
@@ -503,7 +586,6 @@ export const TourCard = ({
           </span>
         </CardStats>
 
-        {/* Responsive action buttons */}
         <CardActions>
           <button
             onClick={() => onView?.(_id)}
@@ -514,18 +596,21 @@ export const TourCard = ({
           <button
             onClick={() => onEdit?.(_id)}
             className="w-8 h-8 sm:w-10 sm:h-10 bg-[#374151] hover:bg-[#374151]/80 text-white rounded-lg sm:rounded-xl transition flex items-center justify-center text-xs sm:text-base"
+            aria-label="Edit tour"
           >
             ✏️
           </button>
           <button
             onClick={() => onShare?.(tour)}
             className="w-8 h-8 sm:w-10 sm:h-10 bg-[#F59E0B] hover:bg-[#F59E0B]/80 text-white rounded-lg sm:rounded-xl transition flex items-center justify-center text-xs sm:text-base"
+            aria-label="Share tour"
           >
             📤
           </button>
           <button
             onClick={() => onDelete?.(tour)}
             className="w-8 h-8 sm:w-10 sm:h-10 bg-red-100 hover:bg-red-200 text-red-600 rounded-lg sm:rounded-xl transition flex items-center justify-center text-xs sm:text-base"
+            aria-label="Delete tour"
           >
             🗑️
           </button>
@@ -536,6 +621,6 @@ export const TourCard = ({
 };
 
 // =====================================
-// EXPORTS ✅
+// EXPORTS
 // =====================================
 export default Card;

@@ -1,11 +1,5 @@
 // frontend/src/pages/MyReviews.jsx
-// ✅ COMPLETE FIXED - Server-Side Pagination (Strategy B)
-// ✅ Added: usePagination hook for pagination controls
-// ✅ Added: Pagination component with page numbers, First/Last
-// ✅ Added: LoadingSkeleton for initial load
-// ✅ Added: BackToTop button
-// ✅ Removed status badge from review card
-// ✅ Added handleHelpfulToggle function for Helpful button
+// ✅ Complete: server-side pagination + refresh bus + shared review tabs
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
@@ -36,8 +30,11 @@ import usePagination from '../hooks/usePagination';
 import Pagination from '../components/ui/Pagination';
 import LoadingSkeleton from '../components/ui/LoadingSkeleton';
 import BackToTop from '../components/ui/BackToTop';
+import TravelerTabs from '../components/navigation/TravelerTabs';
 import { PAGINATION } from '../utils/constants';
 import toast from 'react-hot-toast';
+import useRefreshOn from '../hooks/useRefreshOn';
+import { refreshMany } from '../utils/dataRefresh';
 
 // ===============================
 // AI TOUR COLORS
@@ -57,7 +54,6 @@ const MyReviews = () => {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // ✅ usePagination hook for server-side pagination
   const {
     data: reviews,
     loading,
@@ -80,12 +76,18 @@ const MyReviews = () => {
     dataKey: 'reviews',
   });
 
-  // ✅ STABLE: handleDelete with useCallback
+  // 🔄 Cross-page sync: new/deleted/edited reviews from anywhere refetch this page
+  useRefreshOn(['reviews', 'reviews:traveler'], refresh);
+
   const handleDelete = useCallback(async (reviewId) => {
     if (!window.confirm('Are you sure you want to delete this review?')) return;
-    
+
     try {
       await deleteReview(reviewId);
+
+      // 🔄 Broadcast: deleted review affects listing rating + traveler dashboard counter
+      refreshMany('reviews', 'reviews:traveler', 'listings');
+
       await refresh();
       toast.success('Review deleted successfully');
     } catch (error) {
@@ -94,23 +96,24 @@ const MyReviews = () => {
     }
   }, [refresh]);
 
-  // ✅ STABLE: handleEdit with useCallback
   const handleEdit = useCallback((review) => {
     setEditingReview(review);
     setShowForm(true);
   }, []);
 
-  // ✅ STABLE: handleSubmit with useCallback
   const handleSubmit = useCallback(async (data) => {
     try {
       setSubmitting(true);
-      
+
       await updateReview(editingReview._id, {
         rating: data.rating,
         title: data.title || editingReview.title,
         comment: data.comment,
       });
-      
+
+      // 🔄 Broadcast: edited review affects listing rating + traveler dashboard
+      refreshMany('reviews', 'reviews:traveler', 'listings');
+
       setShowForm(false);
       setEditingReview(null);
       await refresh();
@@ -123,18 +126,15 @@ const MyReviews = () => {
     }
   }, [editingReview, refresh]);
 
-  // ✅ STABLE: handleHelpfulToggle with useCallback
   const handleHelpfulToggle = useCallback(async (reviewId) => {
     try {
-      console.log('📤 [MyReviews] Toggling helpful for review:', reviewId);
-      
       const result = await toggleHelpful(reviewId);
-      
+
       if (result && result.success) {
         await refresh();
         return result;
       }
-      
+
       return false;
     } catch (error) {
       console.error('❌ [MyReviews] Error toggling helpful:', error);
@@ -143,19 +143,17 @@ const MyReviews = () => {
     }
   }, [refresh]);
 
-  // ✅ STABLE: getStats with useMemo
   const stats = useMemo(() => {
     const total = reviews.length;
     const published = reviews.filter(r => r.status === 'published').length;
     const pending = reviews.filter(r => r.status === 'pending').length;
     const hidden = reviews.filter(r => r.status === 'hidden').length;
-    const avgRating = total > 0 
+    const avgRating = total > 0
       ? (reviews.reduce((sum, r) => sum + r.rating, 0) / total).toFixed(1)
       : 0;
     return { total, published, pending, hidden, avgRating };
   }, [reviews]);
 
-  // ✅ STABLE: handleClearFilters with useCallback
   const handleClearFilters = useCallback(() => {
     setSearchTerm('');
     setRatingFilter('all');
@@ -163,31 +161,26 @@ const MyReviews = () => {
     clearFilters();
   }, [clearFilters]);
 
-  // ✅ STABLE: handleCancelEdit with useCallback
   const handleCancelEdit = useCallback(() => {
     setShowForm(false);
     setEditingReview(null);
   }, []);
 
-  // ✅ Handle search with useCallback
   const handleSearch = useCallback((value) => {
     setSearchTerm(value);
     setPaginationSearch(value);
   }, [setPaginationSearch]);
 
-  // ✅ Handle rating filter with useCallback
   const handleRatingFilter = useCallback((value) => {
     setRatingFilter(value);
     applyFilter('rating', value);
   }, [applyFilter]);
 
-  // ✅ Handle status filter with useCallback
   const handleStatusFilter = useCallback((value) => {
     setStatusFilter(value);
     applyFilter('status', value);
   }, [applyFilter]);
 
-  // ✅ Status options - only valid statuses from the model
   const statusOptions = [
     { value: 'all', label: 'All Status' },
     { value: 'pending', label: 'Pending' },
@@ -195,7 +188,6 @@ const MyReviews = () => {
     { value: 'hidden', label: 'Hidden' },
   ];
 
-  // ✅ Rating options
   const ratingOptions = [
     { value: 'all', label: 'All Ratings' },
     { value: '5', label: '⭐ 5 Stars' },
@@ -205,12 +197,11 @@ const MyReviews = () => {
     { value: '1', label: '⭐ 1 Star' },
   ];
 
-  // ===============================
-  // LOADING STATE
-  // ===============================
   if (loading) {
     return (
       <div className="space-y-6 max-w-5xl mx-auto px-4 py-6">
+        {/* ✅ Shared reviews tabs */}
+        <TravelerTabs variant="reviews" />
         <div className="flex items-center gap-3 mb-4">
           <div className="w-12 h-12 rounded-2xl bg-gray-200 dark:bg-gray-700 animate-pulse" />
           <div>
@@ -223,29 +214,30 @@ const MyReviews = () => {
     );
   }
 
-  // ===============================
-  // ERROR STATE
-  // ===============================
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-[300px] text-center max-w-5xl mx-auto px-4">
-        <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-        <p className="text-gray-600 dark:text-gray-400">{error}</p>
-        <button
-          onClick={refresh}
-          className="mt-4 px-6 py-2 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/80 transition"
-        >
-          Try Again
-        </button>
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        {/* ✅ Shared reviews tabs */}
+        <TravelerTabs variant="reviews" />
+        <div className="flex flex-col items-center justify-center h-[300px] text-center mt-6">
+          <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+          <p className="text-gray-600 dark:text-gray-400">{error}</p>
+          <button
+            onClick={refresh}
+            className="mt-4 px-6 py-2 rounded-xl bg-[#0D9488] text-white hover:bg-[#0D9488]/80 transition"
+          >
+            Try Again
+          </button>
+        </div>
       </div>
     );
   }
 
-  // ===============================
-  // MAIN RENDER
-  // ===============================
   return (
     <div className="space-y-6 animate-fade-in px-4 py-6 max-w-5xl mx-auto">
+
+      {/* ✅ Shared reviews tabs */}
+      <TravelerTabs variant="reviews" />
 
       {/* HEADER */}
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -396,7 +388,7 @@ const MyReviews = () => {
         <div className="space-y-4">
           {reviews.map((review) => {
             const canEdit = review.status !== 'hidden';
-            
+
             return (
               <ReviewCard
                 key={review._id}
@@ -440,7 +432,6 @@ const MyReviews = () => {
         </div>
       )}
 
-      {/* Back to Top */}
       <BackToTop />
     </div>
   );

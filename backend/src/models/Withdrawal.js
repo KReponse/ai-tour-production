@@ -1,469 +1,1083 @@
 // backend/src/models/Withdrawal.js
-// ✅ COMPLETE FIXED - Added proper indexes
-// ✅ All indexes defined in ONE place only
-// ✅ No duplicate index definitions
 
 import mongoose from "mongoose";
 
+const { Schema } = mongoose;
+
 /**
- * Withdrawal Schema
- * 
- * This model tracks provider withdrawal requests and their status.
- * 
- * Withdrawal Status:
- * - pending: Initial state, waiting for admin approval
- * - approved: Approved by admin, ready for processing
- * - paid: Payment has been sent to provider
- * - rejected: Withdrawal request rejected
- * 
- * Withdrawal Methods:
- * - bank: Bank transfer
- * - mobile_money: Mobile money (Momo, Airtel, etc.)
- * - paypal: PayPal transfer
+ * Withdrawal Model
+ *
+ * Purpose:
+ * - Stores provider withdrawal requests.
+ * - Prevents invalid state transitions.
+ * - Keeps withdrawal accounting separate from Earning records.
+ * - Supports bank, mobile money and PayPal withdrawals.
+ *
+ * IMPORTANT:
+ * Withdrawal status is intentionally:
+ *
+ * pending
+ *   ↓
+ * approved
+ *   ↓
+ * paid
+ *
+ * Rejection can happen from pending or approved.
+ *
+ * We do NOT mark all provider earnings as "withdrawn" here.
+ * A withdrawal is a separate financial transaction.
  */
 
-const withdrawalSchema = new mongoose.Schema(
-{
-  // ─── Provider ──────────────────────────────────────────────────
-  provider: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: [true, "Provider is required"],
-    // ✅ REMOVED: index: true - defined in schema.index() below
-  },
+const WITHDRAWAL_STATUSES = [
+  "pending",
+  "approved",
+  "paid",
+  "rejected",
+];
 
-  // ─── Amount ────────────────────────────────────────────────────
-  amount: {
-    type: Number,
-    required: [true, "Amount is required"],
-    min: [0.01, "Amount must be greater than 0"],
-  },
+const WITHDRAWAL_METHODS = [
+  "bank",
+  "mobile_money",
+  "paypal",
+];
 
-  // ─── Withdrawal Method ────────────────────────────────────────
-  method: {
-    type: String,
-    enum: [
-      "bank",
-      "mobile_money",
-      "paypal"
-    ],
-    default: "bank",
-    // ✅ REMOVED: index: true - defined in schema.index() below
-  },
+const CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "RWF",
+];
 
-  // ─── Account Details ──────────────────────────────────────────
-  accountDetails: {
-    type: String,
-    required: [true, "Account details are required"],
-    trim: true,
-  },
+const withdrawalSchema = new Schema(
+  {
+    /**
+     * Provider who requested the withdrawal.
+     */
+    provider: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "Provider is required"],
+      index: true,
+    },
 
-  // ─── Status ────────────────────────────────────────────────────
-  status: {
-    type: String,
-    enum: [
-      "pending",
-      "approved",
-      "paid",
-      "rejected"
-    ],
-    default: "pending",
-    // ✅ REMOVED: index: true - defined in schema.index() below
-  },
+    /**
+     * Withdrawal amount requested by provider.
+     *
+     * This is the gross withdrawal amount before withdrawal fee.
+     */
+    amount: {
+      type: Number,
+      required: [true, "Withdrawal amount is required"],
+      min: [0.01, "Withdrawal amount must be greater than 0"],
+    },
 
-  // ─── Admin Notes ──────────────────────────────────────────────
-  adminNote: {
-    type: String,
-    default: "",
-    trim: true,
-  },
+    /**
+     * Currency of the withdrawal.
+     *
+     * IMPORTANT:
+     * The earning/withdrawal layer should not silently mix currencies.
+     * Controller/service should ensure the provider withdraws from
+     * an appropriate currency balance.
+     */
+    currency: {
+      type: String,
+      enum: CURRENCIES,
+      default: "RWF",
+      uppercase: true,
+      trim: true,
+      index: true,
+    },
 
-  // ─── Timestamps ────────────────────────────────────────────────
-  paidAt: {
-    type: Date,
-    // ✅ REMOVED: index: true - defined in schema.index() below
-  },
+    /**
+     * Withdrawal method.
+     */
+    method: {
+      type: String,
+      enum: {
+        values: WITHDRAWAL_METHODS,
+        message: "Invalid withdrawal method",
+      },
+      required: [true, "Withdrawal method is required"],
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
 
-  // ─── Additional Fields ────────────────────────────────────────
-  // Reference number for tracking
-  reference: {
-    type: String,
-    unique: true, // ✅ Creates index automatically
-    // DO NOT add schema.index() for this field
-  },
+    /**
+     * Destination account information.
+     *
+     * MVP:
+     * stored as a protected string.
+     *
+     * Production upgrade later:
+     * encrypt sensitive payout information at application level.
+     */
+    accountDetails: {
+      type: String,
+      required: [true, "Account details are required"],
+      trim: true,
+      minlength: [2, "Account details are too short"],
+      maxlength: [1000, "Account details are too long"],
+      select: false,
+    },
 
-  // Bank/transaction reference from payment provider
-  transactionReference: {
-    type: String,
-    // ✅ REMOVED: index: true - defined in schema.index() below
-  },
+    /**
+     * Current withdrawal state.
+     */
+    status: {
+      type: String,
+      enum: {
+        values: WITHDRAWAL_STATUSES,
+        message: "Invalid withdrawal status",
+      },
+      default: "pending",
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
 
-  // Any fees charged for the withdrawal
-  fee: {
-    type: Number,
-    default: 0,
-    min: [0, "Fee cannot be negative"],
-  },
+    /**
+     * Admin note.
+     *
+     * Kept singular for compatibility with the existing frontend/controller.
+     */
+    adminNote: {
+      type: String,
+      trim: true,
+      maxlength: [2000, "Admin note is too long"],
+      default: null,
+    },
 
-  // Net amount after fees
-  netAmount: {
-    type: Number,
-    // This will be calculated as amount - fee
-  },
+    /**
+     * Reason why a withdrawal was rejected.
+     */
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: [2000, "Rejection reason is too long"],
+      default: null,
+    },
 
-  // Admin who processed the withdrawal
-  processedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-  },
+    /**
+     * Date the withdrawal was actually paid.
+     */
+    paidAt: {
+      type: Date,
+      default: null,
+    },
 
-  processedAt: {
-    type: Date,
-  },
+    /**
+     * Human-readable unique withdrawal reference.
+     *
+     * Example:
+     * WDR-20260909-ABC12345
+     */
+    reference: {
+      type: String,
+      unique: true,
+      trim: true,
+      uppercase: true,
+      index: true,
+    },
 
-  // Rejection reason
-  rejectionReason: {
-    type: String,
-    trim: true,
-  },
+    /**
+     * External payment provider transaction reference.
+     *
+     * Example:
+     * Mobile money transaction ID
+     * Bank transfer reference
+     * PayPal payout ID
+     */
+    transactionReference: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true,
+    },
 
-  // Payment provider data
-  providerData: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    default: {},
-  },
+    /**
+     * Withdrawal processing fee.
+     *
+     * MVP default = 0.
+     */
+    fee: {
+      type: Number,
+      min: [0, "Withdrawal fee cannot be negative"],
+      default: 0,
+    },
 
-  // Metadata
-  metadata: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed,
-    default: {},
+    /**
+     * Actual amount provider receives after withdrawal fee.
+     */
+    netAmount: {
+      type: Number,
+      min: [0, "Net withdrawal amount cannot be negative"],
+      default: 0,
+    },
+
+    /**
+     * Admin/user who processed the withdrawal.
+     */
+    processedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    /**
+     * Last processing timestamp.
+     */
+    processedAt: {
+      type: Date,
+      default: null,
+    },
+
+    /**
+     * External provider data.
+     *
+     * Useful for Stripe, PayPal, bank or mobile-money metadata.
+     */
+    providerData: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: {},
+    },
+
+    /**
+     * Internal metadata.
+     */
+    metadata: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: {},
+    },
   },
-},
-{
-  timestamps: true,
+  {
+    timestamps: true,
+
+    /**
+     * Prevent accidental unknown fields from silently entering
+     * the financial document.
+     */
+    strict: true,
+
+    /**
+     * Keep virtuals in API responses.
+     */
+    toJSON: {
+      virtuals: true,
+      transform: (_doc, ret) => {
+        delete ret.accountDetails;
+        delete ret.__v;
+        return ret;
+      },
+    },
+
+    toObject: {
+      virtuals: true,
+      transform: (_doc, ret) => {
+        delete ret.accountDetails;
+        delete ret.__v;
+        return ret;
+      },
+    },
+  }
+);
+
+/* =========================================================
+   INDEXES
+========================================================= */
+
+/**
+ * Provider withdrawal history.
+ */
+withdrawalSchema.index({
+  provider: 1,
+  createdAt: -1,
 });
 
-// =========================
-// ✅ ALL INDEXES DEFINED IN ONE PLACE
-// =========================
-// NO index:true in field definitions above
-// NO duplicate indexes here
+/**
+ * Provider + status.
+ */
+withdrawalSchema.index({
+  provider: 1,
+  status: 1,
+  createdAt: -1,
+});
 
-// =========================
-// ✅ IMPORTANT NOTES ON INDEXES:
-// =========================
-// 1. reference has unique:true - this automatically creates an index
-//    DO NOT add: withdrawalSchema.index({ reference: 1 })
-// 2. All other indexes are defined ONLY in this section
-// 3. No field has both index:true AND a schema.index() call
+/**
+ * Admin pending/approved queue.
+ */
+withdrawalSchema.index({
+  status: 1,
+  createdAt: -1,
+});
 
-// =========================
-// ✅ SINGLE FIELD INDEXES
-// =========================
-withdrawalSchema.index({ provider: 1 });
-withdrawalSchema.index({ status: 1 });
-withdrawalSchema.index({ method: 1 });
-withdrawalSchema.index({ paidAt: -1 });
-withdrawalSchema.index({ createdAt: -1 });
-withdrawalSchema.index({ transactionReference: 1 });
-withdrawalSchema.index({ processedBy: 1 });
+/**
+ * Currency-aware provider queries.
+ */
+withdrawalSchema.index({
+  provider: 1,
+  currency: 1,
+  status: 1,
+  createdAt: -1,
+});
 
-// =========================
-// ✅ COMPOUND INDEXES (for common queries)
-// =========================
-withdrawalSchema.index({ provider: 1, status: 1 });
-withdrawalSchema.index({ provider: 1, createdAt: -1 });
-withdrawalSchema.index({ status: 1, createdAt: -1 });
-withdrawalSchema.index({ provider: 1, status: 1, createdAt: -1 });
-withdrawalSchema.index({ status: 1, method: 1 });
+/**
+ * Payment transaction lookup.
+ */
+withdrawalSchema.index({
+  transactionReference: 1,
+});
 
-// =========================
-// ✅ VIRTUALS
-// =========================
+/* =========================================================
+   VIRTUALS
+========================================================= */
 
-// Check if withdrawal is pending
-withdrawalSchema.virtual("isPending").get(function() {
+/**
+ * Is withdrawal waiting for admin action?
+ */
+withdrawalSchema.virtual("isPending").get(function () {
   return this.status === "pending";
 });
 
-// Check if withdrawal is approved
-withdrawalSchema.virtual("isApproved").get(function() {
+/**
+ * Has admin approved this withdrawal?
+ */
+withdrawalSchema.virtual("isApproved").get(function () {
   return this.status === "approved";
 });
 
-// Check if withdrawal is paid
-withdrawalSchema.virtual("isPaid").get(function() {
+/**
+ * Has provider actually been paid?
+ */
+withdrawalSchema.virtual("isPaid").get(function () {
   return this.status === "paid";
 });
 
-// Check if withdrawal is rejected
-withdrawalSchema.virtual("isRejected").get(function() {
+/**
+ * Was withdrawal rejected?
+ */
+withdrawalSchema.virtual("isRejected").get(function () {
   return this.status === "rejected";
 });
 
-// Check if withdrawal can be processed
-withdrawalSchema.virtual("canBeProcessed").get(function() {
+/**
+ * Can this withdrawal still be processed?
+ *
+ * Only pending or approved withdrawals can move forward.
+ */
+withdrawalSchema.virtual("canBeProcessed").get(function () {
   return this.status === "pending" || this.status === "approved";
 });
 
-// Calculate net amount (amount - fee)
-withdrawalSchema.virtual("calculatedNetAmount").get(function() {
-  return this.amount - (this.fee || 0);
+/**
+ * Amount provider receives after fee.
+ */
+withdrawalSchema.virtual("calculatedNetAmount").get(function () {
+  const amount = Number(this.amount || 0);
+  const fee = Number(this.fee || 0);
+
+  return Math.max(0, amount - fee);
 });
 
-// =========================
-// ✅ INSTANCE METHODS
-// =========================
+/* =========================================================
+   INSTANCE METHODS
+========================================================= */
 
 /**
- * Approve the withdrawal
+ * Generate a unique human-readable reference.
  */
-withdrawalSchema.methods.approve = async function(adminId, note = "") {
+withdrawalSchema.methods.generateReference = function () {
+  const date = new Date();
+
+  const datePart =
+    `${date.getFullYear()}` +
+    `${String(date.getMonth() + 1).padStart(2, "0")}` +
+    `${String(date.getDate()).padStart(2, "0")}`;
+
+  const randomPart = Math.random()
+    .toString(36)
+    .substring(2, 10)
+    .toUpperCase();
+
+  return `WDR-${datePart}-${randomPart}`;
+};
+
+/**
+ * Approve withdrawal.
+ *
+ * Allowed:
+ * pending → approved
+ */
+withdrawalSchema.methods.approve = async function (adminId, note = null) {
+  if (this.status !== "pending") {
+    throw new Error(
+      `Withdrawal cannot be approved from status "${this.status}"`
+    );
+  }
+
   this.status = "approved";
-  this.processedBy = adminId;
+
+  if (adminId) {
+    this.processedBy = adminId;
+  }
+
   this.processedAt = new Date();
+
   if (note) {
-    this.adminNote = note;
+    this.adminNote = String(note).trim();
   }
-  await this.save();
-  return this;
+
+  return this.save();
 };
 
 /**
- * Mark withdrawal as paid
+ * Mark withdrawal as paid.
+ *
+ * Allowed:
+ * approved → paid
+ *
+ * We intentionally do not allow:
+ * pending → paid
+ *
+ * This ensures admin approval exists before actual payout.
  */
-withdrawalSchema.methods.markAsPaid = async function(reference = null) {
+withdrawalSchema.methods.markAsPaid = async function (
+  transactionReference = null
+) {
+  if (this.status !== "approved") {
+    throw new Error(
+      `Withdrawal must be approved before payment. Current status: "${this.status}"`
+    );
+  }
+
+  if (this.paidAt) {
+    throw new Error("Withdrawal has already been paid");
+  }
+
   this.status = "paid";
   this.paidAt = new Date();
-  if (reference) {
-    this.transactionReference = reference;
+
+  if (transactionReference) {
+    this.transactionReference = String(transactionReference).trim();
   }
-  await this.save();
-  return this;
+
+  this.processedAt = new Date();
+
+  return this.save();
 };
 
 /**
- * Reject the withdrawal
+ * Reject withdrawal.
+ *
+ * Allowed:
+ * pending → rejected
+ * approved → rejected
  */
-withdrawalSchema.methods.reject = async function(adminId, reason = "") {
+withdrawalSchema.methods.reject = async function (
+  adminId,
+  reason
+) {
+  if (!["pending", "approved"].includes(this.status)) {
+    throw new Error(
+      `Withdrawal cannot be rejected from status "${this.status}"`
+    );
+  }
+
+  const cleanReason = String(reason || "").trim();
+
+  if (!cleanReason) {
+    throw new Error("Rejection reason is required");
+  }
+
   this.status = "rejected";
-  this.processedBy = adminId;
-  this.processedAt = new Date();
-  this.rejectionReason = reason || "Withdrawal rejected";
-  await this.save();
-  return this;
-};
+  this.rejectionReason = cleanReason;
 
-/**
- * Process the withdrawal (approve + mark as paid in one step)
- */
-withdrawalSchema.methods.process = async function(adminId, reference = null) {
-  this.status = "paid";
-  this.processedBy = adminId;
-  this.processedAt = new Date();
-  this.paidAt = new Date();
-  if (reference) {
-    this.transactionReference = reference;
+  if (adminId) {
+    this.processedBy = adminId;
   }
-  await this.save();
-  return this;
+
+  this.processedAt = new Date();
+
+  return this.save();
 };
 
 /**
- * Add admin note
+ * Backward-compatible processing helper.
+ *
+ * For existing code that calls:
+ *
+ * withdrawal.process(adminId, reference)
+ *
+ * this now means:
+ * 1. approve pending withdrawal
+ * 2. mark it paid
+ *
+ * For a production admin workflow, preferably call approve()
+ * and markAsPaid() separately.
  */
-withdrawalSchema.methods.addAdminNote = async function(note) {
-  this.adminNote = note;
-  await this.save();
-  return this;
+withdrawalSchema.methods.process = async function (
+  adminId,
+  transactionReference = null
+) {
+  if (this.status === "pending") {
+    await this.approve(adminId);
+  }
+
+  if (this.status !== "approved") {
+    throw new Error(
+      `Withdrawal cannot be processed from status "${this.status}"`
+    );
+  }
+
+  if (transactionReference) {
+    this.transactionReference = String(transactionReference).trim();
+  }
+
+  return this.markAsPaid(this.transactionReference);
 };
 
 /**
- * Generate reference number
+ * Add/update admin note.
  */
-withdrawalSchema.methods.generateReference = function() {
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 7).toUpperCase();
-  return `WD-${timestamp}-${random}`;
+withdrawalSchema.methods.addAdminNote = async function (note) {
+  const cleanNote = String(note || "").trim();
+
+  if (!cleanNote) {
+    throw new Error("Admin note cannot be empty");
+  }
+
+  this.adminNote = cleanNote;
+
+  return this.save();
 };
 
-// =========================
-// ✅ STATIC METHODS
-// =========================
+/* =========================================================
+   STATIC METHODS
+========================================================= */
 
 /**
- * Generate a unique withdrawal reference
+ * Generate a unique withdrawal reference.
+ *
+ * The database unique index remains the final protection against
+ * collisions. If a generated reference somehow already exists,
+ * generate another one.
  */
-withdrawalSchema.statics.generateReference = function() {
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 7).toUpperCase();
-  return `WD-${timestamp}-${random}`;
+withdrawalSchema.statics.generateReference = async function () {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const reference = new this().generateReference();
+
+    const exists = await this.exists({ reference });
+
+    if (!exists) {
+      return reference;
+    }
+  }
+
+  throw new Error(
+    "Unable to generate a unique withdrawal reference"
+  );
 };
 
 /**
- * Get pending withdrawals
+ * Get pending withdrawals.
  */
-withdrawalSchema.statics.getPendingWithdrawals = async function(limit = 100) {
+withdrawalSchema.statics.getPendingWithdrawals = function (
+  options = {}
+) {
+  const {
+    limit = 50,
+    skip = 0,
+  } = options;
+
   return this.find({
-    status: "pending"
+    status: "pending",
   })
-  .populate("provider", "name email businessName avatar")
-  .sort({ createdAt: 1 })
-  .limit(limit);
+    .sort({ createdAt: 1 })
+    .skip(Math.max(0, Number(skip)))
+    .limit(Math.min(100, Math.max(1, Number(limit))))
+    .populate("provider", "name email");
 };
 
 /**
- * Get withdrawals by provider
+ * Get provider withdrawals.
  */
-withdrawalSchema.statics.getProviderWithdrawals = async function(providerId, options = {}) {
-  const { limit = 50, page = 1, status = null } = options;
-  
-  const filter = { provider: providerId };
-  if (status && status !== "all") {
-    filter.status = status;
+withdrawalSchema.statics.getProviderWithdrawals = function (
+  providerId,
+  options = {}
+) {
+  const {
+    status,
+    currency,
+    limit = 50,
+    skip = 0,
+  } = options;
+
+  const query = {
+    provider: providerId,
+  };
+
+  if (status) {
+    query.status = status;
   }
-  
-  const skip = (page - 1) * limit;
-  
-  const [withdrawals, total] = await Promise.all([
-    this.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    this.countDocuments(filter)
-  ]);
-  
-  return {
-    withdrawals,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit)
-  };
+
+  if (currency) {
+    query.currency = String(currency).toUpperCase();
+  }
+
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .skip(Math.max(0, Number(skip)))
+    .limit(Math.min(100, Math.max(1, Number(limit))));
 };
 
 /**
- * Get withdrawal summary for a provider
+ * Get provider withdrawal summary.
+ *
+ * IMPORTANT:
+ * "withdrawn" means PAID only.
+ *
+ * Approved withdrawals are reserved funds,
+ * but they are NOT withdrawn yet.
  */
-withdrawalSchema.statics.getProviderWithdrawalSummary = async function(providerId) {
-  const [pending, approved, paid, rejected] = await Promise.all([
-    this.aggregate([
-      { $match: { provider: providerId, status: "pending" } },
-      { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }
-    ]),
-    this.aggregate([
-      { $match: { provider: providerId, status: "approved" } },
-      { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }
-    ]),
-    this.aggregate([
-      { $match: { provider: providerId, status: "paid" } },
-      { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }
-    ]),
-    this.aggregate([
-      { $match: { provider: providerId, status: "rejected" } },
-      { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }
-    ])
+withdrawalSchema.statics.getProviderWithdrawalSummary = async function (
+  providerId,
+  currency = null
+) {
+  const match = {
+    provider: new mongoose.Types.ObjectId(providerId),
+  };
+
+  if (currency) {
+    match.currency = String(currency).toUpperCase();
+  }
+
+  const rows = await this.aggregate([
+    {
+      $match: match,
+    },
+    {
+      $group: {
+        _id: "$status",
+
+        amount: {
+          $sum: "$amount",
+        },
+
+        netAmount: {
+          $sum: "$netAmount",
+        },
+
+        count: {
+          $sum: 1,
+        },
+      },
+    },
   ]);
 
-  return {
-    pending: pending[0] || { total: 0, count: 0 },
-    approved: approved[0] || { total: 0, count: 0 },
-    paid: paid[0] || { total: 0, count: 0 },
-    rejected: rejected[0] || { total: 0, count: 0 },
-    totalWithdrawn: (paid[0]?.total || 0) + (approved[0]?.total || 0),
-    totalWithdrawalCount: (paid[0]?.count || 0) + (approved[0]?.count || 0)
+  const summary = {
+    pendingAmount: 0,
+    pendingCount: 0,
+
+    approvedAmount: 0,
+    approvedCount: 0,
+
+    paidAmount: 0,
+    paidNetAmount: 0,
+    paidCount: 0,
+
+    rejectedAmount: 0,
+    rejectedCount: 0,
+
+    totalRequestedAmount: 0,
+    totalPaidAmount: 0,
   };
+
+  for (const row of rows) {
+    switch (row._id) {
+      case "pending":
+        summary.pendingAmount = row.amount;
+        summary.pendingCount = row.count;
+        break;
+
+      case "approved":
+        summary.approvedAmount = row.amount;
+        summary.approvedCount = row.count;
+        break;
+
+      case "paid":
+        summary.paidAmount = row.amount;
+        summary.paidNetAmount = row.netAmount;
+        summary.paidCount = row.count;
+        break;
+
+      case "rejected":
+        summary.rejectedAmount = row.amount;
+        summary.rejectedCount = row.count;
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  summary.totalRequestedAmount =
+    summary.pendingAmount +
+    summary.approvedAmount +
+    summary.paidAmount;
+
+  summary.totalPaidAmount = summary.paidNetAmount;
+
+  /**
+   * Reserved funds are pending + approved.
+   */
+  summary.reservedAmount =
+    summary.pendingAmount +
+    summary.approvedAmount;
+
+  summary.reservedCount =
+    summary.pendingCount +
+    summary.approvedCount;
+
+  return summary;
 };
 
 /**
- * Get admin withdrawal statistics
+ * Get pending/approved reserved withdrawal amount.
+ *
+ * This is important when calculating a provider's withdrawable balance.
  */
-withdrawalSchema.statics.getAdminStats = async function() {
-  const [pending, approved, paid, rejected, totals] = await Promise.all([
-    this.countDocuments({ status: "pending" }),
-    this.countDocuments({ status: "approved" }),
-    this.countDocuments({ status: "paid" }),
-    this.countDocuments({ status: "rejected" }),
-    this.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalPending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, "$amount", 0] } },
-          totalApproved: { $sum: { $cond: [{ $eq: ["$status", "approved"] }, "$amount", 0] } },
-          totalPaid: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$amount", 0] } },
-          totalRejected: { $sum: { $cond: [{ $eq: ["$status", "rejected"] }, "$amount", 0] } },
-          totalFees: { $sum: "$fee" }
-        }
-      }
-    ])
-  ]);
-
-  const result = totals[0] || { 
-    totalPending: 0, 
-    totalApproved: 0, 
-    totalPaid: 0, 
-    totalRejected: 0,
-    totalFees: 0
-  };
-
-  return {
-    counts: { pending, approved, paid, rejected },
-    amounts: result,
-    totalWithdrawn: result.totalPaid + result.totalApproved
-  };
-};
-
-/**
- * Get withdrawals by date range
- */
-withdrawalSchema.statics.getByDateRange = async function(startDate, endDate, options = {}) {
-  const { status, providerId, limit = 100, skip = 0 } = options;
-
-  const filter = {
-    createdAt: {
-      $gte: startDate,
-      $lte: endDate,
+withdrawalSchema.statics.getProviderReservedAmount = async function (
+  providerId,
+  currency = null
+) {
+  const match = {
+    provider: new mongoose.Types.ObjectId(providerId),
+    status: {
+      $in: ["pending", "approved"],
     },
   };
 
-  if (status) filter.status = status;
-  if (providerId) filter.provider = providerId;
+  if (currency) {
+    match.currency = String(currency).toUpperCase();
+  }
 
-  return this.find(filter)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .populate("provider", "name email businessName avatar")
-    .populate("processedBy", "name email");
+  const result = await this.aggregate([
+    {
+      $match: match,
+    },
+    {
+      $group: {
+        _id: null,
+        amount: {
+          $sum: "$amount",
+        },
+      },
+    },
+  ]);
+
+  return result[0]?.amount || 0;
 };
 
-// =========================
-// ✅ PRE-SAVE MIDDLEWARE
-// =========================
+/**
+ * Get total amount actually paid out.
+ */
+withdrawalSchema.statics.getProviderPaidAmount = async function (
+  providerId,
+  currency = null
+) {
+  const match = {
+    provider: new mongoose.Types.ObjectId(providerId),
+    status: "paid",
+  };
 
-withdrawalSchema.pre('save', function(next) {
-  // Generate reference if not provided
-  if (!this.reference) {
-    this.reference = this.constructor.generateReference();
+  if (currency) {
+    match.currency = String(currency).toUpperCase();
   }
-  
-  // Calculate net amount
-  this.netAmount = this.amount - (this.fee || 0);
-  
-  // Ensure net amount is not negative
-  if (this.netAmount < 0) {
-    next(new Error('Net amount cannot be negative. Fee exceeds withdrawal amount.'));
+
+  const result = await this.aggregate([
+    {
+      $match: match,
+    },
+    {
+      $group: {
+        _id: null,
+        amount: {
+          $sum: "$amount",
+        },
+        netAmount: {
+          $sum: "$netAmount",
+        },
+      },
+    },
+  ]);
+
+  return {
+    amount: result[0]?.amount || 0,
+    netAmount: result[0]?.netAmount || 0,
+  };
+};
+
+/**
+ * Admin dashboard statistics.
+ */
+withdrawalSchema.statics.getAdminStats = async function () {
+  const rows = await this.aggregate([
+    {
+      $group: {
+        _id: "$status",
+
+        amount: {
+          $sum: "$amount",
+        },
+
+        netAmount: {
+          $sum: "$netAmount",
+        },
+
+        count: {
+          $sum: 1,
+        },
+      },
+    },
+  ]);
+
+  const stats = {
+    pending: {
+      count: 0,
+      amount: 0,
+    },
+
+    approved: {
+      count: 0,
+      amount: 0,
+    },
+
+    paid: {
+      count: 0,
+      amount: 0,
+      netAmount: 0,
+    },
+
+    rejected: {
+      count: 0,
+      amount: 0,
+    },
+
+    totalRequested: 0,
+    totalPaid: 0,
+    totalReserved: 0,
+  };
+
+  for (const row of rows) {
+    if (row._id === "pending") {
+      stats.pending.count = row.count;
+      stats.pending.amount = row.amount;
+    }
+
+    if (row._id === "approved") {
+      stats.approved.count = row.count;
+      stats.approved.amount = row.amount;
+    }
+
+    if (row._id === "paid") {
+      stats.paid.count = row.count;
+      stats.paid.amount = row.amount;
+      stats.paid.netAmount = row.netAmount;
+    }
+
+    if (row._id === "rejected") {
+      stats.rejected.count = row.count;
+      stats.rejected.amount = row.amount;
+    }
   }
-  
-  next();
+
+  stats.totalRequested =
+    stats.pending.amount +
+    stats.approved.amount +
+    stats.paid.amount;
+
+  stats.totalPaid = stats.paid.netAmount;
+
+  stats.totalReserved =
+    stats.pending.amount +
+    stats.approved.amount;
+
+  return stats;
+};
+
+/**
+ * Get withdrawals between two dates.
+ */
+withdrawalSchema.statics.getByDateRange = function (
+  startDate,
+  endDate,
+  options = {}
+) {
+  const {
+    providerId,
+    status,
+    currency,
+    limit = 100,
+    skip = 0,
+  } = options;
+
+  const query = {
+    createdAt: {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    },
+  };
+
+  if (providerId) {
+    query.provider = providerId;
+  }
+
+  if (status) {
+    query.status = status;
+  }
+
+  if (currency) {
+    query.currency = String(currency).toUpperCase();
+  }
+
+  return this.find(query)
+    .sort({ createdAt: -1 })
+    .skip(Math.max(0, Number(skip)))
+    .limit(Math.min(500, Math.max(1, Number(limit))))
+    .populate("provider", "name email");
+};
+
+/* =========================================================
+   VALIDATION
+========================================================= */
+
+/**
+ * Validate business rules before validation/save.
+ *
+ * NOTE:
+ * Mongoose's normal validation runs before save middleware.
+ * Therefore these checks are also useful as explicit application
+ * safeguards when values are changed and saved. 
+ */
+withdrawalSchema.pre("validate", function (next) {
+  const amount = Number(this.amount || 0);
+  const fee = Number(this.fee || 0);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return next(
+      new Error("Withdrawal amount must be greater than 0")
+    );
+  }
+
+  if (!Number.isFinite(fee) || fee < 0) {
+    return next(
+      new Error("Withdrawal fee cannot be negative")
+    );
+  }
+
+  if (fee > amount) {
+    return next(
+      new Error("Withdrawal fee cannot exceed withdrawal amount")
+    );
+  }
+
+  this.netAmount = Number((amount - fee).toFixed(2));
+
+  return next();
 });
 
-// =========================
-// ✅ CREATE AND EXPORT THE MODEL
-// =========================
+/**
+ * Generate reference and enforce state-specific fields.
+ */
+withdrawalSchema.pre("save", async function (next) {
+  try {
+    /**
+     * Generate reference only when needed.
+     */
+    if (!this.reference) {
+      this.reference = await this.constructor.generateReference();
+    }
 
-const Withdrawal = mongoose.model("Withdrawal", withdrawalSchema);
+    /**
+     * Normalize currency.
+     */
+    if (this.currency) {
+      this.currency = String(this.currency).toUpperCase();
+    }
+
+    /**
+     * Normalize method/status.
+     */
+    if (this.method) {
+      this.method = String(this.method).toLowerCase();
+    }
+
+    if (this.status) {
+      this.status = String(this.status).toLowerCase();
+    }
+
+    /**
+     * A paid withdrawal must have paidAt.
+     */
+    if (this.status === "paid" && !this.paidAt) {
+      this.paidAt = new Date();
+    }
+
+    /**
+     * A rejected withdrawal should have a rejection reason.
+     *
+     * We do not throw here if an old record is being loaded/updated
+     * without changing status, but new transitions through reject()
+     * always provide one.
+     */
+    if (
+      this.isModified("status") &&
+      this.status === "rejected" &&
+      !String(this.rejectionReason || "").trim()
+    ) {
+      return next(
+        new Error("Rejection reason is required for rejected withdrawals")
+      );
+    }
+
+    /**
+     * A paid withdrawal cannot later have its payment timestamp removed.
+     */
+    if (
+      !this.isNew &&
+      this.isModified("status") &&
+      this.status !== "paid" &&
+      this.paidAt
+    ) {
+      return next(
+        new Error("A paid withdrawal cannot move back to another status")
+      );
+    }
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/* =========================================================
+   MODEL EXPORT
+========================================================= */
+
+const Withdrawal =
+  mongoose.models.Withdrawal ||
+  mongoose.model("Withdrawal", withdrawalSchema);
+
 export default Withdrawal;
+
+/**
+ * Named constants for controllers/services.
+ */
+export {
+  WITHDRAWAL_STATUSES,
+  WITHDRAWAL_METHODS,
+  CURRENCIES,
+};
+

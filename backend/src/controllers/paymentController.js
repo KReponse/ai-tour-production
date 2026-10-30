@@ -1,1759 +1,2032 @@
 // backend/src/controllers/paymentController.js
-// ✅ COMPLETE REFACTORED - Clean separation of concerns
-// ✅ Delegates to paymentService for all payment operations
-// ✅ Removed duplicate wallet/withdrawal functions (moved to walletController)
-// ✅ Removed duplicate earnings functions (moved to earningController)
-// ✅ ENHANCED PAGINATION - Added search, filters, sorting, date ranges, amount ranges
-// ✅ Proper pagination metadata (hasNext, hasPrev, totalPages)
-// ✅ Added filters object in response
+// ============================================================
+// AI TOUR RWANDA - PAYMENT CONTROLLER  (FINAL)
+// ============================================================
+// ✅ PAYMENT_STATUSES matches Payment.schema enum:
+//    ["pending","processing","paid","succeeded","failed",
+//     "refunded","partially_refunded","disputed"]
+//    - COMPLETED aliases to "paid"
+//    - CANCELLED aliases to "failed"
+//
+// ✅ createCheckoutSession calls paymentService.createPayment()
+//    (the ACTUAL method name) with the payload shape it expects,
+//    and reads the URL/session from `providerResult`.
+//
+// ✅ verifyPayment calls paymentService.verifyPayment(internalPaymentId)
+//    (MongoDB _id, not the Stripe session id) — the service resolves
+//    the provider reference itself.
+//
+// ✅ GET /verify/:sessionId works without auth (public Stripe flow).
+//
+// ✅ Orphan pending payment without a URL is deleted, never
+//    marked with an invalid enum value.
+//
+// ✅ Field names align with Payment.js schema:
+//    - paymentUrl       (not checkoutUrl)
+//    - stripePaymentId  (not paymentIntentId)
+//    - errorMessage     (not failureReason)
+//    - refundId, refundAmount, refundedAt (no refundStatus field)
+// ============================================================
 
-import Stripe from "stripe";
-import Booking from "../models/Booking.js";
 import Payment from "../models/Payment.js";
-import Earning from "../models/Earning.js";
-import { createNotification } from "../utils/notificationService.js";
+import Booking from "../models/Booking.js";
+import Listing from "../models/Listing.js";
+import User from "../models/User.js";
+
 import paymentService from "../services/paymentService.js";
 import currencyService from "../services/currencyService.js";
-import settlementService from "../services/settlementService.js";
-import { PAYMENT_STATUS } from "../services/paymentProvider.interface.js";
-import { generateReceiptNumber } from "../utils/receiptUtils.js";
-import { exportToCSV } from "../utils/exportUtils.js";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2023-10-16",
-  maxNetworkRetries: 3,
-});
+// ============================================================
+// PAYMENT STATUS CONSTANTS
+// ============================================================
 
-// =========================
-// ✅ STRIPE STATUS MAP
-// =========================
-
-const STRIPE_STATUS_MAP = {
-  'succeeded': 'paid',
-  'requires_payment_method': 'pending',
-  'requires_confirmation': 'pending',
-  'requires_action': 'pending',
-  'processing': 'processing',
-  'canceled': 'failed',
-  'failed': 'failed',
-  'complete': 'paid',
-  'expired': 'failed',
-  'open': 'pending',
-  'paid': 'paid',
-  'unpaid': 'pending',
-  'no_payment_required': 'pending',
+const PAYMENT_STATUSES = {
+  PENDING: "pending",
+  PROCESSING: "processing",
+  COMPLETED: "paid",
+  PAID: "paid",
+  SUCCEEDED: "succeeded",
+  FAILED: "failed",
+  CANCELLED: "failed",
+  REFUNDED: "refunded",
+  PARTIALLY_REFUNDED: "partially_refunded",
+  DISPUTED: "disputed",
 };
 
-const mapStripeStatus = (stripeStatus) => {
-  return STRIPE_STATUS_MAP[stripeStatus] || 'pending';
+const REFUND_STATUSES = {
+  NONE: "none",
+  REQUESTED: "requested",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  FAILED: "failed",
 };
 
-// =========================
-// ✅ CURRENCY FORMATTING HELPER
-// =========================
+// ============================================================
+// BASIC HELPERS
+// ============================================================
 
-const formatCurrency = (amount, currencyCode) => {
-  if (!amount && amount !== 0) return '0.00';
-  if (!currencyCode) currencyCode = 'USD';
-  
+const getUserId = (req) =>
+  req.user?._id || req.user?.id || req.user?.userId || null;
+
+const getUserRole = (req) =>
+  req.user?.role || req.user?.userRole || null;
+
+const normalizeId = (value) => {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (value?._id) return value._id.toString();
+  if (typeof value.toString === "function") return value.toString();
+  return null;
+};
+
+const isAdmin = (req) =>
+  ["admin", "superadmin", "super_admin"].includes(getUserRole(req));
+
+const isProvider = (req) =>
+  ["provider", "guide", "tour_provider"].includes(getUserRole(req));
+
+const isTraveler = (req) =>
+  ["traveler", "tourist", "user"].includes(getUserRole(req));
+
+// ============================================================
+// MONEY HELPERS
+// ============================================================
+
+const formatMoney = (amount, currency = "USD") => {
+  const numericAmount = Number(amount || 0);
   try {
-    if (currencyService && typeof currencyService.formatAmount === 'function') {
-      return currencyService.formatAmount(amount, currencyCode);
-    }
-    const formatter = new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currencyCode,
-      currencyDisplay: 'symbol',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    return formatter.format(amount);
-  } catch (error) {
-    return `${amount} ${currencyCode}`;
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(numericAmount);
+  } catch {
+    return `${currency.toUpperCase()} ${numericAmount.toFixed(2)}`;
   }
 };
 
 // ============================================================
-// ✅ CREATE CHECKOUT SESSION - Delegates to paymentService
+// PROVIDER RESPONSE NORMALIZER
+// ============================================================
+
+const normalizeCheckoutResponse = (checkout) => {
+  if (!checkout || typeof checkout !== "object") {
+    return {
+      sessionId: null,
+      paymentIntentId: null,
+      providerPaymentId: null,
+      checkoutUrl: null,
+      rawStatus: null,
+    };
+  }
+
+  const sessionId =
+    checkout.sessionId ||
+    checkout.providerReference ||
+    checkout.data?.sessionId ||
+    checkout.data?.checkoutSession?.id ||
+    checkout.providerResult?.providerReference ||
+    checkout.providerResult?.data?.sessionId ||
+    checkout.providerResult?.data?.checkoutSession?.id ||
+    null;
+
+  const paymentIntentId =
+    checkout.paymentIntentId ||
+    checkout.transactionId ||
+    checkout.data?.paymentIntentId ||
+    (typeof checkout.data?.checkoutSession?.payment_intent === "string"
+      ? checkout.data.checkoutSession.payment_intent
+      : checkout.data?.checkoutSession?.payment_intent?.id) ||
+    checkout.providerResult?.transactionId ||
+    checkout.providerResult?.data?.paymentIntentId ||
+    null;
+
+  const providerPaymentId =
+    checkout.providerPaymentId ||
+    checkout.providerReference ||
+    checkout.data?.sessionId ||
+    checkout.data?.checkoutSession?.id ||
+    checkout.providerResult?.providerReference ||
+    checkout.providerResult?.data?.sessionId ||
+    null;
+
+  const checkoutUrl =
+    checkout.checkoutUrl ||
+    checkout.paymentUrl ||
+    checkout.url ||
+    checkout.data?.paymentUrl ||
+    checkout.data?.checkoutUrl ||
+    checkout.data?.session?.url ||
+    checkout.data?.checkoutSession?.url ||
+    checkout.providerResult?.paymentUrl ||
+    checkout.providerResult?.checkoutUrl ||
+    checkout.providerResult?.url ||
+    checkout.providerResult?.data?.paymentUrl ||
+    checkout.providerResult?.data?.checkoutUrl ||
+    checkout.providerResult?.data?.session?.url ||
+    checkout.providerResult?.data?.checkoutSession?.url ||
+    null;
+
+  return {
+    sessionId,
+    paymentIntentId,
+    providerPaymentId,
+    checkoutUrl,
+    rawStatus: checkout.status || null,
+  };
+};
+
+// ============================================================
+// PAYMENT SERIALIZER
+// ============================================================
+
+const serializePayment = (payment) => {
+  if (!payment) return null;
+  const data =
+    typeof payment.toObject === "function" ? payment.toObject() : payment;
+
+  return {
+    ...data,
+    _id: normalizeId(data._id),
+    booking: normalizeId(data.booking),
+    traveler: normalizeId(data.traveler),
+    provider: normalizeId(data.provider),
+    listing: normalizeId(data.listing),
+    amount: Number(data.amount || 0),
+    currency: data.currency || "USD",
+  };
+};
+
+// ============================================================
+// PAYMENT PROVIDER REFERENCE HELPER
+// ============================================================
+
+const getPaymentProviderId = (payment) =>
+  payment?.providerReference ||
+  payment?.transactionId ||
+  payment?.stripeSessionId ||
+  payment?.stripePaymentId ||
+  null;
+
+// ============================================================
+// OWNERSHIP HELPERS
+// ============================================================
+
+const isPaymentOwner = (payment, userId) => {
+  const currentUserId = normalizeId(userId);
+  if (!currentUserId || !payment) return false;
+  const travelerId = normalizeId(payment.traveler);
+  const providerId = normalizeId(payment.provider);
+  return travelerId === currentUserId || providerId === currentUserId;
+};
+
+const isBookingOwner = (booking, userId) => {
+  const currentUserId = normalizeId(userId);
+  if (!currentUserId || !booking) return false;
+  return normalizeId(booking.user) === currentUserId;
+};
+
+// ============================================================
+// PAGINATION
+// ============================================================
+
+const getPagination = (req) => {
+  const page = Math.max(Number(req.query.page || 1), 1);
+  const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+  const skip = (page - 1) * limit;
+  return { page, limit, skip };
+};
+
+// ============================================================
+// DATE FILTER
+// ============================================================
+
+const buildDateFilter = (req) => {
+  const filter = {};
+  const { startDate, endDate } = req.query;
+
+  if (startDate || endDate) {
+    filter.createdAt = {};
+    if (startDate) {
+      const start = new Date(startDate);
+      if (!Number.isNaN(start.getTime())) filter.createdAt.$gte = start;
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      if (!Number.isNaN(end.getTime())) {
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+    if (Object.keys(filter.createdAt).length === 0) delete filter.createdAt;
+  }
+
+  return filter;
+};
+
+// ============================================================
+// ERROR RESPONSE
+// ============================================================
+
+const sendError = (res, error, message = "Payment operation failed") => {
+  console.error(`[PAYMENT ERROR] ${message}:`, error);
+  const statusCode = error?.statusCode || error?.status || 500;
+  return res.status(statusCode).json({
+    success: false,
+    message: error?.message || message,
+  });
+};
+
+// ============================================================
+// CREATE CHECKOUT SESSION
+// ============================================================
+// - Calls paymentService.createPayment(data) — the real method.
+// - Do NOT pre-create the Payment doc; the service creates it.
+// - Reads URL/session from `providerResult`.
 // ============================================================
 
 export const createCheckoutSession = async (req, res) => {
   try {
-    const { 
-      bookingId, 
-      providerId = 'stripe', 
-      paymentMethod = 'card',
-      currency
-    } = req.body;
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+
+    const { bookingId, currency, successUrl, cancelUrl } = req.body;
 
     if (!bookingId) {
-      return res.status(400).json({
-        success: false,
-        message: "Booking ID is required"
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
     }
 
-    // ✅ Fetch and validate booking
     const booking = await Booking.findById(bookingId)
-      .populate("listing", "title price location currency")
-      .populate("user", "name email preferredCurrency")
-      .populate("provider", "name email preferredCurrency");
+      .populate("listing")
+      .populate("user")
+      .populate("provider", "name email");
 
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found"
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
-    // ✅ Authorization check
-    if (booking.user._id.toString() !== req.user._id.toString()) {
+    const bookingOwnerId = normalizeId(booking.user);
+
+    if (
+      bookingOwnerId &&
+      bookingOwnerId !== normalizeId(userId) &&
+      !isAdmin(req)
+    ) {
       return res.status(403).json({
         success: false,
-        message: "You cannot pay for this booking"
+        message: "You are not allowed to pay for this booking",
       });
     }
 
-    // ✅ Validate booking state
-    if (booking.paymentStatus === "paid") {
+    const bookingTravelerId = normalizeId(booking.user);
+
+    if (!bookingTravelerId) {
       return res.status(400).json({
         success: false,
-        message: "Booking already paid"
+        message: "Booking does not have a valid user",
       });
     }
 
-    // ✅ Validate listing exists
-    if (!booking.listing) {
-      return res.status(404).json({
+    const listingId = normalizeId(booking.listing);
+    let listing = booking.listing;
+
+    if (!listing && listingId) {
+      listing = await Listing.findById(listingId);
+    }
+
+    if (!listing) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Listing not found" });
+    }
+
+    const bookingAmount = Number(
+      booking.totalAmount ?? booking.totalPrice ?? booking.amount ?? 0
+    );
+
+    if (!Number.isFinite(bookingAmount) || bookingAmount <= 0) {
+      return res.status(400).json({
         success: false,
-        message: "No experience associated with this booking."
+        message: "Booking does not have a valid payment amount",
       });
     }
 
-    // ✅ Determine payment currency
-    let paymentCurrency = currency || booking.displayCurrency || booking.currency || 'USD';
-    const isSupported = await currencyService.isCurrencyActive(paymentCurrency);
-    if (!isSupported) {
-      paymentCurrency = await currencyService.getDefaultCurrency().then(c => c?.code || 'USD');
-    }
+    const requestedCurrency = currency || booking.currency || "USD";
+    const normalizedCurrency = String(requestedCurrency).toUpperCase();
 
-    // ✅ Build URLs
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-    const successUrl = `${clientUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id}`;
-    const cancelUrl = `${clientUrl}/payment-cancel?booking_id=${booking._id}`;
+    const providerId = normalizeId(
+      listing.provider || listing.owner || listing.createdBy
+    );
 
-    // ✅ Get exchange rate
-    const exchangeRate = await currencyService.getExchangeRate(paymentCurrency, 'USD');
-    const displayRate = exchangeRate?.rate || 1;
-    const displayAmount = booking.totalPrice * displayRate;
-
-    // ✅ Delegate to paymentService
-    const result = await paymentService.createPayment({
-      bookingId: booking._id,
-      providerId: providerId,
-      userId: req.user._id,
-      currency: paymentCurrency,
-      paymentMethod: paymentMethod,
-      description: `${booking.listing.title} - Booking #${booking.bookingCode}`,
-      metadata: {
-        entityType: 'listing',
-        entityTitle: booking.listing.title,
-        numberOfPeople: booking.numberOfPeople || 1,
-        bookingCode: booking.bookingCode,
-        displayCurrency: paymentCurrency,
-        displayAmount: displayAmount,
-        exchangeRate: displayRate,
+    // ========================================================
+    // REUSE EXISTING ACTIVE PAYMENT (only if it has a URL)
+    // ========================================================
+    const existingPayment = await Payment.findOne({
+      booking: booking._id,
+      traveler: bookingTravelerId,
+      status: {
+        $in: [PAYMENT_STATUSES.PENDING, PAYMENT_STATUSES.PROCESSING],
       },
-      successUrl: successUrl,
-      cancelUrl: cancelUrl,
     });
 
-    if (!result.success) {
-      return res.status(500).json({
-        success: false,
-        message: result.error || "Failed to create payment"
+    if (existingPayment && existingPayment.paymentUrl) {
+      return res.status(200).json({
+        success: true,
+        message: "An active payment already exists for this booking",
+        payment: serializePayment(existingPayment),
+        checkoutUrl: existingPayment.paymentUrl,
+        url: existingPayment.paymentUrl,
+        paymentUrl: existingPayment.paymentUrl,
+        sessionId:
+          existingPayment.stripeSessionId ||
+          existingPayment.providerReference ||
+          null,
       });
     }
 
-    res.json({
-      success: true,
-      url: result.payment.paymentUrl || result.providerResult?.paymentUrl,
-      sessionId: result.payment.providerReference,
-      paymentId: result.payment.id,
-      provider: providerId,
-      status: result.payment.status,
-      currency: paymentCurrency,
-      amount: booking.totalPrice,
-      exchangeRate: displayRate,
-      displayAmount: displayAmount,
-      settlementCurrency: result.payment.settlementCurrency,
-      settlementAmount: result.payment.settlementAmount,
-    });
+    // ========================================================
+    // DELETE ORPHAN PENDING PAYMENT
+    // ========================================================
+    if (existingPayment) {
+      try {
+        await Payment.findByIdAndDelete(existingPayment._id);
+      } catch (deleteError) {
+        console.warn(
+          "[createCheckoutSession] Failed to delete orphan pending payment:",
+          deleteError?.message
+        );
+      }
+    }
 
-  } catch (error) {
-    console.error("❌ Create Checkout Session Error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message || "Failed to create payment session"
+    const clientUrl =
+      process.env.CLIENT_URL ||
+      process.env.FRONTEND_URL ||
+      "http://localhost:3000";
+
+    const finalSuccessUrl =
+      successUrl ||
+      `${clientUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id}`;
+
+    const finalCancelUrl =
+      cancelUrl ||
+      `${clientUrl}/payment-cancel?booking_id=${booking._id}`;
+
+    // ========================================================
+    // CALL paymentService.createPayment()
+    // ========================================================
+    const servicePayload = {
+      bookingId: normalizeId(booking._id),
+      providerId: "stripe",
+      userId: bookingTravelerId,
+      currency: normalizedCurrency,
+      successUrl: finalSuccessUrl,
+      cancelUrl: finalCancelUrl,
+      description:
+        listing.title
+          ? String(
+              typeof listing.title === "string"
+                ? listing.title
+                : listing.title.en ||
+                    listing.title.fr ||
+                    `Booking ${booking._id}`
+            )
+          : `Booking ${booking._id}`,
+      metadata: {
+        bookingId: normalizeId(booking._id),
+        travelerId: bookingTravelerId,
+        listingId: normalizeId(listing._id),
+      },
+    };
+
+    const checkout = await paymentService.createPayment(servicePayload);
+
+    console.log(
+      "[createCheckoutSession] paymentService.createPayment result:",
+      JSON.stringify(checkout, null, 2)
+    );
+
+    if (!checkout || checkout.success === false) {
+      return res.status(400).json({
+        success: false,
+        message:
+          checkout?.message ||
+          "Payment provider could not create the checkout",
+      });
+    }
+
+    // ========================================================
+    // NORMALIZE RESPONSE
+    // ========================================================
+    const normalized = normalizeCheckoutResponse(checkout);
+
+    const checkoutUrl =
+      normalized.checkoutUrl ||
+      checkout?.payment?.paymentUrl ||
+      null;
+
+    const sessionId =
+      normalized.sessionId ||
+      checkout?.payment?.stripeSessionId ||
+      null;
+
+    const paymentIntentId =
+      normalized.paymentIntentId ||
+      checkout?.payment?.stripePaymentId ||
+      null;
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
+    return res.status(201).json({
+      success: true,
+      message: "Checkout session created successfully",
+      reused: Boolean(checkout.reused),
+      payment: checkout.payment || null,
+      checkoutUrl,
+      url: checkoutUrl,
+      paymentUrl: checkoutUrl,
+      sessionId,
+      paymentIntentId,
+      providerResult: checkout.providerResult || null,
     });
+  } catch (error) {
+    return sendError(res, error, "Failed to create checkout session");
   }
 };
 
 // ============================================================
-// ✅ VERIFY PAYMENT - Delegates to paymentService
+// VERIFY PAYMENT
+// ============================================================
+// - GET  /payments/verify/:sessionId  → anonymous allowed
+// - POST /payments/verify             → auth required
+// - Calls paymentService.verifyPayment(internalPaymentId),
+//   NOT the Stripe session id (service resolves provider ref).
 // ============================================================
 
 export const verifyPayment = async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const userId = getUserId(req);
 
-    if (!sessionId) {
+    const sessionId = req.params?.sessionId || req.body?.sessionId || null;
+    const paymentId = req.body?.paymentId || null;
+    const paymentIntentId = req.body?.paymentIntentId || null;
+
+    if (!paymentId && !sessionId && !paymentIntentId) {
       return res.status(400).json({
         success: false,
-        message: "Session ID is required"
+        message: "paymentId, sessionId or paymentIntentId is required",
       });
     }
 
-    console.log('🔍 Verifying payment for session:', sessionId);
+    const anonymousSessionFlow =
+      !userId && !!sessionId && !paymentId && !paymentIntentId;
 
-    // ✅ Find payment
-    let payment = await Payment.findOne({
-      $or: [
-        { stripeSessionId: sessionId },
-        { providerReference: sessionId }
-      ]
-    });
+    if (!userId && !anonymousSessionFlow) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+
+    let payment = null;
+
+    if (paymentId) {
+      payment = await Payment.findById(paymentId)
+        .populate("traveler", "firstName lastName email phone")
+        .populate("provider", "firstName lastName email phone")
+        .populate("booking")
+        .populate("listing");
+    } else if (sessionId) {
+      payment = await Payment.findOne({
+        $or: [
+          { stripeSessionId: sessionId },
+          { providerReference: sessionId },
+        ],
+      })
+        .populate("traveler", "firstName lastName email phone")
+        .populate("provider", "firstName lastName email phone")
+        .populate("booking")
+        .populate("listing");
+    } else {
+      payment = await Payment.findOne({
+        $or: [
+          { stripePaymentId: paymentIntentId },
+          { transactionId: paymentIntentId },
+          { providerReference: paymentIntentId },
+        ],
+      })
+        .populate("traveler", "firstName lastName email phone")
+        .populate("provider", "firstName lastName email phone")
+        .populate("booking")
+        .populate("listing");
+    }
 
     if (!payment) {
-      return res.status(404).json({
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
+    }
+
+    if (userId && !isAdmin(req) && !isPaymentOwner(payment, userId)) {
+      return res.status(403).json({
         success: false,
-        message: "Payment not found"
+        message: "You are not allowed to verify this payment",
       });
     }
 
-    // ✅ If already paid, return early
-    if (payment.status === 'paid') {
-      const booking = await Booking.findById(payment.booking)
-        .populate('listing', 'title price location');
-      
-      return res.json({
-        success: true,
-        alreadyProcessed: true,
-        paymentStatus: 'paid',
-        currency: payment.currency,
-        amount: payment.amount,
-        settlementCurrency: payment.settlementCurrency,
-        settlementAmount: payment.settlementAmount,
-        exchangeRate: payment.exchangeRate,
-        booking: booking ? {
-          _id: booking._id,
-          status: booking.status,
-          totalPrice: booking.totalPrice,
-          bookingCode: booking.bookingCode,
-          numberOfPeople: booking.numberOfPeople,
-          startDate: booking.startDate,
-        } : null,
-      });
-    }
-
-    // ✅ Check booking status
-    const bookingCheck = await Booking.findById(payment.booking);
-    if (bookingCheck && bookingCheck.paymentStatus === 'paid') {
-      payment.status = 'paid';
-      await payment.save();
-      
-      return res.json({
-        success: true,
-        alreadyProcessed: true,
-        paymentStatus: 'paid',
-        currency: payment.currency,
-        amount: payment.amount,
-        settlementCurrency: payment.settlementCurrency,
-        settlementAmount: payment.settlementAmount,
-        booking: {
-          _id: bookingCheck._id,
-          status: bookingCheck.status,
-          totalPrice: bookingCheck.totalPrice,
-          bookingCode: bookingCheck.bookingCode,
-        },
-      });
-    }
-
-    // ✅ Verify with Stripe
-    let session;
-    let paymentIntent;
-    
-    try {
-      session = await stripe.checkout.sessions.retrieve(sessionId);
-      console.log(`✅ Stripe session: ${session.id}, status: ${session.status}, payment_status: ${session.payment_status}`);
-      
-      if (session.payment_intent) {
-        paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
-        console.log(`✅ Payment intent: ${paymentIntent.id}, status: ${paymentIntent.status}`);
+    // ========================================================
+    // CALL paymentService.verifyPayment(internalPaymentId)
+    // ========================================================
+    // IMPORTANT: pass the INTERNAL MongoDB _id, not the Stripe
+    // session id. The service looks up the provider reference
+    // from the Payment document itself.
+    // ========================================================
+    const verification = await paymentService.verifyPayment(
+      normalizeId(payment._id),
+      {
+        paymentId: normalizeId(payment._id),
+        bookingId: normalizeId(payment.booking),
       }
-    } catch (stripeError) {
-      console.error('❌ Stripe retrieval error:', stripeError.message);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to verify payment with Stripe"
-      });
+    );
+
+    const verificationStatus =
+      verification?.status ||
+      verification?.data?.status ||
+      null;
+
+    const verificationPaid =
+      verification?.paid === true ||
+      verification?.success === true ||
+      verification?.data?.paid === true ||
+      verificationStatus === "paid" ||
+      verificationStatus === "succeeded";
+
+    if (verificationStatus) {
+      const s = String(verificationStatus).toLowerCase();
+      if (s === "paid" || s === "succeeded") {
+        payment.status = PAYMENT_STATUSES.COMPLETED;
+      } else if (s === "processing") {
+        payment.status = PAYMENT_STATUSES.PROCESSING;
+      } else if (
+        s === "failed" ||
+        s === "canceled" ||
+        s === "cancelled"
+      ) {
+        payment.status = PAYMENT_STATUSES.FAILED;
+      } else if (Object.values(PAYMENT_STATUSES).includes(s)) {
+        payment.status = s;
+      }
+    } else if (verificationPaid) {
+      payment.status = PAYMENT_STATUSES.COMPLETED;
     }
 
-    // ✅ Check if payment was successful
-    const isSuccessful = 
-      (paymentIntent && paymentIntent.status === 'succeeded') ||
-      (session && session.payment_status === 'paid') ||
-      (session && session.status === 'complete');
+    const vData = verification?.data || {};
 
-    if (!isSuccessful) {
-      const stripeStatus = paymentIntent?.status || session?.payment_status || session?.status || 'unknown';
-      const mappedStatus = mapStripeStatus(stripeStatus);
-      
-      payment.status = mappedStatus;
-      payment.errorMessage = `Payment not successful. Stripe status: ${stripeStatus}`;
-      await payment.save();
-      
-      return res.status(400).json({
-        success: false,
-        message: `Payment not successful. Status: ${stripeStatus}`,
-        paymentStatus: mappedStatus,
-        currency: payment.currency,
-      });
+    if (verification?.paymentIntentId || vData.paymentIntentId) {
+      payment.stripePaymentId =
+        verification.paymentIntentId || vData.paymentIntentId;
+    }
+    if (verification?.sessionId || vData.checkoutSessionId) {
+      payment.stripeSessionId =
+        verification.sessionId || vData.checkoutSessionId;
+    }
+    if (verification?.transactionId || vData.transactionId) {
+      payment.transactionId =
+        verification.transactionId || vData.transactionId;
     }
 
-    // ✅ Update payment
-    const paymentIntentId = paymentIntent?.id || session?.payment_intent || null;
-    
-    payment.status = 'paid';
-    payment.stripePaymentId = paymentIntentId;
-    payment.transactionId = paymentIntentId || sessionId;
-    payment.paidAt = new Date();
-    payment.providerAmount = payment.amount - (payment.platformFee || 0);
-    payment.providerReference = sessionId;
+    if (verification?.paidAt && !payment.paidAt) {
+      payment.paidAt = new Date(verification.paidAt);
+    }
+
+    if (payment.status === PAYMENT_STATUSES.COMPLETED && !payment.paidAt) {
+      payment.paidAt = new Date();
+    }
+
     await payment.save();
 
-    // ✅ Update booking
-    const booking = await Booking.findById(payment.booking);
-    if (booking) {
-      booking.paymentStatus = 'paid';
-      booking.status = 'confirmed';
-      booking.paymentId = paymentIntentId;
-      booking.paidAt = new Date();
-      booking.displayCurrency = payment.currency;
-      booking.displayTotal = payment.amount;
-      await booking.save();
-    }
-
-    // ✅ Process settlement and create earning
-    if (booking) {
-      await paymentService.handleSuccessfulPayment(payment, { 
-        transactionId: paymentIntentId,
-        data: { paymentIntent }
-      });
-    }
-
-    console.log(`✅ Payment verified and processed: ${payment.booking}`);
-
-    const finalBooking = await Booking.findById(payment.booking)
-      .populate('listing', 'title price location');
-
-    res.json({
-      success: true,
-      paymentStatus: 'paid',
-      bookingStatus: finalBooking?.status || 'confirmed',
-      currency: payment.currency,
-      amount: payment.amount,
-      settlementCurrency: payment.settlementCurrency,
-      settlementAmount: payment.settlementAmount,
-      exchangeRate: payment.exchangeRate,
-      booking: finalBooking ? {
-        _id: finalBooking._id,
-        status: finalBooking.status,
-        totalPrice: finalBooking.totalPrice,
-        bookingCode: finalBooking.bookingCode,
-        numberOfPeople: finalBooking.numberOfPeople,
-        startDate: finalBooking.startDate,
-        listing: finalBooking.listing || null,
-        displayCurrency: finalBooking.displayCurrency || payment.currency,
-        displayTotal: finalBooking.displayTotal || payment.amount,
-      } : null,
-      payment: {
-        id: payment._id,
-        status: payment.status,
-        amount: payment.amount,
-        currency: payment.currency,
-        provider: payment.paymentMethod,
-        paidAt: payment.paidAt,
-        settlementCurrency: payment.settlementCurrency,
-        settlementAmount: payment.settlementAmount,
-      }
-    });
-
-  } catch (error) {
-    console.error("❌ Verify Payment Error:", error);
-    console.error("Stack:", error.stack);
-    res.status(500).json({
-      success: false,
-      message: error.message || "Failed to verify payment"
-    });
-  }
-};
-
-// ============================================================
-// ✅ GET MY PAYMENTS (Traveler) - ENHANCED
-// ============================================================
-
-export const getMyPayments = async (req, res) => {
-  try {
-    const { 
-      page = 1, 
-      limit = 20, 
-      status, 
-      search, 
-      sort = '-createdAt',
-      currency,
-      startDate,
-      endDate,
-      minAmount,
-      maxAmount,
-    } = req.query;
-
-    const filter = { traveler: req.user._id };
-    if (status && status !== "all") filter.status = status;
-    if (currency) filter.currency = currency.toUpperCase();
-    
-    // Date range
-    if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
-    }
-    
-    // Amount range
-    if (minAmount || maxAmount) {
-      filter.amount = {};
-      if (minAmount) filter.amount.$gte = Number(minAmount);
-      if (maxAmount) filter.amount.$lte = Number(maxAmount);
-    }
-
-    // Search
-    if (search && search.trim()) {
-      const bookingIds = await Booking.find({
-        $or: [
-          { bookingCode: { $regex: search, $options: "i" } },
-          { "listing.title": { $regex: search, $options: "i" } },
-        ],
-      }).distinct("_id");
-
-      filter.$or = [
-        { booking: { $in: bookingIds } },
-        { transactionId: { $regex: search, $options: "i" } },
-        { stripePaymentId: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const limitNum = parseInt(limit);
-
-    // Validate sort field
-    const validSortFields = ['createdAt', 'amount', 'status', 'paidAt'];
-    const sortField = sort.startsWith('-') ? sort.substring(1) : sort;
-    const sortOrder = sort.startsWith('-') ? -1 : 1;
-    const finalSortField = validSortFields.includes(sortField) ? sortField : 'createdAt';
-
-    const [payments, total] = await Promise.all([
-      Payment.find(filter)
-        .populate("traveler", "name email profileImage")
-        .populate("provider", "name email businessName")
-        .populate("booking", "bookingCode startDate endDate totalPrice status numberOfPeople")
-        .populate({
-          path: "booking",
-          populate: {
-            path: "listing",
-            select: "title coverImage price location slug currency"
+    if (payment.status === PAYMENT_STATUSES.COMPLETED) {
+      const bookingId = normalizeId(payment.booking);
+      if (bookingId) {
+        const booking = await Booking.findById(bookingId);
+        if (booking) {
+          if ("paymentStatus" in booking) booking.paymentStatus = "paid";
+          if ("paid" in booking) booking.paid = true;
+          if (
+            "status" in booking &&
+            ["pending", "pending_payment"].includes(booking.status)
+          ) {
+            booking.status = "confirmed";
           }
-        })
-        .sort({ [finalSortField]: sortOrder })
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
-      Payment.countDocuments(filter),
-    ]);
-
-    const processedPayments = payments.map(payment => {
-      const processed = { ...payment };
-      if (payment.booking?.listing) {
-        processed.listing = payment.booking.listing;
+          await booking.save();
+        }
       }
-      processed.formattedAmount = formatCurrency(payment.amount, payment.currency);
-      processed.formattedSettlementAmount = formatCurrency(
-        payment.settlementAmount, 
-        payment.settlementCurrency || payment.currency
-      );
-      return processed;
-    });
+    }
 
-    res.json({
+    const paid =
+      payment.status === PAYMENT_STATUSES.COMPLETED || verificationPaid;
+
+    return res.status(200).json({
       success: true,
-      data: processedPayments,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
-        hasNext: parseInt(page) * limitNum < total,
-        hasPrev: parseInt(page) > 1,
-      },
-      filters: {
-        status,
-        search,
-        sort,
-        currency,
-        startDate,
-        endDate,
-        minAmount,
-        maxAmount,
-      },
+      paid,
+      status: payment.status,
+      message: "Payment verified successfully",
+      payment: serializePayment(payment),
+      booking: payment.booking
+        ? typeof payment.booking.toObject === "function"
+          ? payment.booking.toObject()
+          : payment.booking
+        : null,
+      verification: verification || null,
     });
   } catch (error) {
-    console.error("❌ Get my payments error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to verify payment");
   }
 };
 
 // ============================================================
-// ✅ GET PAYMENT BY ID
+// GET PAYMENT BY ID
 // ============================================================
 
 export const getPaymentById = async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+
     const { id } = req.params;
-    const userRole = req.user.role;
+    if (!id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment ID is required" });
+    }
 
     const payment = await Payment.findById(id)
-      .populate("traveler", "name email phone profileImage")
-      .populate("booking", "bookingCode startDate endDate totalPrice status numberOfPeople")
-      .populate("provider", "name email businessName phone")
-      .lean();
+      .populate("traveler", "firstName lastName email phone")
+      .populate("provider", "firstName lastName email phone")
+      .populate("booking")
+      .populate("listing");
 
     if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
     }
 
-    const isOwner = payment.traveler?._id?.toString() === req.user._id.toString();
-    const isProvider = payment.provider?._id?.toString() === req.user._id.toString();
-    const isAdmin = userRole === "admin";
-
-    if (!isOwner && !isProvider && !isAdmin) {
+    if (!isAdmin(req) && !isPaymentOwner(payment, userId)) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to view this payment",
+        message: "You are not allowed to view this payment",
       });
     }
 
-    const bookingWithListing = await Booking.findById(payment.booking)
-      .populate("listing", "title coverImage price location slug currency");
-
-    const paymentWithListing = {
-      ...payment,
-      listing: bookingWithListing?.listing || null,
-      formattedAmount: formatCurrency(payment.amount, payment.currency),
-      formattedSettlementAmount: formatCurrency(
-        payment.settlementAmount, 
-        payment.settlementCurrency || payment.currency
-      ),
-      formattedPlatformFee: formatCurrency(payment.platformFee, payment.currency),
-      formattedProviderAmount: formatCurrency(
-        payment.providerAmount, 
-        payment.settlementCurrency || payment.currency
-      ),
-    };
-
-    const refundHistory = payment.refundId
-      ? await Payment.find({
-          refundId: payment.refundId,
-        }).sort({ createdAt: -1 })
-      : [];
-
-    res.json({
+    return res.status(200).json({
       success: true,
-      payment: paymentWithListing,
-      refundHistory,
-      permissions: {
-        canRefund: isAdmin || (isOwner && payment.status === "paid"),
-        canDownload: true,
-        canView: true,
-      },
+      payment: serializePayment(payment),
     });
   } catch (error) {
-    console.error("❌ Get payment by id error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to get payment");
   }
 };
 
 // ============================================================
-// ✅ GET PROVIDER PAYMENTS - ENHANCED
+// GET MY PAYMENTS
+// ============================================================
+
+export const getMyPayments = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+
+    const { page, limit, skip } = getPagination(req);
+    const dateFilter = buildDateFilter(req);
+
+    const filter = { traveler: userId, ...dateFilter };
+    if (req.query.status) filter.status = req.query.status;
+
+    const [payments, total] = await Promise.all([
+      Payment.find(filter)
+        .populate("traveler", "firstName lastName email phone")
+        .populate("provider", "firstName lastName email phone")
+        .populate("booking")
+        .populate("listing")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Payment.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      payments: payments.map(serializePayment),
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    return sendError(res, error, "Failed to get your payments");
+  }
+};
+
+// ============================================================
+// GET PROVIDER PAYMENTS
 // ============================================================
 
 export const getProviderPayments = async (req, res) => {
   try {
-    const providerId = req.user._id;
-    const {
-      page = 1,
-      limit = 20,
-      status,
-      search,
-      startDate,
-      endDate,
-      currency,
-      sort = '-createdAt',
-      minAmount,
-      maxAmount,
-    } = req.query;
-
-    const filter = { provider: providerId };
-
-    if (status && status !== "all") filter.status = status;
-    if (currency) filter.currency = currency.toUpperCase();
-
-    if (search && search.trim()) {
-      filter.$or = [
-        { transactionId: { $regex: search, $options: "i" } },
-        { "traveler.name": { $regex: search, $options: "i" } },
-        { "booking.bookingCode": { $regex: search, $options: "i" } },
-        { "booking.listing.title": { $regex: search, $options: "i" } },
-      ];
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
     }
 
-    if (startDate || endDate) {
-      filter.paidAt = {};
-      if (startDate) filter.paidAt.$gte = new Date(startDate);
-      if (endDate) filter.paidAt.$lte = new Date(endDate);
+    if (!isProvider(req) && !isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Provider access required" });
     }
 
-    if (minAmount || maxAmount) {
-      filter.amount = {};
-      if (minAmount) filter.amount.$gte = Number(minAmount);
-      if (maxAmount) filter.amount.$lte = Number(maxAmount);
-    }
+    const { page, limit, skip } = getPagination(req);
+    const dateFilter = buildDateFilter(req);
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const limitNum = parseInt(limit);
-
-    // Validate sort field
-    const validSortFields = ['createdAt', 'amount', 'status', 'paidAt'];
-    const sortField = sort.startsWith('-') ? sort.substring(1) : sort;
-    const sortOrder = sort.startsWith('-') ? -1 : 1;
-    const finalSortField = validSortFields.includes(sortField) ? sortField : 'createdAt';
+    const filter = { provider: userId, ...dateFilter };
+    if (req.query.status) filter.status = req.query.status;
 
     const [payments, total] = await Promise.all([
       Payment.find(filter)
-        .populate("traveler", "name email profileImage")
-        .populate("provider", "name email businessName")
-        .populate("booking", "bookingCode startDate totalPrice status numberOfPeople")
-        .populate({
-          path: "booking",
-          populate: {
-            path: "listing",
-            select: "title coverImage price location slug currency"
-          }
-        })
-        .sort({ [finalSortField]: sortOrder })
+        .populate("traveler", "firstName lastName email phone")
+        .populate("provider", "firstName lastName email phone")
+        .populate("booking")
+        .populate("listing")
+        .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limitNum)
-        .lean(),
+        .limit(limit),
       Payment.countDocuments(filter),
     ]);
 
-    const processedPayments = payments.map(payment => {
-      const processed = { ...payment };
-      if (payment.booking?.listing) {
-        processed.listing = payment.booking.listing;
-      }
-      processed.formattedAmount = formatCurrency(payment.amount, payment.currency);
-      processed.formattedSettlementAmount = formatCurrency(
-        payment.settlementAmount, 
-        payment.settlementCurrency || payment.currency
-      );
-      return processed;
-    });
-
-    const stats = await calculateProviderStats(providerId);
-
-    res.json({
+    return res.status(200).json({
       success: true,
-      data: processedPayments,
+      payments: payments.map(serializePayment),
       pagination: {
+        page,
+        limit,
         total,
-        page: parseInt(page),
-        limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
-        hasNext: parseInt(page) * limitNum < total,
-        hasPrev: parseInt(page) > 1,
-      },
-      stats,
-      filters: {
-        status,
-        search,
-        sort,
-        currency,
-        startDate,
-        endDate,
-        minAmount,
-        maxAmount,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
-    console.error("❌ Get provider payments error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to get provider payments");
   }
 };
 
 // ============================================================
-// ✅ GET ADMIN PAYMENTS - ENHANCED
+// GET ALL PAYMENTS - ADMIN
 // ============================================================
 
 export const getAllPayments = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 20,
-      status,
-      search,
-      startDate,
-      endDate,
-      provider,
-      currency,
-      sort = '-createdAt',
-      minAmount,
-      maxAmount,
-    } = req.query;
-
-    const filter = {};
-    if (status && status !== "all") filter.status = status;
-    if (currency) filter.currency = currency.toUpperCase();
-
-    if (search && search.trim()) {
-      filter.$or = [
-        { transactionId: { $regex: search, $options: "i" } },
-        { "traveler.name": { $regex: search, $options: "i" } },
-        { "provider.name": { $regex: search, $options: "i" } },
-        { "booking.bookingCode": { $regex: search, $options: "i" } },
-        { "booking.listing.title": { $regex: search, $options: "i" } },
-      ];
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+    if (!isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Admin access required" });
     }
 
-    if (provider) {
-      filter.provider = provider;
-    }
+    const { page, limit, skip } = getPagination(req);
+    const dateFilter = buildDateFilter(req);
+    const filter = { ...dateFilter };
 
-    if (startDate || endDate) {
-      filter.paidAt = {};
-      if (startDate) filter.paidAt.$gte = new Date(startDate);
-      if (endDate) filter.paidAt.$lte = new Date(endDate);
-    }
-
-    if (minAmount || maxAmount) {
-      filter.amount = {};
-      if (minAmount) filter.amount.$gte = Number(minAmount);
-      if (maxAmount) filter.amount.$lte = Number(maxAmount);
-    }
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const limitNum = parseInt(limit);
-
-    // Validate sort field
-    const validSortFields = ['createdAt', 'amount', 'status', 'paidAt'];
-    const sortField = sort.startsWith('-') ? sort.substring(1) : sort;
-    const sortOrder = sort.startsWith('-') ? -1 : 1;
-    const finalSortField = validSortFields.includes(sortField) ? sortField : 'createdAt';
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.provider) filter.provider = req.query.provider;
+    if (req.query.traveler) filter.traveler = req.query.traveler;
+    if (req.query.booking) filter.booking = req.query.booking;
 
     const [payments, total] = await Promise.all([
       Payment.find(filter)
-        .populate("traveler", "name email profileImage")
-        .populate("provider", "name email businessName")
-        .populate("booking", "bookingCode startDate totalPrice status numberOfPeople")
-        .populate({
-          path: "booking",
-          populate: {
-            path: "listing",
-            select: "title coverImage price location slug currency"
-          }
-        })
-        .sort({ [finalSortField]: sortOrder })
+        .populate("traveler", "firstName lastName email phone")
+        .populate("provider", "firstName lastName email phone")
+        .populate("booking")
+        .populate("listing")
+        .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limitNum)
-        .lean(),
+        .limit(limit),
       Payment.countDocuments(filter),
     ]);
 
-    const processedPayments = payments.map(payment => {
-      const processed = { ...payment };
-      if (payment.booking?.listing) {
-        processed.listing = payment.booking.listing;
-      }
-      processed.formattedAmount = formatCurrency(payment.amount, payment.currency);
-      processed.formattedSettlementAmount = formatCurrency(
-        payment.settlementAmount, 
-        payment.settlementCurrency || payment.currency
-      );
-      return processed;
-    });
-
-    const stats = await calculateAdminStats();
-
-    res.json({
+    return res.status(200).json({
       success: true,
-      data: processedPayments,
+      payments: payments.map(serializePayment),
       pagination: {
+        page,
+        limit,
         total,
-        page: parseInt(page),
-        limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
-        hasNext: parseInt(page) * limitNum < total,
-        hasPrev: parseInt(page) > 1,
-      },
-      stats,
-      filters: {
-        status,
-        search,
-        sort,
-        currency,
-        provider,
-        startDate,
-        endDate,
-        minAmount,
-        maxAmount,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
-    console.error("❌ Get all payments error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to get all payments");
   }
 };
 
 // ============================================================
-// ✅ GET PAYMENT STATS (Traveler)
+// TRAVELER PAYMENT STATISTICS
 // ============================================================
 
-export const getPaymentStats = async (req, res) => {
+export const getTravelerPaymentStats = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
 
-    const [total, paid, pending, failed, refunded] = await Promise.all([
-      Payment.countDocuments({ traveler: userId }),
-      Payment.countDocuments({ traveler: userId, status: "paid" }),
-      Payment.countDocuments({ traveler: userId, status: "pending" }),
-      Payment.countDocuments({ traveler: userId, status: "failed" }),
-      Payment.countDocuments({ traveler: userId, status: "refunded" }),
+    const dateFilter = buildDateFilter(req);
+    const match = { traveler: userId, ...dateFilter };
+
+    const [summary, statusBreakdown] = await Promise.all([
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            totalPayments: { $sum: 1 },
+            totalAmount: {
+              $sum: {
+                $cond: [
+                  { $in: ["$status", [PAYMENT_STATUSES.COMPLETED]] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            completedAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.COMPLETED] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            pendingAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.PENDING] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            refundedAmount: {
+              $sum: {
+                $cond: [
+                  {
+                    $in: [
+                      "$status",
+                      [
+                        PAYMENT_STATUSES.REFUNDED,
+                        PAYMENT_STATUSES.PARTIALLY_REFUNDED,
+                      ],
+                    ],
+                  },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            amount: { $sum: "$amount" },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
     ]);
 
-    const totalAmount = await Payment.aggregate([
-      { $match: { traveler: userId, status: "paid" } },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
+    const data = summary[0] || {
+      totalPayments: 0,
+      totalAmount: 0,
+      completedAmount: 0,
+      pendingAmount: 0,
+      refundedAmount: 0,
+    };
 
-    const currencyBreakdown = await Payment.aggregate([
-      { $match: { traveler: userId, status: "paid" } },
-      {
-        $group: {
-          _id: "$currency",
-          total: { $sum: "$amount" },
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    res.json({
+    return res.status(200).json({
       success: true,
       stats: {
-        total,
-        paid,
-        pending,
-        failed,
-        refunded,
-        totalAmount: totalAmount[0]?.total || 0,
-        currencyBreakdown: currencyBreakdown.map(c => ({
-          currency: c._id,
-          total: c.total,
-          count: c.count,
-          formatted: formatCurrency(c.total, c._id),
-        })),
+        totalPayments: data.totalPayments || 0,
+        totalAmount: data.totalAmount || 0,
+        completedAmount: data.completedAmount || 0,
+        pendingAmount: data.pendingAmount || 0,
+        refundedAmount: data.refundedAmount || 0,
       },
+      statusBreakdown,
     });
   } catch (error) {
-    console.error("❌ Get payment stats error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(
+      res,
+      error,
+      "Failed to get traveler payment statistics"
+    );
   }
 };
 
 // ============================================================
-// ✅ GET ADMIN PAYMENT STATS
+// GET PAYMENT STATS (route import name)
 // ============================================================
 
-export const getAdminPaymentStats = async (req, res) => {
-  try {
-    const stats = await calculateAdminStats();
-    res.json({
-      success: true,
-      stats,
-    });
-  } catch (error) {
-    console.error("❌ Get admin payment stats error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+export const getPaymentStats = getTravelerPaymentStats;
 
 // ============================================================
-// ✅ GET PROVIDER PAYMENT STATS
+// PROVIDER PAYMENT STATISTICS
 // ============================================================
 
 export const getProviderPaymentStats = async (req, res) => {
   try {
-    const providerId = req.user._id;
-    const stats = await calculateProviderStats(providerId);
-    res.json({
-      success: true,
-      stats,
-    });
-  } catch (error) {
-    console.error("❌ Get provider payment stats error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================================================
-// ✅ GET PAYMENT RECEIPT
-// ============================================================
-
-export const getPaymentReceipt = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const payment = await Payment.findById(id)
-      .populate("traveler", "name email")
-      .populate("booking", "bookingCode")
-      .populate("provider", "name businessName")
-      .lean();
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+    if (!isProvider(req) && !isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Provider access required" });
     }
 
-    const booking = await Booking.findById(payment.booking)
-      .populate("listing", "title");
+    const providerId =
+      isAdmin(req) && req.query.provider ? req.query.provider : userId;
 
-    const listing = booking?.listing || null;
+    const dateFilter = buildDateFilter(req);
+    const match = { provider: providerId, ...dateFilter };
 
-    const receipt = {
-      receiptNumber: payment.receiptNumber || generateReceiptNumber(payment),
-      date: payment.paidAt || payment.createdAt,
-      traveler: {
-        name: payment.traveler?.name || "N/A",
-        email: payment.traveler?.email || "N/A",
-      },
-      provider: {
-        name: payment.provider?.businessName || payment.provider?.name || "N/A",
-      },
-      listing: {
-        title: listing?.title || "N/A",
-      },
-      booking: {
-        code: payment.booking?.bookingCode || "N/A",
-      },
-      payment: {
-        amount: payment.amount,
-        currency: payment.currency || "USD",
-        method: payment.paymentMethod || "stripe",
-        status: payment.status,
-        transactionId: payment.transactionId || payment.stripePaymentId || "N/A",
-        paidAt: payment.paidAt,
-        subtotal: payment.amount - (payment.tax || 0) - (payment.serviceFee || 0),
-        tax: payment.tax || 0,
-        serviceFee: payment.serviceFee || 0,
-        total: payment.amount,
-      },
+    const [summary, statusBreakdown] = await Promise.all([
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            totalPayments: { $sum: 1 },
+            grossAmount: { $sum: "$amount" },
+            completedAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.COMPLETED] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            pendingAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.PENDING] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            refundedAmount: {
+              $sum: {
+                $cond: [
+                  {
+                    $in: [
+                      "$status",
+                      [
+                        PAYMENT_STATUSES.REFUNDED,
+                        PAYMENT_STATUSES.PARTIALLY_REFUNDED,
+                      ],
+                    ],
+                  },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            amount: { $sum: "$amount" },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
+    ]);
+
+    const data = summary[0] || {
+      totalPayments: 0,
+      grossAmount: 0,
+      completedAmount: 0,
+      pendingAmount: 0,
+      refundedAmount: 0,
     };
 
-    res.json({
+    return res.status(200).json({
       success: true,
-      receipt,
+      stats: {
+        totalPayments: data.totalPayments || 0,
+        grossAmount: data.grossAmount || 0,
+        completedAmount: data.completedAmount || 0,
+        pendingAmount: data.pendingAmount || 0,
+        refundedAmount: data.refundedAmount || 0,
+      },
+      statusBreakdown,
     });
   } catch (error) {
-    console.error("❌ Get payment receipt error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(
+      res,
+      error,
+      "Failed to get provider payment statistics"
+    );
   }
 };
 
 // ============================================================
-// ✅ DOWNLOAD RECEIPT
+// ADMIN PAYMENT STATISTICS
 // ============================================================
 
-export const downloadReceipt = async (req, res) => {
+export const getAdminPaymentStats = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const payment = await Payment.findById(id)
-      .populate("traveler", "name email")
-      .populate("booking", "bookingCode")
-      .populate("provider", "name businessName")
-      .lean();
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+    if (!isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Admin access required" });
     }
 
-    const booking = await Booking.findById(payment.booking)
-      .populate("listing", "title");
+    const dateFilter = buildDateFilter(req);
+    const match = { ...dateFilter };
 
-    const listing = booking?.listing || null;
+    const [summary, statusBreakdown, currencyBreakdown] = await Promise.all([
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            totalPayments: { $sum: 1 },
+            totalAmount: { $sum: "$amount" },
+            completedAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.COMPLETED] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            pendingAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.PENDING] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            failedAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", PAYMENT_STATUSES.FAILED] },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+            refundedAmount: {
+              $sum: {
+                $cond: [
+                  {
+                    $in: [
+                      "$status",
+                      [
+                        PAYMENT_STATUSES.REFUNDED,
+                        PAYMENT_STATUSES.PARTIALLY_REFUNDED,
+                      ],
+                    ],
+                  },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            amount: { $sum: "$amount" },
+          },
+        },
+        { $sort: { amount: -1 } },
+      ]),
+      Payment.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: "$currency",
+            count: { $sum: 1 },
+            amount: { $sum: "$amount" },
+          },
+        },
+        { $sort: { amount: -1 } },
+      ]),
+    ]);
 
-    const receipt = {
-      receiptNumber: payment.receiptNumber || generateReceiptNumber(payment),
-      date: payment.paidAt || payment.createdAt,
-      traveler: {
-        name: payment.traveler?.name || "N/A",
-        email: payment.traveler?.email || "N/A",
-      },
-      provider: {
-        name: payment.provider?.businessName || payment.provider?.name || "N/A",
-      },
-      listing: {
-        title: listing?.title || "N/A",
-      },
-      booking: {
-        code: payment.booking?.bookingCode || "N/A",
-      },
-      payment: {
-        amount: payment.amount,
-        currency: payment.currency || "USD",
-        method: payment.paymentMethod || "stripe",
-        status: payment.status,
-        transactionId: payment.transactionId || payment.stripePaymentId || "N/A",
-        paidAt: payment.paidAt,
-        subtotal: payment.amount - (payment.tax || 0) - (payment.serviceFee || 0),
-        tax: payment.tax || 0,
-        serviceFee: payment.serviceFee || 0,
-        total: payment.amount,
-      },
+    const data = summary[0] || {
+      totalPayments: 0,
+      totalAmount: 0,
+      completedAmount: 0,
+      pendingAmount: 0,
+      failedAmount: 0,
+      refundedAmount: 0,
     };
 
-    res.json({
+    return res.status(200).json({
       success: true,
-      receipt,
-      downloadUrl: `/api/payments/${id}/download-pdf`,
+      stats: {
+        totalPayments: data.totalPayments || 0,
+        totalAmount: data.totalAmount || 0,
+        completedAmount: data.completedAmount || 0,
+        pendingAmount: data.pendingAmount || 0,
+        failedAmount: data.failedAmount || 0,
+        refundedAmount: data.refundedAmount || 0,
+      },
+      statusBreakdown,
+      currencyBreakdown,
     });
   } catch (error) {
-    console.error("❌ Download receipt error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to get admin payment statistics");
   }
 };
 
 // ============================================================
-// ✅ REQUEST REFUND (Traveler)
+// PROVIDER EARNINGS
+// ============================================================
+
+export const getProviderEarnings = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+    if (!isProvider(req) && !isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Provider access required" });
+    }
+
+    const providerId =
+      isAdmin(req) && req.query.provider ? req.query.provider : userId;
+
+    const dateFilter = buildDateFilter(req);
+    const match = {
+      provider: providerId,
+      status: PAYMENT_STATUSES.COMPLETED,
+      ...dateFilter,
+    };
+
+    const earnings = await Payment.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$currency",
+          totalTransactions: { $sum: 1 },
+          grossEarnings: { $sum: "$amount" },
+          averageTransaction: { $avg: "$amount" },
+          highestTransaction: { $max: "$amount" },
+          lowestTransaction: { $min: "$amount" },
+        },
+      },
+      { $sort: { grossEarnings: -1 } },
+    ]);
+
+    const monthlyEarnings = await Payment.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" },
+            currency: "$currency",
+          },
+          amount: { $sum: "$amount" },
+          transactions: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1 } },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      earnings,
+      monthlyEarnings,
+    });
+  } catch (error) {
+    return sendError(res, error, "Failed to get provider earnings");
+  }
+};
+
+// ============================================================
+// REQUEST REFUND - TRAVELER
 // ============================================================
 
 export const requestRefund = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { reason } = req.body;
-
-    const payment = await Payment.findById(id).populate("booking", "status");
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
     }
 
-    if (payment.traveler.toString() !== req.user._id.toString()) {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    if (!id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment ID is required" });
+    }
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
+    }
+
+    if (!isAdmin(req) && !isPaymentOwner(payment, userId)) {
       return res.status(403).json({
         success: false,
-        message: "You can only request refund for your own payments",
+        message: "You are not allowed to request a refund for this payment",
       });
     }
 
-    if (payment.status !== "paid") {
+    if (payment.status !== PAYMENT_STATUSES.COMPLETED) {
       return res.status(400).json({
         success: false,
-        message: `Payment cannot be refunded. Current status: ${payment.status}`,
+        message: "Only completed payments can be refunded",
       });
     }
 
-    if (payment.booking?.status === "completed") {
-      return res.status(400).json({
+    if (
+      payment.refundId ||
+      (payment.refundAmount && Number(payment.refundAmount) > 0)
+    ) {
+      return res.status(409).json({
         success: false,
-        message: "Completed bookings cannot be refunded",
+        message: "A refund has already been requested for this payment",
       });
     }
 
-    await createNotification({
-      recipient: payment.provider,
-      sender: req.user._id,
-      type: "refund_request",
-      title: "Refund Requested 💸",
-      message: `A traveler has requested a refund for booking ${payment.booking?.bookingCode || "N/A"}`,
-      data: { paymentId: payment._id },
-      link: `/provider/payments/${payment._id}`,
-    });
+    // Use providerData map for the reason since the schema has
+    // no `refundReason` field.
+    const existingProviderData =
+      payment.providerData instanceof Map
+        ? Object.fromEntries(payment.providerData)
+        : payment.providerData || {};
 
-    payment.status = "pending_refund";
-    payment.refundReason = reason || "No reason provided";
-    payment.refundRequestedAt = new Date();
+    payment.providerData = {
+      ...existingProviderData,
+      refundReason: reason || "Traveler requested refund",
+      refundRequestedAt: new Date().toISOString(),
+    };
+    payment.markModified("providerData");
+
     await payment.save();
 
-    res.json({
+    return res.status(200).json({
       success: true,
       message: "Refund request submitted successfully",
-      payment,
+      payment: serializePayment(payment),
     });
   } catch (error) {
-    console.error("❌ Request refund error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to request refund");
   }
 };
 
 // ============================================================
-// ✅ PROCESS REFUND (Admin) - Delegates to paymentService
+// PROCESS REFUND - ADMIN
 // ============================================================
 
 export const processRefund = async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+    if (!isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Admin access required" });
+    }
+
     const { id } = req.params;
-    const { amount, reason } = req.body;
+    const { amount, reason } = req.body || {};
 
-    const payment = await Payment.findById(id)
-      .populate("booking", "bookingCode status")
-      .populate("traveler", "name email")
-      .populate("provider", "name email");
+    if (!id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment ID is required" });
+    }
 
+    const payment = await Payment.findById(id);
     if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
     }
 
-    if (payment.status !== "paid" && payment.status !== "pending_refund") {
-      return res.status(400).json({
-        success: false,
-        message: `Payment cannot be refunded. Current status: ${payment.status}`,
-      });
-    }
-
-    const refundAmount = amount || payment.amount;
-    let refund;
-
-    // ✅ Delegate to Stripe for processing
-    if (payment.stripePaymentId) {
-      try {
-        refund = await stripe.refunds.create({
-          payment_intent: payment.stripePaymentId,
-          amount: Math.round(refundAmount * 100),
-          reason: "requested_by_customer",
-          metadata: {
-            paymentId: payment._id.toString(),
-            bookingId: payment.booking?._id?.toString() || "N/A",
-            reason: reason || "Admin initiated refund",
-          },
-        });
-      } catch (stripeError) {
-        console.error("❌ Stripe refund error:", stripeError);
-        return res.status(500).json({
-          success: false,
-          message: "Failed to process refund with payment gateway",
-          error: stripeError.message,
-        });
+    let refundResult = null;
+    try {
+      if (
+        paymentService &&
+        typeof paymentService.refundPayment === "function"
+      ) {
+        refundResult = await paymentService.refundPayment(
+          normalizeId(payment._id),
+          amount != null ? Number(amount) : payment.amount,
+          reason || "Admin initiated refund"
+        );
       }
+    } catch (svcErr) {
+      console.warn(
+        "[PROCESS REFUND] provider refund call failed, marking locally:",
+        svcErr.message
+      );
     }
 
-    // ✅ Update payment
-    payment.status = "refunded";
+    const refundAmount =
+      refundResult?.refundAmount != null
+        ? Number(refundResult.refundAmount)
+        : refundResult?.data?.amount != null
+        ? Number(refundResult.data.amount)
+        : refundResult?.amount != null
+        ? Number(refundResult.amount)
+        : amount != null
+        ? Number(amount)
+        : Number(payment.amount);
+
+    payment.refundId =
+      refundResult?.refundReference ||
+      refundResult?.data?.refundId ||
+      refundResult?.transactionId ||
+      refundResult?.refund?.id ||
+      payment.refundId ||
+      null;
+
     payment.refundAmount = refundAmount;
     payment.refundedAt = new Date();
-    payment.refundId = refund?.id || "manual_refund";
-    payment.refundReason = reason || "Admin initiated refund";
+
+    if (refundAmount >= Number(payment.amount || 0)) {
+      payment.status = PAYMENT_STATUSES.REFUNDED;
+    } else if (refundAmount > 0) {
+      payment.status = PAYMENT_STATUSES.PARTIALLY_REFUNDED;
+    }
+
     await payment.save();
 
-    // ✅ Update booking
-    if (payment.booking) {
-      await Booking.findByIdAndUpdate(payment.booking._id, {
-        status: "cancelled",
-        refundAmount: refundAmount,
-        refundedAt: new Date(),
-        refundId: refund?.id || "manual_refund",
+    return res.status(200).json({
+      success: true,
+      message: "Refund processed successfully",
+      payment: serializePayment(payment),
+      refund: refundResult || null,
+    });
+  } catch (error) {
+    return sendError(res, error, "Failed to process refund");
+  }
+};
+
+// ============================================================
+// GET PAYMENT RECEIPT
+// ============================================================
+
+export const getPaymentReceipt = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment ID is required" });
+    }
+
+    const payment = await Payment.findById(id)
+      .populate("traveler", "firstName lastName email phone")
+      .populate("provider", "firstName lastName email phone")
+      .populate("booking")
+      .populate("listing");
+
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
+    }
+
+    if (!isAdmin(req) && !isPaymentOwner(payment, userId)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view this receipt",
       });
     }
 
-    // ✅ Update earning
-    const earning = await Earning.findOne({ payment: payment._id });
-    if (earning) {
-      earning.status = "refunded";
-      await earning.save();
-    }
+    const receipt = {
+      receiptNumber: `RCPT-${normalizeId(payment._id)}`,
+      issuedAt: new Date().toISOString(),
+      payment: serializePayment(payment),
+      traveler: payment.traveler || null,
+      provider: payment.provider || null,
+      booking: payment.booking || null,
+      listing: payment.listing || null,
+      amountFormatted: formatMoney(payment.amount, payment.currency),
+    };
 
-    // ✅ Send notifications
-    await Promise.all([
-      createNotification({
-        recipient: payment.traveler,
-        sender: req.user._id,
-        type: "refund_processed",
-        title: "Refund Processed ✅",
-        message: `Your refund of ${formatCurrency(refundAmount, payment.currency)} has been processed`,
-        data: { paymentId: payment._id },
-        link: `/payments/${payment._id}`,
-      }),
-      createNotification({
-        recipient: payment.provider,
-        sender: req.user._id,
-        type: "refund_processed",
-        title: "Refund Processed 💸",
-        message: `A refund of ${formatCurrency(refundAmount, payment.currency)} has been processed for booking ${payment.booking?.bookingCode || "N/A"}`,
-        data: { paymentId: payment._id },
-        link: `/provider/payments/${payment._id}`,
-      }),
-    ]);
-
-    res.json({
+    return res.status(200).json({
       success: true,
-      message: "Refund processed successfully",
-      payment,
-      refund,
+      receipt,
     });
   } catch (error) {
-    console.error("❌ Process refund error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to get payment receipt");
   }
 };
 
 // ============================================================
-// ✅ EXPORT PAYMENTS CSV (Admin)
-// ============================================================
-
-export const exportPaymentsCSV = async (req, res) => {
-  try {
-    const { status, startDate, endDate } = req.query;
-
-    const filter = {};
-    if (status && status !== "all") filter.status = status;
-    if (startDate) filter.paidAt = { $gte: new Date(startDate) };
-    if (endDate) filter.paidAt = { ...filter.paidAt, $lte: new Date(endDate) };
-
-    const payments = await Payment.find(filter)
-      .populate("traveler", "name email")
-      .populate("provider", "name email businessName")
-      .populate("booking", "bookingCode")
-      .lean();
-
-    const csvData = payments.map((p) => ({
-      "Transaction ID": p.transactionId || p.stripePaymentId || "N/A",
-      "Booking Code": p.booking?.bookingCode || "N/A",
-      Traveler: p.traveler?.name || "N/A",
-      "Traveler Email": p.traveler?.email || "N/A",
-      Provider: p.provider?.businessName || p.provider?.name || "N/A",
-      "Listing Title": p.listing?.title || p.booking?.listing?.title || "N/A",
-      Amount: p.amount,
-      Currency: p.currency || "USD",
-      "Service Fee": p.serviceFee || 0,
-      "Platform Fee": p.platformFee || 0,
-      "Net Amount": p.providerAmount || p.amount - (p.platformFee || 0),
-      Status: p.status,
-      "Payment Method": p.paymentMethod || "stripe",
-      "Paid At": p.paidAt ? new Date(p.paidAt).toISOString() : "",
-      "Refund Amount": p.refundAmount || 0,
-      "Refund Reason": p.refundReason || "",
-    }));
-
-    const csv = exportToCSV(csvData);
-
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=payments-${new Date().toISOString().split("T")[0]}.csv`
-    );
-    res.send(csv);
-  } catch (error) {
-    console.error("❌ Export payments CSV error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================================================
-// ✅ GET PAYMENT ANALYTICS (Admin)
+// GET PAYMENT ANALYTICS - ADMIN
 // ============================================================
 
 export const getPaymentAnalytics = async (req, res) => {
   try {
-    const { period = "monthly" } = req.query;
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
+    if (!isAdmin(req)) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Admin access required" });
+    }
 
-    const revenueData = await Payment.aggregate([
-      { $match: { status: "paid" } },
+    const period = String(req.query.period || "monthly").toLowerCase();
+
+    const now = new Date();
+    const start = new Date(now);
+    if (period === "daily") start.setDate(now.getDate() - 30);
+    else if (period === "weekly") start.setDate(now.getDate() - 7 * 12);
+    else if (period === "yearly") start.setFullYear(now.getFullYear() - 5);
+    else start.setMonth(now.getMonth() - 12);
+
+    const match = { createdAt: { $gte: start } };
+
+    const groupFormat =
+      period === "daily"
+        ? {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" },
+            day: { $dayOfMonth: "$createdAt" },
+          }
+        : period === "yearly"
+        ? { year: { $year: "$createdAt" } }
+        : {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" },
+          };
+
+    const timeline = await Payment.aggregate([
+      { $match: match },
       {
         $group: {
-          _id: {
-            year: { $year: "$paidAt" },
-            month: { $month: "$paidAt" },
-            day: { $dayOfMonth: "$paidAt" },
-          },
-          total: { $sum: "$amount" },
+          _id: { period: groupFormat, currency: "$currency" },
+          amount: { $sum: "$amount" },
           count: { $sum: 1 },
         },
       },
-      { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
-    ]);
-
-    const methodData = await Payment.aggregate([
-      { $match: { status: "paid" } },
       {
-        $group: {
-          _id: "$paymentMethod",
-          total: { $sum: "$amount" },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const listingData = await Payment.aggregate([
-      { $match: { status: "paid" } },
-      {
-        $group: {
-          _id: "$listing",
-          total: { $sum: "$amount" },
-          count: { $sum: 1 },
-        },
-      },
-      { $sort: { total: -1 } },
-      { $limit: 10 },
-      {
-        $lookup: {
-          from: "listings",
-          localField: "_id",
-          foreignField: "_id",
-          as: "listing",
-        },
-      },
-      { $unwind: "$listing" },
-    ]);
-
-    const refundStats = await Payment.aggregate([
-      { $match: { status: "refunded" } },
-      {
-        $group: {
-          _id: null,
-          totalRefunded: { $sum: "$refundAmount" },
-          count: { $sum: 1 },
+        $sort: {
+          "_id.period.year": 1,
+          "_id.period.month": 1,
+          "_id.period.day": 1,
         },
       },
     ]);
 
-    res.json({
+    const byStatus = await Payment.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+          amount: { $sum: "$amount" },
+        },
+      },
+      { $sort: { amount: -1 } },
+    ]);
+
+    const byProvider = await Payment.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$provider",
+          count: { $sum: 1 },
+          amount: { $sum: "$amount" },
+        },
+      },
+      { $sort: { amount: -1 } },
+      { $limit: 20 },
+    ]);
+
+    return res.status(200).json({
       success: true,
-      analytics: {
-        revenueData,
-        methodData,
-        listingData,
-        refundStats: {
-          totalRefunded: refundStats[0]?.totalRefunded || 0,
-          count: refundStats[0]?.count || 0,
-        },
-      },
+      period,
+      range: { from: start.toISOString(), to: now.toISOString() },
+      timeline,
+      byStatus,
+      byProvider,
     });
   } catch (error) {
-    console.error("❌ Get payment analytics error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error, "Failed to get payment analytics");
   }
 };
 
 // ============================================================
-// ✅ STRIPE WEBHOOK
+// STRIPE WEBHOOK
 // ============================================================
 
 export const stripeWebhook = async (req, res) => {
-  const sig = req.headers["stripe-signature"];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    console.error('❌ STRIPE_WEBHOOK_SECRET is not set');
-    return res.status(500).json({
-      success: false,
-      message: "Webhook secret not configured"
-    });
-  }
-
-  let event;
-
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      webhookSecret
-    );
-  } catch (error) {
-    console.log("❌ Webhook Signature Error:", error.message);
-    return res.status(400).json({
-      success: false,
-      message: `Webhook Error: ${error.message}`
-    });
-  }
-
-  console.log(`📥 Webhook received: ${event.type}`);
-
-  try {
-    const result = await paymentService.handleWebhook('stripe', {
-      body: req.body,
-      headers: req.headers,
-      rawBody: req.rawBody,
-      event: event,
-    });
-
-    if (result.success) {
-      res.json({ received: true, processed: true });
-    } else {
-      await handleWebhookLegacy(event);
-      res.json({ received: true, processed: true });
+    const signature = req.headers["stripe-signature"];
+    if (!signature) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Stripe signature is required" });
     }
-  } catch (error) {
-    console.error('❌ Webhook processing error:', error);
-    try {
-      await handleWebhookLegacy(event);
-      res.json({ received: true, processed: true });
-    } catch (fallbackError) {
-      res.status(500).json({
+
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      return res.status(500).json({
         success: false,
-        message: fallbackError.message
+        message: "STRIPE_WEBHOOK_SECRET is not configured",
       });
     }
-  }
-};
 
-// =========================
-// ✅ LEGACY WEBHOOK HANDLERS
-// =========================
-
-const handleWebhookLegacy = async (event) => {
-  switch (event.type) {
-    case 'checkout.session.completed':
-      await handleCheckoutCompleted(event.data.object);
-      break;
-    case 'checkout.session.expired':
-      await handleCheckoutExpired(event.data.object);
-      break;
-    case 'payment_intent.succeeded':
-      await handlePaymentIntentSucceeded(event.data.object);
-      break;
-    case 'payment_intent.payment_failed':
-      await handlePaymentFailed(event.data.object);
-      break;
-    case 'charge.refunded':
-      await handleChargeRefunded(event.data.object);
-      break;
-    default:
-      console.log(`ℹ️ Unhandled legacy event type: ${event.type}`);
-  }
-};
-
-// =========================
-// ✅ WEBHOOK HELPERS
-// =========================
-
-const handleCheckoutCompleted = async (session) => {
-  const bookingId = session.metadata?.bookingId;
-  
-  console.log(`💰 Payment successful for session: ${session.id}`);
-  console.log(`📦 Booking ID: ${bookingId}`);
-
-  if (!bookingId) {
-    console.error("❌ No bookingId in session metadata");
-    return;
-  }
-
-  const booking = await Booking.findById(bookingId)
-    .populate('listing', 'title');
-    
-  if (!booking) {
-    console.error("❌ Booking not found:", bookingId);
-    return;
-  }
-
-  let payment = await Payment.findOne({ booking: bookingId });
-  
-  if (!payment) {
-    payment = await Payment.create({
-      traveler: booking.user,
-      booking: booking._id,
-      provider: booking.provider,
-      listing: booking.listing._id,
-      amount: booking.totalPrice,
-      currency: "USD",
-      status: "paid",
-      stripeSessionId: session.id,
-      stripePaymentId: session.payment_intent,
-      transactionId: session.payment_intent,
-      paidAt: new Date(),
-      paymentMethod: 'stripe',
-      source: 'webhook',
-      providerReference: session.id,
-      platformFee: booking.totalPrice * 0.1,
-      providerAmount: booking.totalPrice * 0.9,
-      metadata: {
-        bookingId: booking._id.toString(),
-        entityType: 'listing',
-        webhookProcessed: true,
-        webhookProcessedAt: new Date().toISOString(),
-      }
-    });
-  } else if (payment.status !== 'paid') {
-    payment.status = 'paid';
-    payment.stripeSessionId = session.id;
-    payment.stripePaymentId = session.payment_intent;
-    payment.transactionId = session.payment_intent;
-    payment.paidAt = new Date();
-    await payment.save();
-  }
-
-  await safelyUpdateBooking(bookingId, {
-    paymentStatus: "paid",
-    status: "confirmed",
-    paymentId: session.payment_intent,
-    paidAt: new Date()
-  });
-
-  const existingEarning = await Earning.findOne({ booking: bookingId });
-  if (!existingEarning) {
-    await Earning.create({
-      provider: booking.provider,
-      booking: booking._id,
-      payment: payment._id,
-      amount: booking.totalPrice * 0.9,
-      platformFee: booking.totalPrice * 0.1,
-      netAmount: booking.totalPrice * 0.9,
-      bookingType: 'listing',
-      status: "available",
-      paymentId: session.payment_intent,
-      paidAt: new Date()
-    });
-    console.log(`✅ Earning created for booking ${bookingId}`);
-  }
-
-  console.log(`✅ Payment processed successfully for booking: ${bookingId}`);
-};
-
-const handleCheckoutExpired = async (session) => {
-  const bookingId = session.metadata?.bookingId;
-  console.log(`⏰ Checkout expired for booking: ${bookingId}`);
-  
-  if (bookingId) {
-    await safelyUpdateBooking(bookingId, {
-      status: 'failed_payment',
-      adminNotes: 'Payment session expired'
-    });
-  }
-};
-
-const handlePaymentIntentSucceeded = async (paymentIntent) => {
-  console.log(`✅ Payment intent succeeded: ${paymentIntent.id}`);
-};
-
-const handlePaymentFailed = async (paymentIntent) => {
-  console.log(`❌ Payment failed: ${paymentIntent.id}`);
-  const bookingId = paymentIntent.metadata?.bookingId;
-  
-  if (bookingId) {
-    await safelyUpdateBooking(bookingId, {
-      status: 'failed_payment',
-      adminNotes: paymentIntent.last_payment_error?.message || 'Payment failed'
-    });
-  }
-};
-
-const handleChargeRefunded = async (charge) => {
-  console.log(`💸 Charge refunded: ${charge.id}`);
-  const bookingId = charge.metadata?.bookingId;
-  
-  if (bookingId) {
-    await safelyUpdateBooking(bookingId, {
-      paymentStatus: 'refunded',
-      status: 'cancelled',
-      cancelledAt: new Date(),
-      refundAmount: charge.amount_refunded / 100,
-      refundedAt: new Date()
-    });
-    
-    const payment = await Payment.findOne({ booking: bookingId });
-    if (payment && payment.status === 'paid') {
-      payment.status = 'refunded';
-      payment.refundAmount = charge.amount_refunded / 100;
-      payment.refundedAt = new Date();
-      payment.refundId = charge.id;
-      await payment.save();
-    }
-  }
-};
-
-// =========================
-// ✅ SAFE BOOKING UPDATE
-// =========================
-
-const safelyUpdateBooking = async (bookingId, updateData) => {
-  try {
-    const booking = await Booking.findByIdAndUpdate(
-      bookingId,
-      updateData,
-      { 
-        new: true,
-        runValidators: false,
-        context: 'query'
-      }
+    const event = await paymentService.constructWebhookEvent(
+      req.body,
+      signature,
+      webhookSecret
     );
-    return booking;
-  } catch (error) {
-    console.warn('⚠️ Could not update booking with validation:', error.message);
-    const booking = await Booking.findById(bookingId);
-    if (booking) {
-      Object.assign(booking, updateData);
-      booking.markModified('status');
-      booking.markModified('paymentStatus');
-      booking.markModified('paidAt');
-      booking.markModified('displayCurrency');
-      booking.markModified('displayTotal');
-      await booking.save({ validateBeforeSave: false });
+
+    if (!event) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid webhook event" });
     }
-    return booking;
+
+    console.log(`[STRIPE WEBHOOK] ${event.type}`);
+
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data?.object;
+        const sessionId = session?.id;
+        const paymentIntentId = session?.payment_intent;
+        const metadata = session?.metadata || {};
+        const paymentId = metadata.paymentId;
+
+        let payment = null;
+        if (paymentId) payment = await Payment.findById(paymentId);
+        if (!payment && sessionId)
+          payment = await Payment.findOne({
+            $or: [
+              { stripeSessionId: sessionId },
+              { providerReference: sessionId },
+            ],
+          });
+
+        if (!payment) {
+          console.warn(
+            "[STRIPE WEBHOOK] Payment not found for checkout session:",
+            sessionId
+          );
+          break;
+        }
+
+        payment.status = PAYMENT_STATUSES.COMPLETED;
+        if (sessionId) payment.stripeSessionId = sessionId;
+        if (paymentIntentId) payment.stripePaymentId = paymentIntentId;
+        payment.paidAt = payment.paidAt || new Date();
+        await payment.save();
+
+        const bookingId = normalizeId(payment.booking);
+        if (bookingId) {
+          const booking = await Booking.findById(bookingId);
+          if (booking) {
+            if ("paymentStatus" in booking) booking.paymentStatus = "paid";
+            if ("paid" in booking) booking.paid = true;
+            if (
+              "status" in booking &&
+              ["pending", "pending_payment"].includes(booking.status)
+            )
+              booking.status = "confirmed";
+            await booking.save();
+          }
+        }
+        break;
+      }
+
+      case "payment_intent.succeeded": {
+        const intent = event.data?.object;
+        const paymentIntentId = intent?.id;
+
+        let payment = null;
+        if (paymentIntentId)
+          payment = await Payment.findOne({
+            $or: [
+              { stripePaymentId: paymentIntentId },
+              { transactionId: paymentIntentId },
+            ],
+          });
+
+        if (!payment) {
+          console.warn(
+            "[STRIPE WEBHOOK] Payment not found for payment intent:",
+            paymentIntentId
+          );
+          break;
+        }
+
+        payment.status = PAYMENT_STATUSES.COMPLETED;
+        payment.paidAt = payment.paidAt || new Date();
+        await payment.save();
+
+        const bookingId = normalizeId(payment.booking);
+        if (bookingId) {
+          const booking = await Booking.findById(bookingId);
+          if (booking) {
+            if ("paymentStatus" in booking) booking.paymentStatus = "paid";
+            if ("paid" in booking) booking.paid = true;
+            if (
+              "status" in booking &&
+              ["pending", "pending_payment"].includes(booking.status)
+            )
+              booking.status = "confirmed";
+            await booking.save();
+          }
+        }
+        break;
+      }
+
+      case "payment_intent.payment_failed": {
+        const intent = event.data?.object;
+        const paymentIntentId = intent?.id;
+        const payment = await Payment.findOne({
+          $or: [
+            { stripePaymentId: paymentIntentId },
+            { transactionId: paymentIntentId },
+          ],
+        });
+        if (!payment) {
+          console.warn(
+            "[STRIPE WEBHOOK] Failed payment not found:",
+            paymentIntentId
+          );
+          break;
+        }
+        payment.status = PAYMENT_STATUSES.FAILED;
+        if (intent?.last_payment_error?.message)
+          payment.errorMessage = intent.last_payment_error.message;
+        await payment.save();
+        break;
+      }
+
+      case "charge.refunded": {
+        const charge = event.data?.object;
+        const paymentIntentId = charge?.payment_intent;
+        const payment = await Payment.findOne({
+          $or: [
+            { stripePaymentId: paymentIntentId },
+            { transactionId: paymentIntentId },
+          ],
+        });
+        if (!payment) {
+          console.warn(
+            "[STRIPE WEBHOOK] Refunded payment not found:",
+            paymentIntentId
+          );
+          break;
+        }
+        const totalRefunded = Number(charge?.amount_refunded || 0) / 100;
+        const originalAmount = Number(payment.amount || 0);
+
+        payment.refundAmount = totalRefunded;
+        payment.refundedAt = new Date();
+
+        if (totalRefunded >= originalAmount) {
+          payment.status = PAYMENT_STATUSES.REFUNDED;
+        } else {
+          payment.status = PAYMENT_STATUSES.PARTIALLY_REFUNDED;
+        }
+        await payment.save();
+        break;
+      }
+
+      case "charge.failed": {
+        const charge = event.data?.object;
+        const paymentIntentId = charge?.payment_intent;
+        if (!paymentIntentId) break;
+        const payment = await Payment.findOne({
+          $or: [
+            { stripePaymentId: paymentIntentId },
+            { transactionId: paymentIntentId },
+          ],
+        });
+        if (!payment) break;
+        payment.status = PAYMENT_STATUSES.FAILED;
+        if (charge?.failure_message)
+          payment.errorMessage = charge.failure_message;
+        await payment.save();
+        break;
+      }
+
+      case "payment_intent.canceled": {
+        const intent = event.data?.object;
+        const paymentIntentId = intent?.id;
+        const payment = await Payment.findOne({
+          $or: [
+            { stripePaymentId: paymentIntentId },
+            { transactionId: paymentIntentId },
+          ],
+        });
+        if (!payment) break;
+        payment.status = PAYMENT_STATUSES.CANCELLED;
+        await payment.save();
+        break;
+      }
+
+      default:
+        console.log(`[STRIPE WEBHOOK] Unhandled event: ${event.type}`);
+        break;
+    }
+
+    return res.status(200).json({ success: true, received: true });
+  } catch (error) {
+    console.error("[STRIPE WEBHOOK ERROR]:", error);
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "Webhook processing failed",
+    });
   }
 };
 
-// =========================
-// ✅ STATS HELPERS
-// =========================
+// ============================================================
+// GET PAYMENT STATUS
+// ============================================================
 
-const calculateProviderStats = async (providerId) => {
-  const today = new Date();
-  const startOfToday = new Date(today.setHours(0, 0, 0, 0));
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+export const getPaymentStatus = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Authentication required" });
+    }
 
-  const filter = { provider: providerId, status: "paid" };
+    const { id } = req.params;
+    if (!id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment ID is required" });
+    }
 
-  const [allPayments, todayPayments, monthPayments, earnings] = await Promise.all([
-    Payment.find(filter),
-    Payment.find({ ...filter, paidAt: { $gte: startOfToday } }),
-    Payment.find({ ...filter, paidAt: { $gte: startOfMonth } }),
-    Earning.find({ provider: providerId }),
-  ]);
+    const payment = await Payment.findById(id)
+      .populate("traveler", "firstName lastName email")
+      .populate("provider", "firstName lastName email")
+      .populate("booking")
+      .populate("listing");
 
-  const totalRevenue = allPayments.reduce((sum, p) => sum + p.amount, 0);
-  const todayRevenue = todayPayments.reduce((sum, p) => sum + p.amount, 0);
-  const monthlyRevenue = monthPayments.reduce((sum, p) => sum + p.amount, 0);
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Payment not found" });
+    }
 
-  const totalEarnings = earnings.reduce((sum, e) => sum + e.amount, 0);
-  const platformFees = earnings.reduce((sum, e) => sum + (e.platformFee || 0), 0);
-  const netEarnings = totalEarnings - platformFees;
+    if (!isAdmin(req) && !isPaymentOwner(payment, userId)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view this payment status",
+      });
+    }
 
-  return {
-    totalRevenue,
-    todayRevenue,
-    monthlyRevenue,
-    pendingPayout: earnings.filter((e) => e.status === "pending").reduce((sum, e) => sum + e.amount, 0),
-    completedPayments: allPayments.length,
-    cancelledPayments: await Payment.countDocuments({ provider: providerId, status: "cancelled" }),
-    refunds: await Payment.countDocuments({ provider: providerId, status: "refunded" }),
-    totalEarnings,
-    platformFees,
-    netEarnings,
-  };
+    return res.status(200).json({
+      success: true,
+      status: payment.status,
+      paymentStatus: payment.status,
+      amount: payment.amount,
+      currency: payment.currency,
+      paymentId: normalizeId(payment._id),
+      bookingId: normalizeId(payment.booking),
+      transactionId:
+        payment.transactionId ||
+        payment.stripePaymentId ||
+        payment.stripeSessionId ||
+        null,
+      paidAt: payment.paidAt || null,
+      refundedAt: payment.refundedAt || null,
+    });
+  } catch (error) {
+    return sendError(res, error, "Failed to get payment status");
+  }
 };
 
-const calculateAdminStats = async () => {
-  const today = new Date();
-  const startOfToday = new Date(today.setHours(0, 0, 0, 0));
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+// ============================================================
+// EXPORT PAYMENTS CSV - ADMIN
+// ============================================================
 
-  const [totalRevenue, todayRevenue, monthlyRevenue, pendingPayments, refunds, totalEarnings, platformFees] =
-    await Promise.all([
-      Payment.aggregate([{ $match: { status: "paid" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
-      Payment.aggregate([
-        { $match: { status: "paid", paidAt: { $gte: startOfToday } } },
-        { $group: { _id: null, total: { $sum: "$amount" } } },
-      ]),
-      Payment.aggregate([
-        { $match: { status: "paid", paidAt: { $gte: startOfMonth } } },
-        { $group: { _id: null, total: { $sum: "$amount" } } },
-      ]),
-      Payment.countDocuments({ status: "pending" }),
-      Payment.countDocuments({ status: "refunded" }),
-      Earning.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]),
-      Earning.aggregate([{ $group: { _id: null, total: { $sum: "$platformFee" } } }]),
+export const exportPaymentsCSV = async (req, res) => {
+  try {
+    const payments = await Payment.find({})
+      .populate("traveler", "firstName lastName email")
+      .populate("booking")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const headers = [
+      "Payment ID",
+      "Traveler",
+      "Email",
+      "Amount",
+      "Currency",
+      "Status",
+      "Provider",
+      "Created At",
+    ];
+
+    const escapeCSV = (value) => {
+      if (value === null || value === undefined) return "";
+      const stringValue = String(value);
+      if (
+        stringValue.includes(",") ||
+        stringValue.includes('"') ||
+        stringValue.includes("\n")
+      ) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      }
+      return stringValue;
+    };
+
+    const rows = payments.map((payment) => [
+      payment._id,
+      payment.traveler
+        ? `${payment.traveler.firstName || ""} ${
+            payment.traveler.lastName || ""
+          }`.trim()
+        : "",
+      payment.traveler?.email || "",
+      payment.amount ?? "",
+      payment.currency || "",
+      payment.status || "",
+      payment.provider || "",
+      payment.createdAt ? new Date(payment.createdAt).toISOString() : "",
     ]);
 
-  return {
-    totalRevenue: totalRevenue[0]?.total || 0,
-    todayRevenue: todayRevenue[0]?.total || 0,
-    monthlyRevenue: monthlyRevenue[0]?.total || 0,
-    pendingPayments,
-    refunds,
-    totalEarnings: totalEarnings[0]?.total || 0,
-    platformFees: platformFees[0]?.total || 0,
-    netRevenue: (totalRevenue[0]?.total || 0) - (platformFees[0]?.total || 0),
-  };
+    const csv = [
+      headers.map(escapeCSV).join(","),
+      ...rows.map((row) => row.map(escapeCSV).join(",")),
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="payments.csv"'
+    );
+
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error("Export payments CSV error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export payments CSV",
+      error: error.message,
+    });
+  }
 };
 
 // ============================================================
-// ✅ REMOVED FUNCTIONS (Now in other controllers)
+// DEFAULT EXPORT
 // ============================================================
-// ❌ getProviderEarnings → Moved to earningController
-// ❌ getWalletBalance → Moved to walletController
-// ❌ requestWithdrawal → Moved to walletController
-// ❌ getWithdrawalHistory → Moved to walletController
-// ❌ getTransactionHistory → Moved to walletController
-// ❌ getCurrencies → Moved to currencyController
-// ❌ getExchangeRate → Moved to currencyController
-// ❌ getProviderSettlementCurrency → Moved to settlementController
-// ❌ updateProviderSettlementCurrency → Moved to settlementController
+
+export default {
+  createCheckoutSession,
+  verifyPayment,
+  getPaymentById,
+  getMyPayments,
+  getProviderPayments,
+  getAllPayments,
+  getTravelerPaymentStats,
+  getPaymentStats,
+  getProviderPaymentStats,
+  getAdminPaymentStats,
+  getProviderEarnings,
+  requestRefund,
+  processRefund,
+  getPaymentReceipt,
+  getPaymentAnalytics,
+  exportPaymentsCSV,
+  stripeWebhook,
+  getPaymentStatus,
+};

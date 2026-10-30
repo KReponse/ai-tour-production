@@ -1,7 +1,36 @@
+
 // backend/src/routes/earningRoutes.js
-// ✅ NEW - Earning Routes with Authentication v2
+
+// ============================================================
+// AI TOUR RWANDA - EARNING ROUTES
+// ============================================================
+//
+// Authentication:
+// - Every route requires authentication.
+// - Provider wallet/withdrawal routes require provider role.
+// - Admin routes require admin role.
+//
+// IMPORTANT:
+// - Stripe webhook does NOT belong here.
+// - Payment confirmation and Earning creation are handled by:
+//
+//     paymentController
+//          ↓
+//     paymentService
+//          ↓
+//     Payment = paid
+//          ↓
+//     Booking = paid
+//          ↓
+//     Earning = created once
+//
+// Correct Stripe webhook:
+// POST /api/payments/webhook/stripe
+//
+// ============================================================
 
 import express from "express";
+
 import {
   getEarnings,
   getEarningSummary,
@@ -14,77 +43,191 @@ import {
   getProviderEarningSummary,
   getAdminEarnings,
   updateWithdrawalStatus,
-  getPlatformFees
+  getPlatformFees,
 } from "../controllers/earningController.js";
-// ✅ Using Authentication v2
+
 import { AuthMiddleware } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
-console.log('✅ Earning routes loading...');
+// ============================================================
+// AUTHENTICATION
+// ============================================================
+//
+// Every earning route requires authentication.
+//
 
-// ============================================
-// ✅ ALL ROUTES ARE PROTECTED
-// ============================================
+router.use(
+  AuthMiddleware.authenticate
+);
 
-router.use(AuthMiddleware.authenticate);
+// ============================================================
+// MY EARNINGS
+// ============================================================
+//
+// These routes are kept for frontend compatibility.
+//
+// GET /api/earnings/my
+// GET /api/earnings/my/summary
+// GET /api/earnings/my/:id
+//
+// The controller performs the ownership check.
+//
 
-// ============================================
-// ✅ USER / TRAVELER EARNING ROUTES
-// ============================================
+router.get(
+  "/my",
+  getEarnings
+);
 
-// Get my earnings
-router.get("/my", getEarnings);
+router.get(
+  "/my/summary",
+  getEarningSummary
+);
 
-// Get earning summary
-router.get("/my/summary", getEarningSummary);
+router.get(
+  "/my/:id",
+  getEarningDetails
+);
 
-// Get earning details by ID
-router.get("/my/:id", getEarningDetails);
+// ============================================================
+// PROVIDER WALLET / WITHDRAWAL
+// ============================================================
+//
+// Only providers can access these routes.
+//
+// Wallet and withdrawal operations must never be available
+// to ordinary travelers.
+//
 
-// ============================================
-// ✅ WITHDRAWAL ROUTES
-// ============================================
+router.get(
+  "/withdrawable",
+  AuthMiddleware.requireRole("provider"),
+  getWithdrawableBalance
+);
 
-// Get withdrawable balance
-router.get("/withdrawable", getWithdrawableBalance);
+router.post(
+  "/withdraw",
+  AuthMiddleware.requireRole("provider"),
+  requestWithdrawal
+);
 
-// Request withdrawal
-router.post("/withdraw", requestWithdrawal);
+router.get(
+  "/withdrawals",
+  AuthMiddleware.requireRole("provider"),
+  getWithdrawalHistory
+);
 
-// Get withdrawal history
-router.get("/withdrawals", getWithdrawalHistory);
+// ============================================================
+// TRANSACTION HISTORY
+// ============================================================
+//
+// Provider transaction history.
+//
+// The controller also uses the authenticated user's provider ID,
+// so a provider cannot request another provider's transactions.
+//
 
-// ============================================
-// ✅ TRANSACTION ROUTES
-// ============================================
+router.get(
+  "/transactions",
+  AuthMiddleware.requireRole("provider"),
+  getTransactionHistory
+);
 
-// Get transaction history
-router.get("/transactions", getTransactionHistory);
+// ============================================================
+// PROVIDER EARNINGS
+// ============================================================
+//
+// Explicit provider endpoints.
+//
+// GET /api/earnings/provider
+// GET /api/earnings/provider/summary
+//
 
-// ============================================
-// ✅ PROVIDER ROUTES
-// ============================================
+router.get(
+  "/provider",
+  AuthMiddleware.requireRole("provider"),
+  getProviderEarnings
+);
 
-// Get provider earnings (requires provider role)
-router.get("/provider", AuthMiddleware.requireRole('provider'), getProviderEarnings);
+router.get(
+  "/provider/summary",
+  AuthMiddleware.requireRole("provider"),
+  getProviderEarningSummary
+);
 
-// Get provider earning summary
-router.get("/provider/summary", AuthMiddleware.requireRole('provider'), getProviderEarningSummary);
+// ============================================================
+// ADMIN EARNINGS
+// ============================================================
+//
+// Admin-only financial management.
+//
+// GET:
+//   /api/earnings/admin
+//   /api/earnings/admin/fees
+//
+// PUT:
+//   /api/earnings/admin/withdrawals/:id
+//
+// Withdrawal status flow:
+//
+//   pending
+//      ↓
+//   approved
+//      ↓
+//   paid
+//
+// Or:
+//
+//   pending → rejected
+//   approved → rejected
+//
+// ============================================================
 
-// ============================================
-// ✅ ADMIN ROUTES (Admin Only)
-// ============================================
+router.get(
+  "/admin",
+  AuthMiddleware.requireRole("admin"),
+  getAdminEarnings
+);
 
-// Admin: Get all earnings
-router.get("/admin", AuthMiddleware.requireRole('admin'), getAdminEarnings);
+router.put(
+  "/admin/withdrawals/:id",
+  AuthMiddleware.requireRole("admin"),
+  updateWithdrawalStatus
+);
 
-// Admin: Update withdrawal status
-router.put("/admin/withdrawals/:id", AuthMiddleware.requireRole('admin'), updateWithdrawalStatus);
+router.get(
+  "/admin/fees",
+  AuthMiddleware.requireRole("admin"),
+  getPlatformFees
+);
 
-// Admin: Get platform fees
-router.get("/admin/fees", AuthMiddleware.requireRole('admin'), getPlatformFees);
-
-console.log('✅ All earning routes registered');
+// ============================================================
+// STRIPE WEBHOOK
+// ============================================================
+//
+// ❌ DO NOT ADD STRIPE WEBHOOK HERE.
+//
+// The Stripe webhook belongs exclusively to paymentRoutes:
+//
+// POST /api/payments/webhook/stripe
+//
+// Flow:
+//
+// Stripe
+//   ↓
+// paymentController.stripeWebhook
+//   ↓
+// paymentService.handleWebhook
+//   ↓
+// Payment = paid
+//   ↓
+// Booking = paid
+//   ↓
+// Earning = created once
+//
+// This prevents duplicate payment confirmation,
+// duplicate Earning creation and inconsistent financial state.
+//
+// ============================================================
 
 export default router;

@@ -12,6 +12,12 @@
 // - Listing media fields are populated
 // - Notifications are protected from breaking booking operations
 // - ✅ FIXED: Date normalization for same-day bookings
+// - ✅ FIXED: Cancellation now returns correct HTTP status codes
+//            (400/403/404 instead of generic 500)
+// - ✅ FIXED: Cancellation is idempotent — repeated cancels return
+//            the same result (200 with current booking)
+// - ✅ FIXED: Cancel flow no longer re-validates startDate on
+//            past-dated bookings (paired with Booking.js validator fix)
 // ============================================================
 
 import Booking from "../models/Booking.js";
@@ -105,19 +111,43 @@ const normalizeBookingDate = (value) => {
 
 
 // ============================================================
+// ✅ ERROR → HTTP STATUS MAPPER
+// ============================================================
+// Central helper so every cancel-path error gets the correct
+// status code instead of blindly returning 500.
+//
+// Rules:
+// - ValidationError          → 400 (client-side input invalid)
+// - CastError (bad ObjectId) → 400 (client-side input invalid)
+// - errors with .status      → use that status (thrown by service/model)
+// - everything else          → 500 (truly unexpected)
+// ============================================================
+
+const resolveErrorStatus = (error) => {
+  if (!error) return 500;
+
+  // Mongoose validation errors are always client input issues
+  if (error.name === "ValidationError") return 400;
+
+  // Mongoose cast errors (bad ObjectId, bad type) are client input issues
+  if (error.name === "CastError") return 400;
+
+  // Explicit status set by controller/model code (e.g. err.status = 403)
+  if (typeof error.status === "number") return error.status;
+
+  // Explicit statusCode set by some libraries
+  if (typeof error.statusCode === "number") return error.statusCode;
+
+  // Default
+  return 500;
+};
+
+
+// ============================================================
 // CREATE BOOKING
 // ============================================================
 // IMPORTANT:
 // Email verification is intentionally NOT checked here.
-//
-// Required:
-// - authenticated user
-//
-// Not required:
-// - verified email
-//
-// This fixes:
-// 403 "Please verify your email address first"
 // ============================================================
 
 export const createBooking = async (req, res) => {
@@ -142,10 +172,6 @@ export const createBooking = async (req, res) => {
 
     const user = req.user;
 
-    // ----------------------------------------------------------
-    // Authentication
-    // ----------------------------------------------------------
-
     if (!user) {
       console.log("❌ No authenticated user");
 
@@ -154,10 +180,6 @@ export const createBooking = async (req, res) => {
         message: "Authentication required",
       });
     }
-
-    // ----------------------------------------------------------
-    // Providers cannot create traveler bookings
-    // ----------------------------------------------------------
 
     if (user.role === "provider") {
       return res.status(403).json({
@@ -172,10 +194,6 @@ export const createBooking = async (req, res) => {
       user.isEmailVerified
     );
 
-    // ----------------------------------------------------------
-    // Request data
-    // ----------------------------------------------------------
-
     const {
       listingId,
       startDate,
@@ -189,20 +207,12 @@ export const createBooking = async (req, res) => {
     console.log("📌 endDate:", endDate);
     console.log("📌 numberOfPeople:", numberOfPeople);
 
-    // ----------------------------------------------------------
-    // Validate listing ID
-    // ----------------------------------------------------------
-
     if (!listingId) {
       return res.status(400).json({
         success: false,
         message: "listingId is required",
       });
     }
-
-    // ----------------------------------------------------------
-    // Validate number of people
-    // ----------------------------------------------------------
 
     const peopleCount = Number(numberOfPeople);
 
@@ -212,10 +222,6 @@ export const createBooking = async (req, res) => {
         message: "numberOfPeople must be at least 1",
       });
     }
-
-    // ----------------------------------------------------------
-    // Get listing
-    // ----------------------------------------------------------
 
     const entity = await getEntity(listingId);
 
@@ -238,10 +244,6 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // Validate provider
-    // ----------------------------------------------------------
-
     if (!entity.providerId) {
       console.error(
         "❌ Listing has no provider:",
@@ -255,17 +257,12 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // ==========================================================
-    // ✅ FIXED: Date Normalization
-    // ==========================================================
-
     const start = normalizeBookingDate(startDate);
     let end = normalizeBookingDate(endDate);
 
     console.log("📅 Normalized start:", start);
     console.log("📅 Normalized end:", end);
 
-    // ✅ Validate start date
     if (!start) {
       return res.status(400).json({
         success: false,
@@ -273,7 +270,6 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // ✅ Check if start date is in the past
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -284,21 +280,18 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // ✅ If no end date, set to start + 1 day
     if (!end) {
       end = new Date(start);
       end.setDate(end.getDate() + 1);
       console.log("📅 No end date provided, set to:", end);
     }
 
-    // ✅ If same day, make it a 1-day booking (end = start + 1 day)
     if (end.getTime() === start.getTime()) {
       end = new Date(start);
       end.setDate(end.getDate() + 1);
       console.log("📅 Same day booking, set end to:", end);
     }
 
-    // ✅ Only reject if end is truly before start
     if (end < start) {
       return res.status(400).json({
         success: false,
@@ -307,14 +300,6 @@ export const createBooking = async (req, res) => {
     }
 
     console.log("📅 Final dates - start:", start, "end:", end);
-
-    // ==========================================================
-    // End of date fix
-    // ==========================================================
-
-    // ----------------------------------------------------------
-    // Duplicate booking check
-    // ----------------------------------------------------------
 
     const hasActive = await Booking.hasActiveBooking(
       user._id,
@@ -344,10 +329,6 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // Calculate total price
-    // ----------------------------------------------------------
-
     const price = Number(entity.price || 0);
 
     const totalPrice = price * peopleCount;
@@ -355,10 +336,6 @@ export const createBooking = async (req, res) => {
     console.log("📌 price:", price);
     console.log("📌 people:", peopleCount);
     console.log("📌 totalPrice:", totalPrice);
-
-    // ----------------------------------------------------------
-    // Booking data
-    // ----------------------------------------------------------
 
     const bookingData = {
       user: user._id,
@@ -387,10 +364,6 @@ export const createBooking = async (req, res) => {
 
     console.log("📌 Creating booking:", bookingData);
 
-    // ----------------------------------------------------------
-    // Create booking
-    // ----------------------------------------------------------
-
     const booking = await Booking.create(
       bookingData
     );
@@ -400,27 +373,15 @@ export const createBooking = async (req, res) => {
       booking._id
     );
 
-    // ----------------------------------------------------------
-    // Populate listing
-    // ----------------------------------------------------------
-
     await booking.populate(
       "listing",
       "title location price coverImage coverMedia coverMediaType galleryImages videos slug"
     );
 
-    // ----------------------------------------------------------
-    // Populate provider
-    // ----------------------------------------------------------
-
     await booking.populate(
       "provider",
       "name email profileImage"
     );
-
-    // ----------------------------------------------------------
-    // Notification
-    // ----------------------------------------------------------
 
     try {
       await createNotification({
@@ -442,10 +403,6 @@ export const createBooking = async (req, res) => {
         notificationError.message
       );
     }
-
-    // ----------------------------------------------------------
-    // Response
-    // ----------------------------------------------------------
 
     return res.status(201).json({
       success: true,
@@ -538,8 +495,6 @@ export const getMyBookings = async (req, res) => {
       }
     }
 
-    // Search booking code directly.
-    // Listing title/location search is handled after population.
     if (search && search.trim()) {
       filter.bookingCode = {
         $regex: search.trim(),
@@ -723,14 +678,23 @@ export const getBookingById = async (
 
 
 // ============================================================
-// CANCEL BOOKING
+// ✅ CANCEL BOOKING (FULLY FIXED)
+// ============================================================
+// Requirements addressed:
+// 1. Cancels past-dated bookings ✅ (paired with Booking.js validator fix)
+// 2. Idempotent — double-cancel returns 200 with current state ✅
+// 3. Correct HTTP status codes — never returns 500 for user errors ✅
+// 4. Permission checks — owner or admin only ✅
+// 5. Completed / rejected bookings cannot be cancelled ✅
+// 6. Only cancellation fields mutated — no overwrites ✅
+// 7. Prevents automatic 4xx retries on the frontend ✅
 // ============================================================
 
-export const cancelBooking = async (
-  req,
-  res
-) => {
+export const cancelBooking = async (req, res) => {
   try {
+    // ----------------------------------------------------------
+    // 1. Auth
+    // ----------------------------------------------------------
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -738,13 +702,33 @@ export const cancelBooking = async (
       });
     }
 
-    const { reason } =
-      req.body || {};
+    // ----------------------------------------------------------
+    // 2. Validate input — reason must be a string if provided
+    // ----------------------------------------------------------
+    const { reason } = req.body || {};
 
-    const booking =
-      await Booking.findById(
-        req.params.id
-      );
+    if (reason !== undefined && reason !== null && typeof reason !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Cancellation reason must be a string",
+      });
+    }
+
+    // ----------------------------------------------------------
+    // 3. Find booking (catch bad ObjectId here, not in generic 500)
+    // ----------------------------------------------------------
+    let booking;
+    try {
+      booking = await Booking.findById(req.params.id);
+    } catch (castErr) {
+      if (castErr.name === "CastError") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid booking ID format",
+        });
+      }
+      throw castErr;
+    }
 
     if (!booking) {
       return res.status(404).json({
@@ -753,9 +737,11 @@ export const cancelBooking = async (
       });
     }
 
+    // ----------------------------------------------------------
+    // 4. Permission check — owner or admin
+    // ----------------------------------------------------------
     const isOwner =
-      booking.user.toString() ===
-      req.user._id.toString();
+      booking.user.toString() === req.user._id.toString();
 
     const isAdmin =
       req.user.role === "admin";
@@ -768,19 +754,56 @@ export const cancelBooking = async (
       });
     }
 
-    if (
-      booking.status === "cancelled" ||
-      booking.status === "completed"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          `Booking cannot be cancelled because it is already ${booking.status}`,
+    // ----------------------------------------------------------
+    // 5. Idempotency — already cancelled → 200 with same state
+    //    (Don't 4xx here: the frontend shows success either way,
+    //     and this prevents retry-loops on stale UI.)
+    // ----------------------------------------------------------
+    if (booking.status === "cancelled") {
+      return res.status(200).json({
+        success: true,
+        message: "Booking is already cancelled",
+        booking,
+        alreadyCancelled: true,
       });
     }
 
+    // ----------------------------------------------------------
+    // 6. Business rule — cannot cancel completed bookings
+    // ----------------------------------------------------------
+    if (booking.status === "completed") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Booking cannot be cancelled because it is already completed",
+      });
+    }
+
+    // ----------------------------------------------------------
+    // 7. Business rule — only cancellable statuses
+    // ----------------------------------------------------------
+    const cancellableStatuses = [
+      "pending_payment",
+      "paid",
+      "confirmed",
+    ];
+
+    if (!cancellableStatuses.includes(booking.status)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          `Booking cannot be cancelled. Current status: ${booking.status}`,
+      });
+    }
+
+    // ----------------------------------------------------------
+    // 8. Perform cancellation via model instance method
+    //    (model method mutates only cancel-related fields;
+    //     startDate validator fix in Booking.js ensures this
+    //     doesn't fail on past-dated bookings)
+    // ----------------------------------------------------------
     const cancellationReason =
-      reason ||
+      (reason && reason.trim()) ||
       "User requested cancellation";
 
     await booking.cancelBooking(
@@ -788,6 +811,9 @@ export const cancelBooking = async (
       req.user._id
     );
 
+    // ----------------------------------------------------------
+    // 9. Notify provider (best-effort, non-blocking on failure)
+    // ----------------------------------------------------------
     try {
       await createNotification({
         recipient: booking.provider,
@@ -810,24 +836,37 @@ export const cancelBooking = async (
       );
     }
 
-    return res.json({
+    // ----------------------------------------------------------
+    // 10. Success
+    // ----------------------------------------------------------
+    return res.status(200).json({
       success: true,
-      message:
-        "Booking cancelled successfully",
+      message: "Booking cancelled successfully",
       booking,
     });
 
   } catch (error) {
-    console.error(
-      "❌ Cancel booking error:",
-      error
-    );
+    // ----------------------------------------------------------
+    // 11. Error handling — correct HTTP status per error type
+    // ----------------------------------------------------------
+    console.error("❌ Cancel booking error:", error);
 
-    return res.status(500).json({
+    const status = resolveErrorStatus(error);
+
+    // Validation errors get a cleaner message (no "Booking validation failed:" prefix)
+    let message = error.message || "Failed to cancel booking";
+    if (error.name === "ValidationError" && error.errors) {
+      const fieldMessages = Object.values(error.errors)
+        .map((e) => e.message)
+        .filter(Boolean);
+      if (fieldMessages.length > 0) {
+        message = fieldMessages.join("; ");
+      }
+    }
+
+    return res.status(status).json({
       success: false,
-      message:
-        error.message ||
-        "Failed to cancel booking",
+      message,
     });
   }
 };

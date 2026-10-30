@@ -1,4 +1,5 @@
 // src/pages/admin/Tours.jsx
+// ✅ Refresh bus wired: subscribes to tours/tours:admin/listings, broadcasts on approve/reject/delete
 
 import { useEffect, useState } from 'react';
 import axios from 'axios';
@@ -17,6 +18,8 @@ import {
   User,
   Clock,
 } from 'lucide-react';
+import useRefreshOn from '../../hooks/useRefreshOn';
+import { refreshMany } from '../../utils/dataRefresh';
 
 // ===============================
 // AI TOUR COLORS
@@ -41,14 +44,12 @@ const Tours = () => {
 
   const token = localStorage.getItem('token');
 
-  // ============= FETCH TOURS =============
   const fetchTours = async () => {
     try {
       setLoading(true);
       const { data } = await axios.get(`${API_URL}/tours`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('✅ Admin tours:', data);
       setTours(data.tours || []);
       setFilteredTours(data.tours || []);
     } catch (error) {
@@ -63,7 +64,9 @@ const Tours = () => {
     fetchTours();
   }, []);
 
-  // ============= SEARCH & FILTER =============
+  // 🔄 Cross-page sync: refetch on tour changes from anywhere
+  useRefreshOn(['tours', 'tours:admin', 'listings'], fetchTours);
+
   useEffect(() => {
     let filtered = [...tours];
 
@@ -82,13 +85,11 @@ const Tours = () => {
     setFilteredTours(filtered);
   }, [searchTerm, statusFilter, tours]);
 
-  // ============= NOTIFICATION =============
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // ============= APPROVE TOUR =============
   const approveTour = async (id) => {
     if (!window.confirm('Are you sure you want to approve this tour?')) return;
 
@@ -99,6 +100,10 @@ const Tours = () => {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      // 🔄 Broadcast: approved tour becomes publicly bookable
+      refreshMany('tours', 'tours:admin', 'listings');
+
       showNotification('Tour approved successfully! ✅', 'success');
       await fetchTours();
     } catch (error) {
@@ -109,7 +114,6 @@ const Tours = () => {
     }
   };
 
-  // ============= REJECT TOUR =============
   const rejectTour = async (id) => {
     if (!window.confirm('Are you sure you want to reject this tour?')) return;
 
@@ -120,6 +124,10 @@ const Tours = () => {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      // 🔄 Broadcast: rejected tour removed from public browse
+      refreshMany('tours', 'tours:admin', 'listings');
+
       showNotification('Tour rejected ❌', 'info');
       await fetchTours();
     } catch (error) {
@@ -130,7 +138,6 @@ const Tours = () => {
     }
   };
 
-  // ============= DELETE TOUR =============
   const deleteTour = async (id) => {
     if (!window.confirm('⚠️ Delete this tour permanently? This action cannot be undone!')) return;
 
@@ -139,6 +146,10 @@ const Tours = () => {
       await axios.delete(`${API_URL}/tours/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+
+      // 🔄 Broadcast: deleted tour vanishes from public browse
+      refreshMany('tours', 'tours:admin', 'listings');
+
       showNotification('Tour deleted successfully 🗑️', 'success');
       await fetchTours();
     } catch (error) {
@@ -149,7 +160,6 @@ const Tours = () => {
     }
   };
 
-  // ============= GET STATUS BADGE =============
   const getStatusBadge = (status) => {
     const styles = {
       approved: 'bg-[#0D9488]/10 text-[#0D9488] dark:bg-[#0D9488]/20 dark:text-[#0D9488]',
@@ -159,7 +169,6 @@ const Tours = () => {
     return styles[status] || styles.pending;
   };
 
-  // ============= LOADING =============
   if (loading) {
     return (
       <div className="flex flex-col justify-center items-center h-[400px] gap-4">
@@ -172,7 +181,6 @@ const Tours = () => {
     );
   }
 
-  // ============= RENDER =============
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 p-6">
 
@@ -378,7 +386,6 @@ const Tours = () => {
             </table>
           )}
 
-          {/* TABLE FOOTER */}
           <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
             <span>Showing {filteredTours.length} of {tours.length} tours</span>
             <span>Last updated: {new Date().toLocaleString()}</span>

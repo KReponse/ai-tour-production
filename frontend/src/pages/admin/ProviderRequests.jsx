@@ -1,4 +1,16 @@
 // src/pages/admin/ProviderRequests.jsx
+// ============================================================
+// AI TOUR — ADMIN PROVIDER REQUESTS (FINAL)
+// ============================================================
+// ✅ Broadcasts every approve / reject / needs-info mutation to
+//    'providers', 'provider-requests', and 'dashboard' so every
+//    consumer stays in sync.
+// ✅ Auto-refreshes when the list is invalidated by another
+//    action (e.g. approving from /admin/ProviderRequestDetails
+//    in another tab).
+// ✅ Preserves all UI: search, filter, skeleton, notification,
+//    status badge, modal, actions.
+// ============================================================
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -16,33 +28,14 @@ import {
   Users,
   Eye,
   User,
-  Globe,
-  Instagram,
-  Facebook,
-  Twitter,
-  Linkedin,
-  Youtube,
-  CreditCard,
-  FileText,
-  Image,
-  ChevronDown,
-  ChevronUp,
-  FileCheck,
   Clock,
-  Clock as ClockIcon,
-  MapPin as MapPinIcon,
-  BookOpen,
-  ExternalLink,
-  Download,
-  Calendar,
-  DollarSign,
-  Shield,
-  RefreshCw,
 } from "lucide-react";
 import {
   getProviderRequests,
   updateProviderRequest,
 } from "../../services/adminService";
+import useRefreshOn from "../../hooks/useRefreshOn";
+import { refreshMany } from "../../utils/dataRefresh";
 
 // ===============================
 // AI TOUR COLORS
@@ -137,7 +130,8 @@ const StatusBadge = ({ status, size = "default" }) => {
 
   const style = styles[status?.toLowerCase()] || styles.pending;
   const Icon = style.icon;
-  const sizeClasses = size === "small" ? "px-2 py-1 text-xs" : "px-4 py-2 text-sm";
+  const sizeClasses =
+    size === "small" ? "px-2 py-1 text-xs" : "px-4 py-2 text-sm";
 
   return (
     <span
@@ -186,12 +180,16 @@ const ProviderRequests = () => {
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ============= LOAD DATA ON MOUNT =============
+  // ============= LOAD ON MOUNT =============
   useEffect(() => {
     fetchRequests();
   }, [fetchRequests]);
+
+  // ✅ Auto-refresh when any other page mutates provider data
+  useRefreshOn(["providers", "provider-requests"], fetchRequests);
 
   // ============= SEARCH & FILTER =============
   useEffect(() => {
@@ -224,28 +222,51 @@ const ProviderRequests = () => {
   }, []);
 
   // ============= NAVIGATE TO DETAILS =============
- const viewDetails = useCallback((requestId) => {
-  navigate(`/admin/provider-requests/${requestId}`);
-}, [navigate]);
-  // ============= HANDLE APPROVE =============
-  const handleApprove = useCallback(async (id) => {
-    if (!window.confirm("Are you sure you want to approve this provider?")) return;
+  const viewDetails = useCallback(
+    (requestId) => {
+      navigate(`/admin/provider-requests/${requestId}`);
+    },
+    [navigate]
+  );
 
-    try {
-      setActionLoading(id);
-      await updateProviderRequest(id, "approved");
-      showNotification("✅ Provider approved successfully!", "success");
-      await fetchRequests();
-    } catch (error) {
-      console.error("Error approving provider:", error);
-      showNotification(
-        error.response?.data?.message || "Failed to approve provider",
-        "error"
-      );
-    } finally {
-      setActionLoading(null);
-    }
-  }, [fetchRequests, showNotification]);
+  // ============= BROADCAST AFTER MUTATION =============
+  const broadcastProviderChange = useCallback(() => {
+    refreshMany(
+      "providers",
+      "provider-requests",
+      "users",
+      "dashboard"
+    );
+  }, []);
+
+  // ============= HANDLE APPROVE =============
+  const handleApprove = useCallback(
+    async (id) => {
+      if (
+        !window.confirm(
+          "Are you sure you want to approve this provider?"
+        )
+      )
+        return;
+
+      try {
+        setActionLoading(id);
+        await updateProviderRequest(id, "approved");
+        showNotification("✅ Provider approved successfully!", "success");
+        await fetchRequests();
+        // ✅ Notify every other consumer
+        broadcastProviderChange();
+      } catch (error) {
+        showNotification(
+          error.response?.data?.message || "Failed to approve provider",
+          "error"
+        );
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [fetchRequests, showNotification, broadcastProviderChange]
+  );
 
   // ============= OPEN STATUS MODAL =============
   const openStatusModal = useCallback((request, status) => {
@@ -257,7 +278,11 @@ const ProviderRequests = () => {
 
   // ============= SUBMIT STATUS UPDATE =============
   const submitStatusUpdate = useCallback(async () => {
-    if (!adminNotes.trim() && (selectedStatus === "rejected" || selectedStatus === "needs_information")) {
+    if (
+      !adminNotes.trim() &&
+      (selectedStatus === "rejected" ||
+        selectedStatus === "needs_information")
+    ) {
       showNotification("Please provide admin notes", "error");
       return;
     }
@@ -275,8 +300,9 @@ const ProviderRequests = () => {
         "success"
       );
       await fetchRequests();
+      // ✅ Notify every other consumer
+      broadcastProviderChange();
     } catch (error) {
-      console.error("Error updating status:", error);
       showNotification(
         error.response?.data?.message || "Failed to update status",
         "error"
@@ -284,14 +310,22 @@ const ProviderRequests = () => {
     } finally {
       setActionLoading(null);
     }
-  }, [selectedRequest, selectedStatus, adminNotes, fetchRequests, showNotification]);
+  }, [
+    selectedRequest,
+    selectedStatus,
+    adminNotes,
+    fetchRequests,
+    showNotification,
+    broadcastProviderChange,
+  ]);
 
-  // ============= GET STATUS COUNT =============
-  const getStatusCount = useCallback((status) => {
-    return requests.filter((r) => r.status === status).length;
-  }, [requests]);
+  // ============= STATUS COUNT =============
+  const getStatusCount = useCallback(
+    (status) => requests.filter((r) => r.status === status).length,
+    [requests]
+  );
 
-  // ============= RENDER =============
+  // ============= LOADING =============
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 p-6">
@@ -319,24 +353,27 @@ const ProviderRequests = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-950 dark:to-gray-900 p-6">
-      
-      {/* NOTIFICATION */}
       {notification && (
-        <div className={`fixed top-6 right-6 z-50 p-4 rounded-2xl shadow-xl flex items-center gap-3 max-w-md ${
-          notification.type === "success"
-            ? "bg-[#0D9488] text-white"
-            : notification.type === "error"
-            ? "bg-red-600 text-white"
-            : "bg-[#F59E0B] text-white"
-        }`}>
-          {notification.type === "success" && <CheckCircle className="w-5 h-5 flex-shrink-0" />}
-          {notification.type === "error" && <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+        <div
+          className={`fixed top-6 right-6 z-50 p-4 rounded-2xl shadow-xl flex items-center gap-3 max-w-md ${
+            notification.type === "success"
+              ? "bg-[#0D9488] text-white"
+              : notification.type === "error"
+              ? "bg-red-600 text-white"
+              : "bg-[#F59E0B] text-white"
+          }`}
+        >
+          {notification.type === "success" && (
+            <CheckCircle className="w-5 h-5 flex-shrink-0" />
+          )}
+          {notification.type === "error" && (
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          )}
           <span>{notification.message}</span>
         </div>
       )}
 
       <div className="max-w-7xl mx-auto">
-        
         {/* HEADER */}
         <div className="mb-8">
           <div className="flex items-center gap-3">
@@ -348,7 +385,8 @@ const ProviderRequests = () => {
                 Provider Verification
               </h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">
-                Manage provider applications • {filteredRequests.length} requests
+                Manage provider applications • {filteredRequests.length}{" "}
+                requests
               </p>
             </div>
           </div>
@@ -373,14 +411,22 @@ const ProviderRequests = () => {
             className="h-12 px-4 rounded-2xl border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] focus:border-transparent outline-none min-w-[160px]"
           >
             <option value="all">All Status</option>
-            <option value="pending">Pending ({getStatusCount("pending")})</option>
-            <option value="approved">Approved ({getStatusCount("approved")})</option>
-            <option value="rejected">Rejected ({getStatusCount("rejected")})</option>
-            <option value="needs_information">Needs Info ({getStatusCount("needs_information")})</option>
+            <option value="pending">
+              Pending ({getStatusCount("pending")})
+            </option>
+            <option value="approved">
+              Approved ({getStatusCount("approved")})
+            </option>
+            <option value="rejected">
+              Rejected ({getStatusCount("rejected")})
+            </option>
+            <option value="needs_information">
+              Needs Info ({getStatusCount("needs_information")})
+            </option>
           </select>
         </div>
 
-        {/* REQUESTS GRID */}
+        {/* REQUESTS */}
         {filteredRequests.length === 0 ? (
           <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-800 p-12 text-center">
             <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
@@ -426,7 +472,9 @@ const ProviderRequests = () => {
                       </p>
                       <p className="flex items-center gap-2 text-sm truncate">
                         <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        {[request.city, request.country].filter(Boolean).join(", ") || "N/A"}
+                        {[request.city, request.country]
+                          .filter(Boolean)
+                          .join(", ") || "N/A"}
                       </p>
                     </div>
                   </div>
@@ -448,7 +496,6 @@ const ProviderRequests = () => {
                     <Eye className="w-4 h-4" />
                     View Details
                   </button>
-                  
 
                   {request.status === "pending" && (
                     <>
@@ -466,7 +513,9 @@ const ProviderRequests = () => {
                       </button>
 
                       <button
-                        onClick={() => openStatusModal(request, "rejected")}
+                        onClick={() =>
+                          openStatusModal(request, "rejected")
+                        }
                         disabled={actionLoading === request._id}
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition-colors disabled:opacity-50"
                       >
@@ -475,7 +524,9 @@ const ProviderRequests = () => {
                       </button>
 
                       <button
-                        onClick={() => openStatusModal(request, "needs_information")}
+                        onClick={() =>
+                          openStatusModal(request, "needs_information")
+                        }
                         disabled={actionLoading === request._id}
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#F59E0B]/80 text-white font-medium transition-colors disabled:opacity-50"
                       >
@@ -490,7 +541,7 @@ const ProviderRequests = () => {
           </div>
         )}
 
-        {/* STATUS SUMMARY */}
+        {/* SUMMARY */}
         {requests.length > 0 && (
           <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 border border-gray-200 dark:border-gray-800 text-center">
@@ -521,7 +572,7 @@ const ProviderRequests = () => {
         )}
       </div>
 
-      {/* STATUS UPDATE MODAL */}
+      {/* MODAL */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-lg shadow-2xl">

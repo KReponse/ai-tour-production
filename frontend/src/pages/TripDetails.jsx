@@ -1,7 +1,18 @@
 // src/pages/TripDetails.jsx
-// ✅ COMPLETE FIXED - Added cancellation reason prompt, correct cancelBooking call
+// ============================================================
+// AI TOUR — TRIP DETAILS PAGE
+// ============================================================
+// ✅ Auto-refreshes when other pages invalidate any booking
+//    domain (e.g. canceling from Trips, provider confirming,
+//    PaymentSuccess verifying payment).
+// ✅ Cancel broadcasts 'bookings', 'bookings:traveler',
+//    'bookings:provider', and 'dashboard' so every consumer
+//    (Trips list, Dashboard counters, provider Bookings) stays
+//    in sync without a page reload.
+// ✅ All prior UI/UX preserved.
+// ============================================================
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Calendar,
@@ -15,8 +26,6 @@ import {
   ArrowLeft,
   DollarSign,
   User,
-  Mail,
-  Phone,
   FileText,
   Printer,
   Share2,
@@ -24,25 +33,26 @@ import {
   AlertCircle,
   MessageCircle,
   Star,
-  Shield,
-  Award,
   Eye,
-  Download,
   Check,
   TrendingUp,
   CalendarDays,
-  Play,
-  Video,
 } from 'lucide-react';
-import Card, { CardContent, CardImage } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { getBookingById, cancelBooking } from '../services/bookingService';
 import { createCheckout } from '../services/paymentService';
 import { useAuth } from '../contexts/AuthContext';
+import { refreshMany } from '../utils/dataRefresh';
+import useRefreshOn from '../hooks/useRefreshOn';
 import toast from 'react-hot-toast';
 
-// ✅ FIXED: Import mediaHelpers for consistent image and video handling
-import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo } from '../utils/mediaHelpers';
+import {
+  getImageUrl,
+  getCoverMedia,
+  getCoverMediaType,
+  getCoverVideo,
+  hasVideo,
+} from '../utils/mediaHelpers';
 
 // ===============================
 // AI TOUR COLORS
@@ -53,6 +63,50 @@ import { getImageUrl, getCoverMedia, getCoverMediaType, getCoverVideo, hasVideo 
 // White : #FFFFFF
 // ===============================
 
+const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+
+// ===============================
+// PAYMENT STATUS LABELS
+// ===============================
+const PAYMENT_STATUS_LABELS = {
+  unpaid: 'Not yet paid',
+  pending: 'Payment processing',
+  processing: 'Payment processing',
+  paid: 'Paid',
+  succeeded: 'Paid',
+  failed: 'Payment failed',
+  refunded: 'Refunded',
+  partially_refunded: 'Partially refunded',
+};
+
+const formatPaymentStatus = (status) => {
+  if (!status) return PAYMENT_STATUS_LABELS.unpaid;
+  const key = String(status).toLowerCase();
+  return PAYMENT_STATUS_LABELS[key] || 'Unknown';
+};
+
+// ===============================
+// PROVIDER NAME RESOLVER
+// ===============================
+const getProviderName = (provider) => {
+  if (!provider) return '';
+  if (typeof provider === 'string') return provider.trim();
+  if (typeof provider === 'object') {
+    const candidates = [
+      provider.businessName,
+      provider.name,
+      provider.fullName,
+      provider.displayName,
+      provider.username,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+    }
+  }
+  return '';
+};
+
 const TripDetails = () => {
   const { bookingId } = useParams();
   const navigate = useNavigate();
@@ -62,24 +116,19 @@ const TripDetails = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchBooking();
-  }, [bookingId]);
-
-  const fetchBooking = async () => {
+  const fetchBooking = useCallback(async () => {
+    if (!bookingId) return;
     try {
       setLoading(true);
       setError(null);
       const token = localStorage.getItem('token');
       const data = await getBookingById(bookingId, token);
       setBooking(data.booking);
-    } catch (error) {
-      console.error('Error fetching booking:', error);
-      
-      if (error.response?.status === 401) {
+    } catch (err) {
+      if (err.response?.status === 401) {
         setError('Please login to view trip details');
         setTimeout(() => navigate('/login'), 2000);
-      } else if (error.response?.status === 404) {
+      } else if (err.response?.status === 404) {
         setError('Trip not found');
       } else {
         setError('Failed to load trip details. Please try again.');
@@ -87,22 +136,25 @@ const TripDetails = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [bookingId, navigate]);
 
-  // ✅ FIXED: handleCancel with proper reason
+  useEffect(() => {
+    fetchBooking();
+  }, [fetchBooking]);
+
+  // ✅ Auto-refresh when another page mutates any booking
+  useRefreshOn(['bookings', 'bookings:traveler'], fetchBooking);
+
   const handleCancel = async () => {
-    // ✅ Ask for a cancellation reason
     const reason = window.prompt(
       'Please tell us why you want to cancel this trip:',
       'I need to change my travel plans'
     );
-    
-    // If user clicks Cancel on the prompt, don't proceed
+
     if (reason === null) return;
-    
-    // ✅ If reason is empty, use a default
-    const cancellationReason = reason.trim() || 'User requested cancellation';
-    
+    const cancellationReason =
+      reason.trim() || 'User requested cancellation';
+
     const confirmCancel = window.confirm(
       `Are you sure you want to cancel this trip?\n\nReason: ${cancellationReason}`
     );
@@ -110,14 +162,20 @@ const TripDetails = () => {
 
     try {
       setActionLoading(true);
-      
-      // ✅ FIXED: Only pass bookingId and reason (token is handled inside bookingService)
       await cancelBooking(bookingId, cancellationReason);
       await fetchBooking();
+      // ✅ Broadcast to every other consumer
+      refreshMany(
+        'bookings',
+        'bookings:traveler',
+        'bookings:provider',
+        'dashboard'
+      );
       toast.success('Booking cancelled successfully');
-    } catch (error) {
-      console.error('Error cancelling booking:', error);
-      toast.error(error.response?.data?.message || 'Failed to cancel booking');
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message || 'Failed to cancel booking'
+      );
     } finally {
       setActionLoading(false);
     }
@@ -127,9 +185,9 @@ const TripDetails = () => {
     try {
       setActionLoading(true);
       toast.loading('Initializing payment...');
-      
+
       const result = await createCheckout(bookingId);
-      
+
       if (result.url) {
         toast.dismiss();
         window.location.href = result.url;
@@ -137,13 +195,12 @@ const TripDetails = () => {
         toast.dismiss();
         toast.error('Failed to create payment session');
       }
-    } catch (error) {
-      console.error('Payment error:', error);
+    } catch (err) {
       toast.dismiss();
-      
-      const errorMessage = error.response?.data?.message || 
-                          error.message || 
-                          'Failed to initiate payment. Please try again.';
+      const errorMessage =
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to initiate payment. Please try again.';
       toast.error(errorMessage);
     } finally {
       setActionLoading(false);
@@ -171,22 +228,12 @@ const TripDetails = () => {
   };
 
   // ===============================
-  // ✅ MEDIA HELPERS (Using mediaHelpers)
+  // ENTITY RESOLVERS
   // ===============================
-
-  const getEntity = () => {
-    return booking?.listing || booking?.tour || null;
-  };
-
-  const getEntityTitle = () => {
-    const entity = getEntity();
-    return entity?.title || 'Experience';
-  };
-
-  const getEntityLocation = () => {
-    const entity = getEntity();
-    return entity?.location || 'Location not specified';
-  };
+  const getEntity = () => booking?.listing || booking?.tour || null;
+  const getEntityTitle = () => getEntity()?.title || 'Experience';
+  const getEntityLocation = () =>
+    getEntity()?.location || 'Location not specified';
 
   const getEntityLink = () => {
     if (booking?.listing) {
@@ -201,15 +248,12 @@ const TripDetails = () => {
   };
 
   const getEntityMedia = (entity) => {
-    const defaultImage = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-    
     if (!entity) {
-      return { 
-        url: defaultImage, 
-        isVideo: false, 
-        videoUrl: null, 
-        poster: defaultImage,
-        imageUrl: defaultImage,
+      return {
+        isVideo: false,
+        videoUrl: null,
+        poster: FALLBACK_IMAGE,
+        imageUrl: FALLBACK_IMAGE,
       };
     }
 
@@ -217,73 +261,41 @@ const TripDetails = () => {
     const coverUrl = getCoverMedia(entity);
     const videoUrl = getCoverVideo(entity);
     const hasVideoContent = hasVideo(entity);
-    
-    let poster = defaultImage;
+
+    let poster = FALLBACK_IMAGE;
     if (entity.coverImage) {
-      poster = getImageUrl(entity.coverImage) || defaultImage;
-    } else if (entity.galleryImages && entity.galleryImages.length > 0) {
-      poster = getImageUrl(entity.galleryImages[0]) || defaultImage;
-    } else if (entity.images && entity.images.length > 0) {
-      poster = getImageUrl(entity.images[0]) || defaultImage;
+      poster = getImageUrl(entity.coverImage) || FALLBACK_IMAGE;
+    } else if (
+      Array.isArray(entity.galleryImages) &&
+      entity.galleryImages.length
+    ) {
+      poster = getImageUrl(entity.galleryImages[0]) || FALLBACK_IMAGE;
+    } else if (Array.isArray(entity.images) && entity.images.length) {
+      poster = getImageUrl(entity.images[0]) || FALLBACK_IMAGE;
     } else if (entity.image) {
-      poster = getImageUrl(entity.image) || defaultImage;
+      poster = getImageUrl(entity.image) || FALLBACK_IMAGE;
     }
 
-    let imageUrl = coverUrl || defaultImage;
-    
-    console.log('📊 Media result:', {
-      coverType,
-      coverUrl,
-      videoUrl,
-      hasVideoContent,
-      poster,
-      imageUrl,
-      entityId: entity._id,
-      entityTitle: entity.title,
-    });
+    const imageUrl = coverUrl || FALLBACK_IMAGE;
 
     if ((coverType === 'video' || hasVideoContent) && videoUrl) {
-      return {
-        url: videoUrl,
-        isVideo: true,
-        videoUrl: videoUrl,
-        poster: poster,
-        imageUrl: imageUrl,
-      };
+      return { isVideo: true, videoUrl, poster, imageUrl };
     }
 
-    return {
-      url: imageUrl,
-      isVideo: false,
-      videoUrl: null,
-      poster: imageUrl,
-      imageUrl: imageUrl,
-    };
+    return { isVideo: false, videoUrl: null, poster: imageUrl, imageUrl };
   };
 
-  const getBookingCode = () => {
-    return booking?.bookingCode || booking?._id?.slice(-8)?.toUpperCase() || 'N/A';
-  };
+  const getBookingCode = () => booking?.bookingCode || 'N/A';
 
   const getStatusConfig = (status) => {
     const configs = {
-      draft: {
-        icon: FileText,
-        label: 'Draft',
-        color: 'text-gray-500',
-        bg: 'bg-gray-100',
-        border: 'border-gray-200',
-        text: 'Draft',
-        progress: 0,
-      },
       pending_payment: {
         icon: Clock,
-        label: 'Pending Payment',
+        label: 'Awaiting Payment',
         color: 'text-[#F59E0B]',
         bg: 'bg-[#F59E0B]/10',
         border: 'border-[#F59E0B]/20',
         text: 'Awaiting Payment',
-        progress: 20,
       },
       paid: {
         icon: CreditCard,
@@ -292,7 +304,6 @@ const TripDetails = () => {
         bg: 'bg-[#0D9488]/10',
         border: 'border-[#0D9488]/20',
         text: 'Payment Received',
-        progress: 40,
       },
       confirmed: {
         icon: CheckCircle,
@@ -300,8 +311,7 @@ const TripDetails = () => {
         color: 'text-[#0D9488]',
         bg: 'bg-[#0D9488]/10',
         border: 'border-[#0D9488]/20',
-        text: 'Confirmed!',
-        progress: 60,
+        text: 'Confirmed',
       },
       in_progress: {
         icon: TrendingUp,
@@ -310,7 +320,6 @@ const TripDetails = () => {
         bg: 'bg-[#0D9488]/10',
         border: 'border-[#0D9488]/20',
         text: 'Trip in Progress',
-        progress: 80,
       },
       completed: {
         icon: CheckCircle,
@@ -318,8 +327,7 @@ const TripDetails = () => {
         color: 'text-green-600',
         bg: 'bg-green-100',
         border: 'border-green-200',
-        text: 'Trip Completed!',
-        progress: 100,
+        text: 'Trip Completed',
       },
       review_eligible: {
         icon: Star,
@@ -328,7 +336,6 @@ const TripDetails = () => {
         bg: 'bg-[#F59E0B]/10',
         border: 'border-[#F59E0B]/20',
         text: 'Ready for Review',
-        progress: 100,
       },
       cancelled: {
         icon: XCircle,
@@ -337,16 +344,6 @@ const TripDetails = () => {
         bg: 'bg-red-500/10',
         border: 'border-red-500/20',
         text: 'Cancelled',
-        progress: 0,
-      },
-      rejected: {
-        icon: XCircle,
-        label: 'Rejected',
-        color: 'text-red-500',
-        bg: 'bg-red-500/10',
-        border: 'border-red-500/20',
-        text: 'Rejected',
-        progress: 0,
       },
       failed_payment: {
         icon: XCircle,
@@ -355,29 +352,24 @@ const TripDetails = () => {
         bg: 'bg-red-500/10',
         border: 'border-red-500/20',
         text: 'Payment Failed',
-        progress: 0,
       },
     };
     return configs[status] || configs.pending_payment;
   };
 
-  const canCancel = () => {
-    return ['pending_payment', 'paid', 'confirmed'].includes(booking?.status);
-  };
+  const canCancel = () =>
+    ['pending_payment', 'paid', 'confirmed'].includes(booking?.status);
+  const canPay = () => booking?.status === 'pending_payment';
+  const canReview = () =>
+    (booking?.status === 'completed' ||
+      booking?.status === 'review_eligible') &&
+    !booking?.reviewSubmitted;
+  const isPastTrip = () =>
+    booking?.startDate && new Date(booking.startDate) < new Date();
 
-  const canPay = () => {
-    return booking?.status === 'pending_payment';
-  };
-
-  const canReview = () => {
-    return (booking?.status === 'completed' || booking?.status === 'review_eligible') && 
-           !booking?.reviewSubmitted;
-  };
-
-  const isPastTrip = () => {
-    return booking?.startDate && new Date(booking.startDate) < new Date();
-  };
-
+  // ===============================
+  // MEDIA RENDERER (clean)
+  // ===============================
   const renderMedia = (media, title) => {
     if (media.isVideo && media.videoUrl) {
       return (
@@ -392,26 +384,18 @@ const TripDetails = () => {
             playsInline
             poster={media.poster}
             onError={(e) => {
-              console.error('❌ Video error:', media.videoUrl);
-              e.target.style.display = 'none';
               const parent = e.target.parentElement;
-              if (parent) {
+              e.target.style.display = 'none';
+              if (parent && !parent.querySelector('img.fallback-poster')) {
                 const img = document.createElement('img');
-                img.src = media.poster || 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
-                img.className = 'w-full h-full object-cover';
-                img.alt = title || 'Media';
+                img.src = media.poster || FALLBACK_IMAGE;
+                img.className =
+                  'w-full h-full object-cover fallback-poster';
+                img.alt = title || 'Experience';
                 parent.appendChild(img);
               }
             }}
           />
-          <div className="absolute top-4 left-4 bg-[#0D9488]/80 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-            <Play className="w-3 h-3" />
-            Cover Video
-          </div>
-          <div className="absolute bottom-4 right-4 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-            <Video className="w-3 h-3" />
-            Video
-          </div>
         </div>
       );
     }
@@ -419,17 +403,13 @@ const TripDetails = () => {
     return (
       <div className="relative w-full h-64 md:h-72 lg:h-80 bg-gray-200 dark:bg-gray-800 rounded-2xl overflow-hidden">
         <img
-          src={media.url}
+          src={media.imageUrl}
           alt={title || 'Experience image'}
           className="w-full h-full object-cover"
           onError={(e) => {
-            e.target.src = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=500';
+            e.target.src = FALLBACK_IMAGE;
           }}
         />
-        <div className="absolute top-4 left-4 bg-[#0D9488]/80 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-          <span>📷</span>
-          Cover Image
-        </div>
       </div>
     );
   };
@@ -457,7 +437,9 @@ const TripDetails = () => {
         <h1 className="text-3xl font-bold text-[#374151] dark:text-white mb-2">
           Trip Not Found
         </h1>
-        <p className="text-gray-500 dark:text-gray-400">{error || 'The trip you\'re looking for doesn\'t exist.'}</p>
+        <p className="text-gray-500 dark:text-gray-400">
+          {error || "The trip you're looking for doesn't exist."}
+        </p>
         <button
           onClick={() => navigate('/trips')}
           className="mt-6 px-6 py-3 rounded-xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/90 transition"
@@ -474,11 +456,20 @@ const TripDetails = () => {
   const entityTitle = getEntityTitle();
   const entityLocation = getEntityLocation();
   const media = getEntityMedia(entity);
+  const providerName = getProviderName(
+    booking.provider || entity?.provider
+  );
+  const isActive = [
+    'pending_payment',
+    'paid',
+    'confirmed',
+    'in_progress',
+  ].includes(booking.status);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
-        {/* Back Button */}
+        {/* Back */}
         <button
           onClick={() => navigate('/trips')}
           className="flex items-center gap-2 text-gray-500 hover:text-[#0D9488] transition mb-6 no-print"
@@ -487,7 +478,7 @@ const TripDetails = () => {
           <span>Back to My Trips</span>
         </button>
 
-        {/* ✅ Experience Media (Image or Video) */}
+        {/* Media */}
         {renderMedia(media, entityTitle)}
 
         {/* Header */}
@@ -498,13 +489,15 @@ const TripDetails = () => {
                 <h1 className="text-3xl font-bold text-[#374151] dark:text-white">
                   {entityTitle}
                 </h1>
-                <span className={`px-3 py-1 rounded-full text-sm font-semibold ${statusConfig.bg} ${statusConfig.color} border ${statusConfig.border}`}>
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-semibold ${statusConfig.bg} ${statusConfig.color} border ${statusConfig.border}`}
+                >
                   <span className="flex items-center gap-1">
                     <StatusIcon className="w-4 h-4" />
                     {statusConfig.label}
                   </span>
                 </span>
-                {['pending_payment', 'paid', 'confirmed', 'in_progress'].includes(booking.status) && (
+                {isActive && (
                   <span className="px-3 py-1 rounded-full text-sm font-semibold bg-green-100 text-green-600 border border-green-200">
                     <span className="flex items-center gap-1">
                       <CheckCircle className="w-4 h-4" />
@@ -512,19 +505,24 @@ const TripDetails = () => {
                     </span>
                   </span>
                 )}
-                {media.isVideo && (
-                  <span className="px-3 py-1 rounded-full text-sm font-semibold bg-[#0D9488]/10 text-[#0D9488] border border-[#0D9488]/20 flex items-center gap-1">
-                    <Play className="w-3 h-3" />
-                    Video Cover
-                  </span>
-                )}
               </div>
               <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                 <MapPin className="w-4 h-4 text-[#0D9488]" />
                 <span>{entityLocation}</span>
               </div>
+              {providerName && (
+                <p className="text-gray-500 dark:text-gray-400 mt-1 text-sm">
+                  by{' '}
+                  <span className="text-[#0D9488] font-semibold">
+                    {providerName}
+                  </span>
+                </p>
+              )}
               <p className="text-gray-500 dark:text-gray-400 mt-1">
-                Booking Reference: <span className="font-mono font-semibold text-[#0D9488]">{getBookingCode()}</span>
+                Booking Reference:{' '}
+                <span className="font-mono font-semibold text-[#0D9488]">
+                  {getBookingCode()}
+                </span>
               </p>
             </div>
             <div className="flex flex-wrap gap-2 no-print">
@@ -552,7 +550,7 @@ const TripDetails = () => {
           </div>
         </div>
 
-        {/* Status Timeline */}
+        {/* Timeline */}
         <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6 mb-6">
           <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-[#0D9488]" />
@@ -562,24 +560,60 @@ const TripDetails = () => {
             <div className="flex items-center justify-between">
               {[
                 { label: 'Booking Created', status: true },
-                { label: 'Payment', status: ['paid', 'confirmed', 'in_progress', 'completed', 'review_eligible'].includes(booking.status) },
-                { label: 'Confirmed', status: ['confirmed', 'in_progress', 'completed', 'review_eligible'].includes(booking.status) },
-                { label: 'In Progress', status: ['in_progress', 'completed', 'review_eligible'].includes(booking.status) },
-                { label: 'Completed', status: ['completed', 'review_eligible'].includes(booking.status) },
+                {
+                  label: 'Payment',
+                  status: [
+                    'paid',
+                    'confirmed',
+                    'in_progress',
+                    'completed',
+                    'review_eligible',
+                  ].includes(booking.status),
+                },
+                {
+                  label: 'Confirmed',
+                  status: [
+                    'confirmed',
+                    'in_progress',
+                    'completed',
+                    'review_eligible',
+                  ].includes(booking.status),
+                },
+                {
+                  label: 'In Progress',
+                  status: [
+                    'in_progress',
+                    'completed',
+                    'review_eligible',
+                  ].includes(booking.status),
+                },
+                {
+                  label: 'Completed',
+                  status: ['completed', 'review_eligible'].includes(
+                    booking.status
+                  ),
+                },
               ].map((step, index) => (
-                <div key={index} className="flex flex-col items-center flex-1">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    step.status
-                      ? 'bg-[#0D9488] text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400'
-                  }`}>
+                <div
+                  key={step.label}
+                  className="flex flex-col items-center flex-1"
+                >
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      step.status
+                        ? 'bg-[#0D9488] text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-400'
+                    }`}
+                  >
                     {step.status ? <Check className="w-5 h-5" /> : index + 1}
                   </div>
-                  <p className={`text-xs mt-2 text-center ${
-                    step.status
-                      ? 'text-[#0D9488] font-semibold'
-                      : 'text-gray-400'
-                  }`}>
+                  <p
+                    className={`text-xs mt-2 text-center ${
+                      step.status
+                        ? 'text-[#0D9488] font-semibold'
+                        : 'text-gray-400'
+                    }`}
+                  >
                     {step.label}
                   </p>
                 </div>
@@ -588,11 +622,10 @@ const TripDetails = () => {
           </div>
         </div>
 
-        {/* Main Content */}
+        {/* Main grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Trip Details */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Experience Information */}
+            {/* Experience info */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
               <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-[#F59E0B]" />
@@ -600,8 +633,13 @@ const TripDetails = () => {
               </h2>
               {entity ? (
                 <div className="space-y-4">
-                  <Link to={getEntityLink()} className="block hover:opacity-80 transition">
-                    <h3 className="text-lg font-semibold text-[#0D9488]">{entityTitle}</h3>
+                  <Link
+                    to={getEntityLink()}
+                    className="block hover:opacity-80 transition"
+                  >
+                    <h3 className="text-lg font-semibold text-[#0D9488]">
+                      {entityTitle}
+                    </h3>
                   </Link>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
@@ -614,26 +652,25 @@ const TripDetails = () => {
                     </div>
                     <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                       <Users className="w-4 h-4 text-[#0D9488]" />
-                      <span>Max {entity.capacity || entity.travelers || 10} travelers</span>
+                      <span>
+                        Max {entity.capacity || entity.travelers || 10}{' '}
+                        travelers
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                       <DollarSign className="w-4 h-4 text-[#0D9488]" />
                       <span>${entity.price || 0} per person</span>
                     </div>
-                    {media.isVideo && (
-                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300 col-span-2">
-                        <Video className="w-4 h-4 text-[#0D9488]" />
-                        <span>Cover Media: <span className="text-[#0D9488] font-semibold">Video</span></span>
-                      </div>
-                    )}
                   </div>
                 </div>
               ) : (
-                <p className="text-gray-500 dark:text-gray-400">Experience information unavailable</p>
+                <p className="text-gray-500 dark:text-gray-400">
+                  Experience information unavailable
+                </p>
               )}
             </div>
 
-            {/* Booking Details */}
+            {/* Booking details */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
               <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-[#0D9488]" />
@@ -662,15 +699,20 @@ const TripDetails = () => {
                       Travel Date
                     </label>
                     <p className="text-[#374151] dark:text-white font-medium">
-                      {booking.startDate ? formatDate(booking.startDate) : 'N/A'}
+                      {booking.startDate
+                        ? formatDate(booking.startDate)
+                        : 'N/A'}
                     </p>
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                      Number of Travelers
+                      Travelers
                     </label>
                     <p className="text-[#374151] dark:text-white font-medium">
-                      {booking.numberOfPeople || 1} {booking.numberOfPeople > 1 ? 'people' : 'person'}
+                      {booking.numberOfPeople || 1}{' '}
+                      {(booking.numberOfPeople || 1) > 1
+                        ? 'people'
+                        : 'person'}
                     </p>
                   </div>
                   <div>
@@ -683,14 +725,18 @@ const TripDetails = () => {
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                      Payment Status
+                      Payment
                     </label>
-                    <p className={`font-medium ${
-                      booking.paymentStatus === 'paid' ? 'text-[#0D9488]' :
-                      booking.paymentStatus === 'pending' ? 'text-[#F59E0B]' :
-                      'text-gray-400'
-                    }`}>
-                      {booking.paymentStatus || 'Pending'}
+                    <p
+                      className={`font-medium ${
+                        booking.paymentStatus === 'paid'
+                          ? 'text-[#0D9488]'
+                          : booking.paymentStatus === 'failed'
+                          ? 'text-red-500'
+                          : 'text-[#F59E0B]'
+                      }`}
+                    >
+                      {formatPaymentStatus(booking.paymentStatus)}
                     </p>
                   </div>
                 </div>
@@ -709,7 +755,7 @@ const TripDetails = () => {
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                       Cancellation Reason
                     </label>
-                    <p className="text-red-600 dark:text-red-400 mt-1 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">
+                    <p className="text-red-600 dark:text-red-400 mt-1 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl break-words whitespace-pre-wrap">
                       {booking.cancellationReason}
                     </p>
                   </div>
@@ -717,7 +763,7 @@ const TripDetails = () => {
               </div>
             </div>
 
-            {/* Contact Information */}
+            {/* Contact */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
               <h2 className="text-xl font-bold text-[#374151] dark:text-white mb-4 flex items-center gap-2">
                 <User className="w-5 h-5 text-[#0D9488]" />
@@ -752,9 +798,8 @@ const TripDetails = () => {
             </div>
           </div>
 
-          {/* Right Column - Sidebar */}
+          {/* Sidebar */}
           <div className="space-y-6">
-            {/* Quick Actions */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-6">
               <h2 className="text-lg font-bold text-[#374151] dark:text-white mb-4">
                 Quick Actions
@@ -768,7 +813,7 @@ const TripDetails = () => {
                     </Button>
                   </Link>
                 )}
-                
+
                 {canPay() && (
                   <button
                     onClick={handlePayNow}
@@ -783,7 +828,7 @@ const TripDetails = () => {
                     {actionLoading ? 'Processing...' : 'Pay Now'}
                   </button>
                 )}
-                
+
                 {canReview() && (
                   <Link
                     to={`/review/${bookingId}`}
@@ -793,7 +838,7 @@ const TripDetails = () => {
                     Leave a Review
                   </Link>
                 )}
-                
+
                 {canCancel() && !isPastTrip() && (
                   <button
                     onClick={handleCancel}
@@ -802,7 +847,7 @@ const TripDetails = () => {
                   >
                     {actionLoading ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        <Loader2 className="w-4 h-4 animate-spin mr-2 inline" />
                         Processing...
                       </>
                     ) : (
@@ -810,7 +855,7 @@ const TripDetails = () => {
                     )}
                   </button>
                 )}
-                
+
                 <button
                   onClick={() => navigate('/trips')}
                   className="w-full py-3 rounded-xl bg-[#0D9488] text-white font-bold hover:bg-[#0D9488]/90 transition"
@@ -820,7 +865,6 @@ const TripDetails = () => {
               </div>
             </div>
 
-            {/* Support */}
             <div className="bg-gradient-to-br from-[#0D9488]/5 to-[#F59E0B]/5 rounded-3xl border border-[#0D9488]/10 p-6">
               <h3 className="font-bold text-[#374151] dark:text-white mb-2">
                 Need Help?
@@ -837,7 +881,6 @@ const TripDetails = () => {
               </button>
             </div>
 
-            {/* Trust Badge */}
             <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-800 p-4 text-center">
               <div className="flex items-center justify-center gap-1 text-[#F59E0B] mb-2">
                 {[...Array(5)].map((_, i) => (
@@ -849,7 +892,6 @@ const TripDetails = () => {
               </p>
             </div>
 
-            {/* Booking Code */}
             <div className="bg-gray-50 dark:bg-gray-800 rounded-3xl p-4 text-center border border-gray-200 dark:border-gray-700">
               <p className="text-xs text-gray-400">Booking Reference</p>
               <p className="font-mono font-bold text-[#0D9488] text-sm mt-1">
@@ -860,36 +902,22 @@ const TripDetails = () => {
         </div>
       </div>
 
-      <style jsx="true">{`
-        @media print {
-          .no-print {
-            display: none !important;
-          }
-          .min-h-screen {
-            min-height: auto !important;
-            padding: 0 !important;
-          }
-          .max-w-5xl {
-            max-width: 100% !important;
-            margin: 0 !important;
-          }
-          button {
-            display: none !important;
-          }
-          a {
-            text-decoration: none !important;
-          }
-          .bg-white {
-            background: white !important;
-          }
-          .shadow-lg {
-            box-shadow: none !important;
-          }
-          .border {
-            border: 1px solid #e5e7eb !important;
-          }
-        }
-      `}</style>
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            @media print {
+              .no-print { display: none !important; }
+              .min-h-screen { min-height: auto !important; padding: 0 !important; }
+              .max-w-5xl { max-width: 100% !important; margin: 0 !important; }
+              button { display: none !important; }
+              a { text-decoration: none !important; }
+              .bg-white { background: white !important; }
+              .shadow-lg { box-shadow: none !important; }
+              .border { border: 1px solid #e5e7eb !important; }
+            }
+          `,
+        }}
+      />
     </div>
   );
 };

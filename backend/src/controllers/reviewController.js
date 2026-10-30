@@ -1,11 +1,12 @@
 // backend/src/controllers/reviewController.js
-// ✅ PRODUCTION READY - Review Controller with Moderation Workflow
-// ✅ Immediately published reviews, edit/delete windows, reporting, provider replies
-// ✅ Added toggleHelpful export
-// ✅ FIXED: addProviderReply checks both review.provider and listing.provider
-// ✅ ENHANCED PAGINATION - Added search, filters, sorting, date ranges, rating ranges
-// ✅ Proper pagination metadata (hasNext, hasPrev, totalPages)
-// ✅ Added filters object in response
+// ✅ PRODUCTION READY - Review Controller
+// ✅ Immediately published reviews
+// ✅ Edit/delete windows
+// ✅ Review reporting + moderation workflow
+// ✅ Provider replies
+// ✅ Provider reviews with ownership fallback
+// ✅ Pagination + filters + sorting
+// ✅ Compatible response: data + reviews
 
 import Review from "../models/Review.js";
 import Booking from "../models/Booking.js";
@@ -14,20 +15,24 @@ import User from "../models/User.js";
 import { createNotification } from "../utils/notificationService.js";
 
 // =========================
-// ✅ CONFIGURABLE CONSTANTS
+// CONFIGURABLE CONSTANTS
 // =========================
-const REVIEW_REPORT_THRESHOLD = parseInt(process.env.REVIEW_REPORT_THRESHOLD) || 5;
-const REVIEW_EDIT_WINDOW_HOURS = parseInt(process.env.REVIEW_EDIT_WINDOW_HOURS) || 168; // 7 days
-const REVIEW_DELETE_WINDOW_HOURS = parseInt(process.env.REVIEW_DELETE_WINDOW_HOURS) || 168; // 7 days
+const REVIEW_REPORT_THRESHOLD =
+  parseInt(process.env.REVIEW_REPORT_THRESHOLD, 10) || 5;
+
+const REVIEW_EDIT_WINDOW_HOURS =
+  parseInt(process.env.REVIEW_EDIT_WINDOW_HOURS, 10) || 168;
+
+const REVIEW_DELETE_WINDOW_HOURS =
+  parseInt(process.env.REVIEW_DELETE_WINDOW_HOURS, 10) || 168;
 
 // ============================================================
-// ✅ CREATE REVIEW - Immediately Published
+// CREATE REVIEW
 // ============================================================
 export const createReview = async (req, res) => {
   try {
     const { bookingId, rating, title, comment, images } = req.body;
 
-    // Validate required fields
     if (!bookingId) {
       return res.status(400).json({
         success: false,
@@ -56,7 +61,6 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Get booking with populations
     const booking = await Booking.findById(bookingId)
       .populate("listing", "title provider")
       .populate("provider", "name email _id")
@@ -69,9 +73,15 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Ownership check
-    const bookingUserId = booking.user._id || booking.user;
-    const currentUserId = req.user._id || req.user.id;
+    const bookingUserId = booking.user?._id || booking.user;
+    const currentUserId = req.user?._id || req.user?.id;
+
+    if (!currentUserId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
 
     if (String(bookingUserId) !== String(currentUserId)) {
       return res.status(403).json({
@@ -80,8 +90,8 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Check booking status - must be completed or review_eligible
     const allowedStatuses = ["completed", "review_eligible"];
+
     if (!allowedStatuses.includes(booking.status)) {
       return res.status(400).json({
         success: false,
@@ -89,7 +99,6 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Check payment status
     if (booking.paymentStatus !== "paid") {
       return res.status(400).json({
         success: false,
@@ -97,8 +106,10 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Check if review already exists
-    const existingReview = await Review.findOne({ booking: bookingId });
+    const existingReview = await Review.findOne({
+      booking: bookingId,
+    });
+
     if (existingReview) {
       return res.status(400).json({
         success: false,
@@ -106,7 +117,6 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Check review deadline (30 days after completion)
     const reviewDeadline = new Date(booking.updatedAt);
     reviewDeadline.setDate(reviewDeadline.getDate() + 30);
 
@@ -117,8 +127,8 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Get entity
     const entity = booking.listing;
+
     if (!entity) {
       return res.status(400).json({
         success: false,
@@ -126,12 +136,15 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // Determine provider ID
+    // Determine provider from booking first,
+    // then fallback to listing.provider.
     let providerId = null;
+
     if (booking.provider) {
       providerId = booking.provider._id || booking.provider;
-    } else if (booking.listing && booking.listing.provider) {
-      providerId = booking.listing.provider._id || booking.listing.provider;
+    } else if (booking.listing?.provider) {
+      providerId =
+        booking.listing.provider._id || booking.listing.provider;
     }
 
     if (!providerId) {
@@ -141,7 +154,6 @@ export const createReview = async (req, res) => {
       });
     }
 
-    // ✅ Create review - IMMEDIATELY PUBLISHED
     const review = await Review.create({
       traveler: currentUserId,
       provider: providerId,
@@ -150,44 +162,48 @@ export const createReview = async (req, res) => {
       rating,
       title: title.trim(),
       comment: comment.trim(),
-      images: images || [],
+      images: Array.isArray(images) ? images : [],
       isVerifiedBooking: true,
       reviewDeadline,
-      status: "published", // ✅ Immediately published
+      status: "published",
       publishedAt: new Date(),
     });
 
-    // Update booking review status
     booking.canReview = false;
     booking.reviewSubmitted = true;
+
     await booking.save();
 
-    // Update listing average rating
     await updateListingRating(booking.listing._id);
 
-    // Send notification to provider
     try {
       await createNotification({
         recipient: providerId,
         sender: currentUserId,
         type: "new_review",
         title: "New Review Received ⭐",
-        message: `${req.user.name} left a ${rating}-star review on "${entity.title}"`,
-        data: { reviewId: review._id },
+        message: `${req.user?.name || "A traveler"} left a ${rating}-star review on "${entity.title}"`,
+        data: {
+          reviewId: review._id,
+        },
         link: `/provider/reviews`,
       });
     } catch (notifError) {
-      console.warn("⚠️ Notification error:", notifError.message);
+      console.warn(
+        "⚠️ Notification error:",
+        notifError.message
+      );
     }
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Review submitted successfully",
       review,
     });
   } catch (error) {
     console.error("❌ Create review error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: error.message || "Failed to create review",
     });
@@ -195,13 +211,13 @@ export const createReview = async (req, res) => {
 };
 
 // ============================================================
-// ✅ EDIT REVIEW - Within Edit Window
+// EDIT REVIEW
 // ============================================================
 export const editReview = async (req, res) => {
   try {
     const { id } = req.params;
     const { rating, title, comment, images } = req.body;
-    const userId = req.user._id || req.user.id;
+    const userId = req.user?._id || req.user?.id;
 
     const review = await Review.findById(id);
 
@@ -212,7 +228,6 @@ export const editReview = async (req, res) => {
       });
     }
 
-    // Ownership check
     if (String(review.traveler) !== String(userId)) {
       return res.status(403).json({
         success: false,
@@ -220,7 +235,6 @@ export const editReview = async (req, res) => {
       });
     }
 
-    // Check if review is deleted
     if (review.status === "deleted") {
       return res.status(400).json({
         success: false,
@@ -228,7 +242,6 @@ export const editReview = async (req, res) => {
       });
     }
 
-    // Check edit window
     if (!review.canEdit) {
       return res.status(400).json({
         success: false,
@@ -236,7 +249,8 @@ export const editReview = async (req, res) => {
       });
     }
 
-    // Perform edit
+    const oldRating = review.rating;
+
     const updatedReview = await review.edit({
       rating,
       title,
@@ -244,14 +258,20 @@ export const editReview = async (req, res) => {
       images,
     });
 
-    res.json({
+    // Rating can change after edit.
+    if (oldRating !== updatedReview.rating) {
+      await updateListingRating(review.listing);
+    }
+
+    return res.json({
       success: true,
       message: "Review updated successfully",
       review: updatedReview,
     });
   } catch (error) {
     console.error("❌ Edit review error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: error.message || "Failed to edit review",
     });
@@ -259,13 +279,13 @@ export const editReview = async (req, res) => {
 };
 
 // ============================================================
-// ✅ DELETE REVIEW - Soft Delete
+// DELETE REVIEW
 // ============================================================
 export const deleteReview = async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    const userId = req.user._id || req.user.id;
+    const userId = req.user?._id || req.user?.id;
 
     const review = await Review.findById(id);
 
@@ -276,7 +296,6 @@ export const deleteReview = async (req, res) => {
       });
     }
 
-    // Ownership check
     if (String(review.traveler) !== String(userId)) {
       return res.status(403).json({
         success: false,
@@ -284,7 +303,6 @@ export const deleteReview = async (req, res) => {
       });
     }
 
-    // Check if already deleted
     if (review.status === "deleted") {
       return res.status(400).json({
         success: false,
@@ -292,7 +310,6 @@ export const deleteReview = async (req, res) => {
       });
     }
 
-    // Check delete window
     if (!review.canDelete) {
       return res.status(400).json({
         success: false,
@@ -300,19 +317,21 @@ export const deleteReview = async (req, res) => {
       });
     }
 
-    // Soft delete
-    await review.softDelete(userId, reason || "User deleted their review");
+    await review.softDelete(
+      userId,
+      reason || "User deleted their review"
+    );
 
-    // Update listing rating
     await updateListingRating(review.listing);
 
-    res.json({
+    return res.json({
       success: true,
       message: "Review deleted successfully",
     });
   } catch (error) {
     console.error("❌ Delete review error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: error.message || "Failed to delete review",
     });
@@ -320,13 +339,13 @@ export const deleteReview = async (req, res) => {
 };
 
 // ============================================================
-// ✅ REPORT REVIEW
+// REPORT REVIEW
 // ============================================================
 export const reportReview = async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    const userId = req.user._id || req.user.id;
+    const userId = req.user?._id || req.user?.id;
 
     if (!reason || !reason.trim()) {
       return res.status(400).json({
@@ -335,7 +354,10 @@ export const reportReview = async (req, res) => {
       });
     }
 
-    const review = await Review.findById(id).populate("traveler", "name email");
+    const review = await Review.findById(id).populate(
+      "traveler",
+      "name email"
+    );
 
     if (!review) {
       return res.status(404).json({
@@ -344,15 +366,13 @@ export const reportReview = async (req, res) => {
       });
     }
 
-    // Can't report your own review
-    if (String(review.traveler) === String(userId)) {
+    if (String(review.traveler?._id || review.traveler) === String(userId)) {
       return res.status(400).json({
         success: false,
         message: "You cannot report your own review",
       });
     }
 
-    // Can't report deleted reviews
     if (review.status === "deleted") {
       return res.status(400).json({
         success: false,
@@ -360,7 +380,6 @@ export const reportReview = async (req, res) => {
       });
     }
 
-    // Check if user already reported
     const alreadyReported = review.reportedBy.some(
       (r) => String(r.user) === String(userId)
     );
@@ -372,31 +391,38 @@ export const reportReview = async (req, res) => {
       });
     }
 
-    // Add report
     await review.report(userId, reason.trim());
 
-    // If threshold reached, notify admin
     if (review.reportThresholdReached) {
-      const admins = await User.find({ role: "admin" }).select("_id");
-      
+      const admins = await User.find({
+        role: "admin",
+      }).select("_id");
+
       for (const admin of admins) {
-        await createNotification({
-          recipient: admin._id,
-          sender: userId,
-          type: "review_report_threshold",
-          title: "⚠️ Review Report Threshold Reached",
-          message: `A review has received ${review.reportedCount} reports and needs moderation`,
-          data: {
-            reviewId: review._id,
-            reportedCount: review.reportedCount,
-            threshold: REVIEW_REPORT_THRESHOLD,
-          },
-          link: `/admin/reviews/${review._id}`,
-        });
+        try {
+          await createNotification({
+            recipient: admin._id,
+            sender: userId,
+            type: "review_report_threshold",
+            title: "⚠️ Review Report Threshold Reached",
+            message: `A review has received ${review.reportedCount} reports and needs moderation`,
+            data: {
+              reviewId: review._id,
+              reportedCount: review.reportedCount,
+              threshold: REVIEW_REPORT_THRESHOLD,
+            },
+            link: `/admin/reviews/${review._id}`,
+          });
+        } catch (notificationError) {
+          console.warn(
+            "⚠️ Admin notification error:",
+            notificationError.message
+          );
+        }
       }
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: "Review reported successfully",
       reportedCount: review.reportedCount,
@@ -404,7 +430,8 @@ export const reportReview = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Report review error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: error.message || "Failed to report review",
     });
@@ -412,13 +439,13 @@ export const reportReview = async (req, res) => {
 };
 
 // ============================================================
-// ✅ PROVIDER REPLY TO REVIEW - FIXED with fallback
+// ADD PROVIDER REPLY
 // ============================================================
 export const addProviderReply = async (req, res) => {
   try {
     const { id } = req.params;
     const { reply } = req.body;
-    const providerId = req.user._id || req.user.id;
+    const providerId = req.user?._id || req.user?.id;
 
     if (!reply || !reply.trim()) {
       return res.status(400).json({
@@ -439,84 +466,90 @@ export const addProviderReply = async (req, res) => {
       });
     }
 
-    // ✅ Check provider ownership - try multiple sources
     let isOwner = false;
-    
-    // Check 1: Direct provider on review
+
     if (review.provider) {
-      const reviewProviderId = review.provider._id || review.provider;
+      const reviewProviderId =
+        review.provider._id || review.provider;
+
       if (String(reviewProviderId) === String(providerId)) {
         isOwner = true;
-        console.log('✅ Provider ownership verified via review.provider');
       }
     }
-    
-    // Check 2: Check listing's provider (fallback)
+
     if (!isOwner && review.listing) {
-      const listingProviderId = review.listing.provider?._id || review.listing.provider;
-      if (listingProviderId && String(listingProviderId) === String(providerId)) {
+      const listingProviderId =
+        review.listing.provider?._id ||
+        review.listing.provider;
+
+      if (
+        listingProviderId &&
+        String(listingProviderId) === String(providerId)
+      ) {
         isOwner = true;
-        console.log('✅ Provider ownership verified via listing.provider');
       }
     }
 
     if (!isOwner) {
-      console.log('❌ Provider ownership check failed:', {
-        reviewProvider: review.provider?._id || review.provider,
-        listingProvider: review.listing?.provider?._id || review.listing?.provider,
-        currentProvider: providerId,
-        reviewId: review._id
-      });
       return res.status(403).json({
         success: false,
-        message: "You can only reply to reviews on your own listings",
+        message:
+          "You can only reply to reviews on your own listings",
       });
     }
 
-    // Check if already has reply
     if (review.hasProviderReply) {
       return res.status(400).json({
         success: false,
-        message: "You already replied to this review. Use edit reply to update.",
+        message:
+          "You already replied to this review. Use edit reply to update.",
       });
     }
 
-    // Add reply
-    await review.addReply(reply);
+    await review.addReply(reply.trim());
 
-    // Notify traveler
-    await createNotification({
-      recipient: review.traveler,
-      sender: providerId,
-      type: "provider_reply",
-      title: "Provider Replied to Your Review 💬",
-      message: `${req.user.name} replied to your review`,
-      data: { reviewId: review._id },
-      link: `/my-reviews/${review._id}`,
-    });
+    try {
+      await createNotification({
+        recipient: review.traveler,
+        sender: providerId,
+        type: "provider_reply",
+        title: "Provider Replied to Your Review 💬",
+        message: `${req.user?.name || "The provider"} replied to your review`,
+        data: {
+          reviewId: review._id,
+        },
+        link: `/my-reviews/${review._id}`,
+      });
+    } catch (notificationError) {
+      console.warn(
+        "⚠️ Traveler notification error:",
+        notificationError.message
+      );
+    }
 
-    res.json({
+    return res.json({
       success: true,
       message: "Reply added successfully",
       review,
     });
   } catch (error) {
     console.error("❌ Add provider reply error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: error.message || "Failed to add reply",
+      message: error.message || "Failed to add provider reply",
     });
   }
 };
 
 // ============================================================
-// ✅ EDIT PROVIDER REPLY
+// EDIT PROVIDER REPLY
 // ============================================================
 export const editProviderReply = async (req, res) => {
   try {
     const { id } = req.params;
     const { reply } = req.body;
-    const providerId = req.user._id || req.user.id;
+    const providerId = req.user?._id || req.user?.id;
 
     if (!reply || !reply.trim()) {
       return res.status(400).json({
@@ -525,8 +558,10 @@ export const editProviderReply = async (req, res) => {
       });
     }
 
-    const review = await Review.findById(id)
-      .populate("listing", "provider title");
+    const review = await Review.findById(id).populate(
+      "listing",
+      "provider title"
+    );
 
     if (!review) {
       return res.status(404).json({
@@ -535,21 +570,26 @@ export const editProviderReply = async (req, res) => {
       });
     }
 
-    // ✅ Check provider ownership - try multiple sources
     let isOwner = false;
-    
-    // Check 1: Direct provider on review
+
     if (review.provider) {
-      const reviewProviderId = review.provider._id || review.provider;
+      const reviewProviderId =
+        review.provider._id || review.provider;
+
       if (String(reviewProviderId) === String(providerId)) {
         isOwner = true;
       }
     }
-    
-    // Check 2: Check listing's provider (fallback)
+
     if (!isOwner && review.listing) {
-      const listingProviderId = review.listing.provider?._id || review.listing.provider;
-      if (listingProviderId && String(listingProviderId) === String(providerId)) {
+      const listingProviderId =
+        review.listing.provider?._id ||
+        review.listing.provider;
+
+      if (
+        listingProviderId &&
+        String(listingProviderId) === String(providerId)
+      ) {
         isOwner = true;
       }
     }
@@ -568,32 +608,33 @@ export const editProviderReply = async (req, res) => {
       });
     }
 
-    // Update reply
-    await review.updateReply(reply);
+    await review.updateReply(reply.trim());
 
-    res.json({
+    return res.json({
       success: true,
       message: "Reply updated successfully",
       review,
     });
   } catch (error) {
     console.error("❌ Edit provider reply error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: error.message || "Failed to edit reply",
+      message:
+        error.message || "Failed to edit provider reply",
     });
   }
 };
 
 // ============================================================
-// ✅ GET MY REVIEWS (Traveler) - ENHANCED
+// GET MY REVIEWS
 // ============================================================
 export const getMyReviews = async (req, res) => {
   try {
     const {
       status,
       search,
-      sort = '-createdAt',
+      sort = "-createdAt",
       page = 1,
       limit = 20,
       startDate,
@@ -602,106 +643,218 @@ export const getMyReviews = async (req, res) => {
       maxRating,
     } = req.query;
 
-    const userId = req.user._id || req.user.id;
-    const filter = { traveler: userId };
+    const userId = req.user?._id || req.user?.id;
 
-    // Status filter
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    const filter = {
+      traveler: userId,
+    };
+
     if (status && status !== "all") {
       filter.status = status;
     }
 
-    // Search
     if (search && search.trim()) {
       filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { comment: { $regex: search, $options: 'i' } },
-        { 'listing.title': { $regex: search, $options: 'i' } },
+        {
+          title: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
+        {
+          comment: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
       ];
     }
 
-    // Date range
     if (startDate || endDate) {
       filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+
+      if (startDate) {
+        const start = new Date(startDate);
+
+        if (!Number.isNaN(start.getTime())) {
+          start.setHours(0, 0, 0, 0);
+          filter.createdAt.$gte = start;
+        }
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+
+        if (!Number.isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
+
+      if (Object.keys(filter.createdAt).length === 0) {
+        delete filter.createdAt;
+      }
     }
 
-    // Rating range
     if (minRating || maxRating) {
       filter.rating = {};
-      if (minRating) filter.rating.$gte = Number(minRating);
-      if (maxRating) filter.rating.$lte = Number(maxRating);
+
+      if (minRating) {
+        const value = Number(minRating);
+
+        if (!Number.isNaN(value)) {
+          filter.rating.$gte = Math.max(1, Math.min(5, value));
+        }
+      }
+
+      if (maxRating) {
+        const value = Number(maxRating);
+
+        if (!Number.isNaN(value)) {
+          filter.rating.$lte = Math.max(1, Math.min(5, value));
+        }
+      }
+
+      if (Object.keys(filter.rating).length === 0) {
+        delete filter.rating;
+      }
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(
+      1,
+      parseInt(page, 10) || 1
+    );
 
-    // Validate sort field
-    const validSortFields = ['createdAt', 'rating', 'updatedAt'];
-    const sortField = sort.startsWith('-') ? sort.substring(1) : sort;
-    const sortOrder = sort.startsWith('-') ? -1 : 1;
-    const finalSortField = validSortFields.includes(sortField) ? sortField : 'createdAt';
+    const limitNum = Math.min(
+      100,
+      Math.max(1, parseInt(limit, 10) || 20)
+    );
+
+    const validSortFields = [
+      "createdAt",
+      "rating",
+      "updatedAt",
+    ];
+
+    const requestedSort = String(sort || "-createdAt");
+
+    const sortField = requestedSort.startsWith("-")
+      ? requestedSort.substring(1)
+      : requestedSort;
+
+    const sortOrder = requestedSort.startsWith("-")
+      ? -1
+      : 1;
+
+    const finalSortField = validSortFields.includes(sortField)
+      ? sortField
+      : "createdAt";
+
+    const skip = (pageNum - 1) * limitNum;
 
     const [reviews, total] = await Promise.all([
       Review.find(filter)
         .populate("listing", "title slug coverMedia")
-        .populate("provider", "name businessName avatar")
-        .populate("booking", "bookingCode startDate")
-        .sort({ [finalSortField]: sortOrder })
+        .populate(
+          "provider",
+          "name businessName avatar"
+        )
+        .populate(
+          "booking",
+          "bookingCode startDate status"
+        )
+        .sort({
+          [finalSortField]: sortOrder,
+        })
         .skip(skip)
         .limit(limitNum)
         .lean(),
+
       Review.countDocuments(filter),
     ]);
 
-    res.json({
+    return res.json({
       success: true,
       data: reviews,
+      reviews,
       pagination: {
         total,
-        page: parseInt(page),
+        page: pageNum,
         limit: limitNum,
         totalPages: Math.ceil(total / limitNum),
-        hasNext: parseInt(page) * limitNum < total,
-        hasPrev: parseInt(page) > 1,
+        hasNext: pageNum * limitNum < total,
+        hasPrev: pageNum > 1,
       },
       filters: {
-        status,
-        search,
-        sort,
-        startDate,
-        endDate,
-        minRating,
-        maxRating,
+        status: status || "all",
+        search: search || "",
+        sort: requestedSort,
+        startDate: startDate || "",
+        endDate: endDate || "",
+        minRating: minRating || "",
+        maxRating: maxRating || "",
       },
     });
   } catch (error) {
     console.error("❌ Get my reviews error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message || "Failed to fetch my reviews",
     });
   }
 };
 
 // ============================================================
-// ✅ GET REVIEW BY ID
+// GET REVIEW BY ID
 // ============================================================
 export const getReviewById = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id || req.user.id;
-    const userRole = req.user.role;
+    const userId = req.user?._id || req.user?.id;
+    const userRole = req.user?.role;
 
     const review = await Review.findById(id)
-      .populate("traveler", "name avatar email")
-      .populate("provider", "name businessName avatar")
-      .populate("listing", "title slug coverMedia")
-      .populate("booking", "bookingCode startDate")
-      .populate("hiddenBy", "name email")
-      .populate("deletedBy", "name email")
-      .populate("moderatedBy", "name email")
-      .populate("reportedBy.user", "name email")
+      .populate(
+        "traveler",
+        "name avatar email profileImage"
+      )
+      .populate(
+        "provider",
+        "name businessName avatar"
+      )
+      .populate(
+        "listing",
+        "title slug coverMedia"
+      )
+      .populate(
+        "booking",
+        "bookingCode startDate status"
+      )
+      .populate(
+        "hiddenBy",
+        "name email"
+      )
+      .populate(
+        "deletedBy",
+        "name email"
+      )
+      .populate(
+        "moderatedBy",
+        "name email"
+      )
+      .populate(
+        "reportedBy.user",
+        "name email"
+      )
       .lean();
 
     if (!review) {
@@ -711,70 +864,99 @@ export const getReviewById = async (req, res) => {
       });
     }
 
-    // Access control based on status and role
-    const travelerId = review.traveler?._id || review.traveler;
-    const providerId = review.provider?._id || review.provider;
-    const isOwner = String(travelerId) === String(userId);
-    const isProvider = String(providerId) === String(userId);
+    const travelerId =
+      review.traveler?._id || review.traveler;
+
+    const providerId =
+      review.provider?._id || review.provider;
+
+    const isOwner =
+      String(travelerId) === String(userId);
+
+    const isProvider =
+      String(providerId) === String(userId);
+
     const isAdmin = userRole === "admin";
 
-    // If review is deleted, only owner or admin can view
-    if (review.status === "deleted" && !isOwner && !isAdmin) {
+    if (
+      review.status === "deleted" &&
+      !isOwner &&
+      !isAdmin
+    ) {
       return res.status(404).json({
         success: false,
         message: "Review not found",
       });
     }
 
-    // If review is hidden, only admin can view
-    if (review.status === "hidden" && !isAdmin) {
+    if (
+      review.status === "hidden" &&
+      !isAdmin
+    ) {
       return res.status(404).json({
         success: false,
         message: "Review not found",
       });
     }
 
-    // If review is published, anyone can view
-    // If reported, owner, provider, and admin can view
-
-    if (!isOwner && !isProvider && !isAdmin && review.status !== "published") {
+    if (
+      !isOwner &&
+      !isProvider &&
+      !isAdmin &&
+      review.status !== "published"
+    ) {
       return res.status(404).json({
         success: false,
         message: "Review not found",
       });
     }
 
-    // Add permissions info
     const permissions = {
-      canEdit: isOwner && review.canEdit && review.status !== "deleted",
-      canDelete: isOwner && review.canDelete && review.status !== "deleted",
-      canReply: isProvider && review.canReply,
-      canReport: !isOwner && review.status === "published",
+      canEdit:
+        isOwner &&
+        review.canEdit &&
+        review.status !== "deleted",
+
+      canDelete:
+        isOwner &&
+        review.canDelete &&
+        review.status !== "deleted",
+
+      canReply:
+        isProvider &&
+        review.canReply,
+
+      canReport:
+        !isOwner &&
+        review.status === "published",
+
       canModerate: isAdmin,
     };
 
-    res.json({
+    return res.json({
       success: true,
       review,
       permissions,
     });
   } catch (error) {
     console.error("❌ Get review by id error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message || "Failed to fetch review",
     });
   }
 };
 
 // ============================================================
-// ✅ GET REVIEW BY BOOKING
+// GET REVIEW BY BOOKING
 // ============================================================
 export const getReviewByBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const userId = req.user._id || req.user.id;
-    const userRole = req.user.role;
+    const userId = req.user?._id || req.user?.id;
+    const userRole = req.user?.role;
 
     if (!bookingId) {
       return res.status(400).json({
@@ -783,11 +965,25 @@ export const getReviewByBooking = async (req, res) => {
       });
     }
 
-    const review = await Review.findOne({ booking: bookingId })
-      .populate("traveler", "name profileImage avatar")
-      .populate("provider", "name businessName avatar")
-      .populate("listing", "title location slug")
-      .populate("booking", "bookingCode startDate")
+    const review = await Review.findOne({
+      booking: bookingId,
+    })
+      .populate(
+        "traveler",
+        "name profileImage avatar"
+      )
+      .populate(
+        "provider",
+        "name businessName avatar"
+      )
+      .populate(
+        "listing",
+        "title location slug"
+      )
+      .populate(
+        "booking",
+        "bookingCode startDate status"
+      )
       .lean();
 
     if (!review) {
@@ -797,163 +993,363 @@ export const getReviewByBooking = async (req, res) => {
       });
     }
 
-    const travelerId = review.traveler?._id || review.traveler;
-    const providerId = review.provider?._id || review.provider;
-    const isOwner = String(travelerId) === String(userId);
-    const isProvider = String(providerId) === String(userId);
+    const travelerId =
+      review.traveler?._id || review.traveler;
+
+    const providerId =
+      review.provider?._id || review.provider;
+
+    const isOwner =
+      String(travelerId) === String(userId);
+
+    const isProvider =
+      String(providerId) === String(userId);
+
     const isAdmin = userRole === "admin";
 
     if (!isOwner && !isProvider && !isAdmin) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to view this review",
+        message:
+          "You do not have permission to view this review",
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       review,
     });
   } catch (error) {
-    console.error("❌ Get review by booking error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get review by booking error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to fetch review by booking",
     });
   }
 };
 
 // ============================================================
-// ✅ GET PROVIDER REVIEWS - ENHANCED
+// GET PROVIDER REVIEWS
 // ============================================================
 export const getProviderReviews = async (req, res) => {
   try {
-    const providerId = req.user._id || req.user.id;
+    const providerId = req.user?._id || req.user?.id;
+
+    if (!providerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Provider authentication required",
+      });
+    }
+
     const {
       page = 1,
       limit = 20,
-      status = null,
+      status = "all",
       search,
-      sort = '-createdAt',
+      sort = "-createdAt",
       startDate,
       endDate,
       minRating,
       maxRating,
     } = req.query;
 
-    const filter = { provider: providerId };
+    const pageNum = Math.max(
+      1,
+      parseInt(page, 10) || 1
+    );
 
-    if (status && status !== 'all') {
+    const limitNum = Math.min(
+      100,
+      Math.max(1, parseInt(limit, 10) || 20)
+    );
+
+    // --------------------------------------------------------
+    // Find all listings owned by this provider
+    // --------------------------------------------------------
+    const providerListings = await Listing.find({
+      provider: providerId,
+    })
+      .select("_id")
+      .lean();
+
+    const providerListingIds = providerListings.map(
+      (listing) => listing._id
+    );
+
+    // --------------------------------------------------------
+    // Support both new and old reviews:
+    //
+    // New:
+    //   Review.provider = providerId
+    //
+    // Old:
+    //   Review.listing belongs to provider
+    // --------------------------------------------------------
+    const ownershipFilter = [
+      {
+        provider: providerId,
+      },
+    ];
+
+    if (providerListingIds.length > 0) {
+      ownershipFilter.push({
+        listing: {
+          $in: providerListingIds,
+        },
+      });
+    }
+
+    const filter = {
+      $or: ownershipFilter,
+    };
+
+    // --------------------------------------------------------
+    // Status
+    // --------------------------------------------------------
+    if (status && status !== "all") {
       filter.status = status;
+    } else {
+      filter.status = {
+        $in: [
+          "published",
+          "reported",
+          "hidden",
+        ],
+      };
     }
 
-    // Search
-    if (search && search.trim()) {
-      filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { comment: { $regex: search, $options: 'i' } },
-        { 'traveler.name': { $regex: search, $options: 'i' } },
-        { 'listing.title': { $regex: search, $options: 'i' } },
-      ];
-    }
-
+    // --------------------------------------------------------
     // Date range
+    // --------------------------------------------------------
     if (startDate || endDate) {
       filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+
+      if (startDate) {
+        const start = new Date(startDate);
+
+        if (!Number.isNaN(start.getTime())) {
+          start.setHours(0, 0, 0, 0);
+          filter.createdAt.$gte = start;
+        }
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+
+        if (!Number.isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
+
+      if (Object.keys(filter.createdAt).length === 0) {
+        delete filter.createdAt;
+      }
     }
 
+    // --------------------------------------------------------
     // Rating range
+    // --------------------------------------------------------
     if (minRating || maxRating) {
       filter.rating = {};
-      if (minRating) filter.rating.$gte = Number(minRating);
-      if (maxRating) filter.rating.$lte = Number(maxRating);
+
+      if (minRating) {
+        const min = Number(minRating);
+
+        if (!Number.isNaN(min)) {
+          filter.rating.$gte = Math.max(
+            1,
+            Math.min(5, min)
+          );
+        }
+      }
+
+      if (maxRating) {
+        const max = Number(maxRating);
+
+        if (!Number.isNaN(max)) {
+          filter.rating.$lte = Math.max(
+            1,
+            Math.min(5, max)
+          );
+        }
+      }
+
+      if (Object.keys(filter.rating).length === 0) {
+        delete filter.rating;
+      }
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const limitNum = parseInt(limit);
+    // --------------------------------------------------------
+    // Sorting
+    // --------------------------------------------------------
+    const validSortFields = [
+      "createdAt",
+      "rating",
+      "updatedAt",
+    ];
 
-    // Validate sort field
-    const validSortFields = ['createdAt', 'rating', 'updatedAt'];
-    const sortField = sort.startsWith('-') ? sort.substring(1) : sort;
-    const sortOrder = sort.startsWith('-') ? -1 : 1;
-    const finalSortField = validSortFields.includes(sortField) ? sortField : 'createdAt';
+    const requestedSort = String(
+      sort || "-createdAt"
+    );
 
+    const sortField = requestedSort.startsWith("-")
+      ? requestedSort.substring(1)
+      : requestedSort;
+
+    const sortOrder = requestedSort.startsWith("-")
+      ? -1
+      : 1;
+
+    const finalSortField =
+      validSortFields.includes(sortField)
+        ? sortField
+        : "createdAt";
+
+    const skip = (pageNum - 1) * limitNum;
+
+    // --------------------------------------------------------
+    // Fetch reviews + count
+    // --------------------------------------------------------
     const [reviews, total] = await Promise.all([
       Review.find(filter)
-        .populate('traveler', 'name profileImage avatar')
-        .populate('provider', 'name businessName email')
-        .populate('listing', 'title slug coverMedia provider')
-        .populate('booking', 'bookingCode startDate')
-        .sort({ [finalSortField]: sortOrder })
+        .populate(
+          "traveler",
+          "name profileImage avatar"
+        )
+        .populate(
+          "provider",
+          "name businessName email avatar"
+        )
+        .populate(
+          "listing",
+          "title slug coverMedia provider"
+        )
+        .populate(
+          "booking",
+          "bookingCode startDate status"
+        )
+        .sort({
+          [finalSortField]: sortOrder,
+        })
         .skip(skip)
         .limit(limitNum)
         .lean(),
+
       Review.countDocuments(filter),
     ]);
 
-    const stats = await getProviderStats(providerId);
+    const stats = await getProviderStats(
+      providerId
+    );
 
-    res.json({
+    return res.status(200).json({
       success: true,
+
+      // Both formats are returned temporarily
+      // to prevent frontend response-shape mismatch.
       data: reviews,
+      reviews,
+
       pagination: {
         total,
-        page: parseInt(page),
+        page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
-        hasNext: parseInt(page) * limitNum < total,
-        hasPrev: parseInt(page) > 1,
+        totalPages: Math.ceil(
+          total / limitNum
+        ),
+        hasNext:
+          pageNum * limitNum < total,
+        hasPrev:
+          pageNum > 1,
       },
+
       stats,
+
       filters: {
         status,
-        search,
-        sort,
-        startDate,
-        endDate,
-        minRating,
-        maxRating,
+        search: search || "",
+        sort: requestedSort,
+        startDate: startDate || "",
+        endDate: endDate || "",
+        minRating: minRating || "",
+        maxRating: maxRating || "",
       },
     });
   } catch (error) {
-    console.error("❌ Get provider reviews error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get provider reviews error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message || "Failed to fetch provider reviews",
+      message:
+        error.message ||
+        "Failed to fetch provider reviews",
     });
   }
 };
 
 // ============================================================
-// ✅ GET PROVIDER REVIEW STATS
+// GET PROVIDER REVIEW STATS
 // ============================================================
-export const getProviderReviewStats = async (req, res) => {
+export const getProviderReviewStats = async (
+  req,
+  res
+) => {
   try {
-    const providerId = req.user._id || req.user.id;
-    const stats = await getProviderStats(providerId);
+    const providerId =
+      req.user?._id || req.user?.id;
 
-    res.json({
+    if (!providerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Provider authentication required",
+      });
+    }
+
+    const stats = await getProviderStats(
+      providerId
+    );
+
+    return res.json({
       success: true,
       stats,
     });
   } catch (error) {
-    console.error("❌ Get provider review stats error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Get provider review stats error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message || "Failed to fetch review stats",
+      message:
+        error.message ||
+        "Failed to fetch review stats",
     });
   }
 };
 
 // ============================================================
-// ✅ TOGGLE HELPFUL
+// TOGGLE HELPFUL
 // ============================================================
-export const toggleHelpful = async (req, res) => {
+export const toggleHelpful = async (
+  req,
+  res
+) => {
   try {
     const { id } = req.params;
-    const userId = req.user._id || req.user.id;
+    const userId =
+      req.user?._id || req.user?.id;
 
     const review = await Review.findById(id);
 
@@ -965,99 +1361,184 @@ export const toggleHelpful = async (req, res) => {
     }
 
     const userIdStr = String(userId);
-    
-    const index = review.helpfulUsers.findIndex(
-      (uid) => String(uid) === userIdStr
-    );
+
+    const index =
+      review.helpfulUsers.findIndex(
+        (uid) => String(uid) === userIdStr
+      );
 
     if (index > -1) {
       review.helpfulUsers.splice(index, 1);
-      review.helpfulCount = Math.max(0, (review.helpfulCount || 0) - 1);
+
+      review.helpfulCount = Math.max(
+        0,
+        (review.helpfulCount || 0) - 1
+      );
     } else {
       review.helpfulUsers.push(userId);
-      review.helpfulCount = (review.helpfulCount || 0) + 1;
+
+      review.helpfulCount =
+        (review.helpfulCount || 0) + 1;
     }
 
     await review.save();
 
-    res.json({
+    return res.json({
       success: true,
       helpfulCount: review.helpfulCount,
       isHelpful: index === -1,
     });
   } catch (error) {
-    console.error("❌ Toggle helpful error:", error);
-    res.status(500).json({
+    console.error(
+      "❌ Toggle helpful error:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Failed to toggle helpful",
     });
   }
 };
 
 // ============================================================
-// ✅ HELPER FUNCTIONS
+// HELPER: UPDATE LISTING RATING
 // ============================================================
-
-/**
- * Update listing average rating and total reviews
- */
-const updateListingRating = async (listingId) => {
+const updateListingRating = async (
+  listingId
+) => {
   try {
     const result = await Review.aggregate([
-      { $match: { listing: listingId, status: "published" } },
+      {
+        $match: {
+          listing: listingId,
+          status: "published",
+        },
+      },
       {
         $group: {
           _id: null,
-          averageRating: { $avg: "$rating" },
-          totalReviews: { $sum: 1 },
+          averageRating: {
+            $avg: "$rating",
+          },
+          totalReviews: {
+            $sum: 1,
+          },
         },
       },
     ]);
 
-    const stats = result[0] || { averageRating: 0, totalReviews: 0 };
+    const stats = result[0] || {
+      averageRating: 0,
+      totalReviews: 0,
+    };
 
-    await Listing.findByIdAndUpdate(listingId, {
-      averageRating: Math.round(stats.averageRating * 10) / 10,
-      totalReviews: stats.totalReviews,
-    });
+    await Listing.findByIdAndUpdate(
+      listingId,
+      {
+        averageRating:
+          Math.round(
+            stats.averageRating * 10
+          ) / 10,
+
+        totalReviews:
+          stats.totalReviews,
+      }
+    );
   } catch (error) {
-    console.error("❌ Error updating listing rating:", error);
+    console.error(
+      "❌ Error updating listing rating:",
+      error
+    );
   }
 };
 
-/**
- * Get provider review statistics
- */
-const getProviderStats = async (providerId) => {
-  const allReviews = await Review.find({ provider: providerId });
-  
-  const published = allReviews.filter((r) => r.status === "published");
-  const hidden = allReviews.filter((r) => r.status === "hidden");
-  const deleted = allReviews.filter((r) => r.status === "deleted");
-  const reported = allReviews.filter((r) => r.status === "reported");
-  
+// ============================================================
+// HELPER: PROVIDER REVIEW STATISTICS
+// ============================================================
+const getProviderStats = async (
+  providerId
+) => {
+  const allReviews = await Review.find({
+    $or: [
+      {
+        provider: providerId,
+      },
+      {
+        listing: {
+          $in: await Listing.find({
+            provider: providerId,
+          }).distinct("_id"),
+        },
+      },
+    ],
+  }).lean();
+
+  const published = allReviews.filter(
+    (review) => review.status === "published"
+  );
+
+  const hidden = allReviews.filter(
+    (review) => review.status === "hidden"
+  );
+
+  const deleted = allReviews.filter(
+    (review) => review.status === "deleted"
+  );
+
+  const reported = allReviews.filter(
+    (review) => review.status === "reported"
+  );
+
   const totalReviews = allReviews.length;
+
+  // Prevent division by zero.
   const averageRating =
-    totalReviews > 0
-      ? published.reduce((sum, r) => sum + r.rating, 0) / published.length
+    published.length > 0
+      ? published.reduce(
+          (sum, review) => sum + review.rating,
+          0
+        ) / published.length
       : 0;
 
-  const ratingCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-  published.forEach((r) => {
-    if (ratingCounts[r.rating] !== undefined) ratingCounts[r.rating]++;
+  const ratingCounts = {
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
+  };
+
+  published.forEach((review) => {
+    if (
+      ratingCounts[review.rating] !== undefined
+    ) {
+      ratingCounts[review.rating]++;
+    }
   });
 
-  // Per-listing stats
   const byListing = {};
-  published.forEach((r) => {
-    const listingId = r.listing?.toString();
-    if (listingId) {
-      if (!byListing[listingId]) {
-        byListing[listingId] = { count: 0, sum: 0 };
-      }
-      byListing[listingId].count++;
-      byListing[listingId].sum += r.rating;
+
+  published.forEach((review) => {
+    const listingId =
+      review.listing?.toString();
+
+    if (!listingId) {
+      return;
     }
+
+    if (!byListing[listingId]) {
+      byListing[listingId] = {
+        count: 0,
+        sum: 0,
+      };
+    }
+
+    byListing[listingId].count++;
+    byListing[listingId].sum +=
+      review.rating;
   });
 
   return {
@@ -1066,9 +1547,261 @@ const getProviderStats = async (providerId) => {
     hidden: hidden.length,
     deleted: deleted.length,
     reported: reported.length,
-    averageRating: Math.round(averageRating * 10) / 10,
+    averageRating:
+      Math.round(averageRating * 10) / 10,
     ratingCounts,
     byListing,
     hasReviews: totalReviews > 0,
   };
+};
+
+// ============================================================
+// ✅ NEW: GET ADMIN REVIEWS
+// ============================================================
+// Admin-only paginated list of reviews with filters.
+// Supports: status, search, rating range, date range, sort.
+// ============================================================
+export const getAdminReviews = async (req, res) => {
+  try {
+    const {
+      status = "all",
+      search,
+      sort = "-createdAt",
+      page = 1,
+      limit = 20,
+      startDate,
+      endDate,
+      minRating,
+      maxRating,
+      reportedOnly,
+      hiddenOnly,
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+
+    const filter = {};
+
+    // Status
+    if (status && status !== "all") {
+      filter.status = status;
+    }
+    if (reportedOnly === "true" || reportedOnly === true) {
+      filter.status = "reported";
+    }
+    if (hiddenOnly === "true" || hiddenOnly === true) {
+      filter.status = "hidden";
+    }
+
+    // Search
+    if (search && search.trim()) {
+      filter.$or = [
+        { title: { $regex: search.trim(), $options: "i" } },
+        { comment: { $regex: search.trim(), $options: "i" } },
+      ];
+    }
+
+    // Date
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        if (!Number.isNaN(start.getTime())) {
+          start.setHours(0, 0, 0, 0);
+          filter.createdAt.$gte = start;
+        }
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        if (!Number.isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
+      if (Object.keys(filter.createdAt).length === 0) delete filter.createdAt;
+    }
+
+    // Rating range
+    if (minRating || maxRating) {
+      filter.rating = {};
+      if (minRating) {
+        const min = Number(minRating);
+        if (!Number.isNaN(min)) filter.rating.$gte = Math.max(1, Math.min(5, min));
+      }
+      if (maxRating) {
+        const max = Number(maxRating);
+        if (!Number.isNaN(max)) filter.rating.$lte = Math.max(1, Math.min(5, max));
+      }
+      if (Object.keys(filter.rating).length === 0) delete filter.rating;
+    }
+
+    // Sort
+    const validSortFields = ["createdAt", "rating", "updatedAt"];
+    const requestedSort = String(sort || "-createdAt");
+    const sortField = requestedSort.startsWith("-")
+      ? requestedSort.substring(1)
+      : requestedSort;
+    const sortOrder = requestedSort.startsWith("-") ? -1 : 1;
+    const finalSortField = validSortFields.includes(sortField)
+      ? sortField
+      : "createdAt";
+
+    const skip = (pageNum - 1) * limitNum;
+
+    const [reviews, total, stats] = await Promise.all([
+      Review.find(filter)
+        .populate("traveler", "name email profileImage avatar")
+        .populate("provider", "name businessName email avatar")
+        .populate("listing", "title slug coverMedia")
+        .populate("booking", "bookingCode startDate status")
+        .sort({ [finalSortField]: sortOrder })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+
+      Review.countDocuments(filter),
+
+      Review.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const statsMap = {};
+    stats.forEach((row) => {
+      statsMap[row._id || "unknown"] = row.count;
+    });
+
+    return res.json({
+      success: true,
+      data: reviews,
+      reviews,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+        hasNext: pageNum * limitNum < total,
+        hasPrev: pageNum > 1,
+      },
+      stats: {
+        total,
+        published: statsMap.published || 0,
+        hidden: statsMap.hidden || 0,
+        reported: statsMap.reported || 0,
+        deleted: statsMap.deleted || 0,
+      },
+      filters: {
+        status,
+        search: search || "",
+        sort: requestedSort,
+        startDate: startDate || "",
+        endDate: endDate || "",
+        minRating: minRating || "",
+        maxRating: maxRating || "",
+      },
+    });
+  } catch (error) {
+    console.error("❌ Get admin reviews error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch admin reviews",
+    });
+  }
+};
+
+// ============================================================
+// ✅ NEW: UPDATE REVIEW STATUS (ADMIN MODERATION)
+// ============================================================
+// Allowed transitions:
+//   published  → hidden      (hide from public)
+//   hidden     → published   (restore)
+//   reported   → published   (dismiss reports)
+//   reported   → hidden      (uphold reports)
+//   *          → deleted     (soft delete)
+//
+// Updates listing rating when status changes.
+// ============================================================
+export const updateReviewStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, moderationNote } = req.body;
+    const adminId = req.user?._id || req.user?.id;
+
+    const allowedStatuses = [
+      "published",
+      "hidden",
+      "reported",
+      "deleted",
+    ];
+
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${allowedStatuses.join(", ")}`,
+      });
+    }
+
+    const review = await Review.findById(id);
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: "Review not found",
+      });
+    }
+
+    const previousStatus = review.status;
+
+    if (previousStatus === status) {
+      return res.json({
+        success: true,
+        message: "Status unchanged",
+        review,
+      });
+    }
+
+    review.status = status;
+    review.moderatedBy = adminId;
+    review.moderatedAt = new Date();
+
+    if (moderationNote && typeof moderationNote === "string") {
+      review.moderationNote = moderationNote.trim();
+    }
+
+    if (status === "published" && !review.publishedAt) {
+      review.publishedAt = new Date();
+    }
+
+    if (status === "hidden" || status === "deleted") {
+      review.hiddenAt = review.hiddenAt || new Date();
+    }
+
+    await review.save();
+
+    // Rating recompute if visibility changed
+    const affectsRating =
+      previousStatus === "published" || status === "published";
+
+    if (affectsRating && review.listing) {
+      await updateListingRating(review.listing);
+    }
+
+    return res.json({
+      success: true,
+      message: `Review status updated to "${status}"`,
+      review,
+    });
+  } catch (error) {
+    console.error("❌ Update review status error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update review status",
+    });
+  }
 };

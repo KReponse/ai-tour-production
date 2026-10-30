@@ -1,9 +1,5 @@
 // frontend/src/pages/admin/Users.jsx
-// ✅ COMPLETE FIXED - Server-Side Pagination (Strategy B)
-// ✅ Added: usePagination hook for pagination controls
-// ✅ Added: Pagination component with page numbers, First/Last
-// ✅ Added: Search, filters, sorting
-// ✅ Added: Skeleton loader, Back to Top button
+// ✅ Complete: server-side pagination + refresh bus wired
 
 import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
@@ -27,6 +23,8 @@ import LoadingSkeleton from "../../components/ui/LoadingSkeleton";
 import BackToTop from "../../components/ui/BackToTop";
 import { PAGINATION } from "../../utils/constants";
 import toast from "react-hot-toast";
+import useRefreshOn from "../../hooks/useRefreshOn";
+import { refreshMany } from "../../utils/dataRefresh";
 
 // ===============================
 // AI TOUR COLORS
@@ -39,9 +37,6 @@ import toast from "react-hot-toast";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-// ===============================
-// MAIN COMPONENT
-// ===============================
 const Users = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -50,13 +45,11 @@ const Users = () => {
 
   const token = localStorage.getItem("token");
 
-  // ── Notification ──
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // ✅ usePagination hook for server-side pagination
   const {
     data: users,
     loading,
@@ -85,25 +78,24 @@ const Users = () => {
     dataKey: 'users',
   });
 
-  // ── Handle Search ─────────────────────────────────────────────
+  // 🔄 Cross-page sync: role changes anywhere refetch this page
+  useRefreshOn(['users', 'users:admin'], refresh);
+
   const handleSearch = useCallback((value) => {
     setSearchTerm(value);
     setPaginationSearch(value);
   }, [setPaginationSearch]);
 
-  // ── Handle Role Filter ────────────────────────────────────────
   const handleRoleFilter = useCallback((role) => {
     setRoleFilter(role);
     applyFilter('role', role);
   }, [applyFilter]);
 
-  // ── Handle Sort Change ────────────────────────────────────────
   const handleSortChange = useCallback((e) => {
     const value = e.target.value;
     applyFilter('sort', value);
   }, [applyFilter]);
 
-  // ✅ Update role with correct endpoint
   const updateRole = async (id, role) => {
     try {
       setActionLoading(id);
@@ -112,11 +104,15 @@ const Users = () => {
         { role },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      // 🔄 Broadcast: role change ripples across users, providers, dashboards
+      refreshMany('users', 'users:admin', 'dashboard', 'providers', 'provider-requests');
+
       await refresh();
       showNotification(`User role updated to ${role}`, 'success');
       toast.success(`User role updated to ${role}`);
     } catch (error) {
-      console.log("Role update error:", error);
+      console.error("Role update error:", error);
       const message = error.response?.data?.message || "Failed to update role";
       showNotification(message, "error");
       toast.error(message);
@@ -125,7 +121,6 @@ const Users = () => {
     }
   };
 
-  // Role colors with AI Tour colors
   const getRoleBadge = (role) => {
     const styles = {
       admin: {
@@ -147,7 +142,6 @@ const Users = () => {
     return styles[role] || styles.traveler;
   };
 
-  // Role counts
   const roleCounts = {
     all: meta.total || 0,
     admin: users.filter(u => u.role === 'admin').length,
@@ -155,9 +149,6 @@ const Users = () => {
     traveler: users.filter(u => u.role === 'traveler').length,
   };
 
-  // ===============================
-  // LOADING STATE
-  // ===============================
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -173,9 +164,6 @@ const Users = () => {
     );
   }
 
-  // ===============================
-  // ERROR STATE
-  // ===============================
   if (error) {
     return (
       <div className="p-6 max-w-7xl mx-auto flex flex-col items-center justify-center h-96 text-center">
@@ -189,13 +177,9 @@ const Users = () => {
     );
   }
 
-  // ===============================
-  // MAIN RENDER
-  // ===============================
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 animate-fade-in">
 
-      {/* ── Notification ── */}
       {notification && (
         <div
           className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-2xl shadow-2xl text-white flex items-center gap-3 ${
@@ -210,7 +194,6 @@ const Users = () => {
         </div>
       )}
 
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center shadow-lg">
@@ -227,7 +210,6 @@ const Users = () => {
         </div>
       </div>
 
-      {/* SEARCH & FILTERS */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
@@ -256,7 +238,6 @@ const Users = () => {
         </div>
       </div>
 
-      {/* Sort Dropdown */}
       <div className="flex justify-end">
         <select
           onChange={handleSortChange}
@@ -269,7 +250,6 @@ const Users = () => {
         </select>
       </div>
 
-      {/* EMPTY STATE */}
       {users.length === 0 ? (
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-16 text-center shadow-sm">
           <div className="w-20 h-20 rounded-full bg-[#0D9488]/10 flex items-center justify-center mx-auto mb-4">
@@ -296,7 +276,6 @@ const Users = () => {
         <>
           <div className="overflow-x-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-sm">
             <table className="w-full">
-              {/* HEADER */}
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
                   <th className="p-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">User</th>
@@ -306,7 +285,6 @@ const Users = () => {
                 </tr>
               </thead>
 
-              {/* BODY */}
               <tbody>
                 {users.map((u) => {
                   const roleBadge = getRoleBadge(u?.role);
@@ -318,7 +296,6 @@ const Users = () => {
                       key={u?._id}
                       className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all duration-200"
                     >
-                      {/* NAME */}
                       <td className="p-4">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0D9488] to-[#F59E0B] flex items-center justify-center text-white text-xs font-bold">
@@ -330,7 +307,6 @@ const Users = () => {
                         </div>
                       </td>
 
-                      {/* EMAIL */}
                       <td className="p-4 text-gray-600 dark:text-gray-300 text-sm">
                         <div className="flex items-center gap-1.5">
                           <Mail size={14} className="text-[#0D9488]" />
@@ -338,7 +314,6 @@ const Users = () => {
                         </div>
                       </td>
 
-                      {/* ROLE */}
                       <td className="p-4">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${roleBadge.bg} ${roleBadge.text}`}>
                           <RoleIcon className="w-3.5 h-3.5" />
@@ -346,10 +321,8 @@ const Users = () => {
                         </span>
                       </td>
 
-                      {/* ACTIONS */}
                       <td className="p-4">
                         <div className="flex gap-2 flex-wrap">
-                          {/* Traveler Button */}
                           <button
                             onClick={() => updateRole(u._id, "traveler")}
                             disabled={actionLoading === u._id || currentRole === "traveler"}
@@ -366,7 +339,6 @@ const Users = () => {
                             )}
                           </button>
 
-                          {/* Provider Button */}
                           <button
                             onClick={() => updateRole(u._id, "provider")}
                             disabled={actionLoading === u._id || currentRole === "provider"}
@@ -379,7 +351,6 @@ const Users = () => {
                             Provider
                           </button>
 
-                          {/* Admin Button */}
                           <button
                             onClick={() => updateRole(u._id, "admin")}
                             disabled={actionLoading === u._id || currentRole === "admin"}
@@ -401,7 +372,6 @@ const Users = () => {
             </table>
           </div>
 
-          {/* PAGINATION */}
           {meta.totalPages > 1 && (
             <div className="mt-4">
               <Pagination
@@ -414,7 +384,6 @@ const Users = () => {
         </>
       )}
 
-      {/* Back to Top */}
       <BackToTop />
     </div>
   );

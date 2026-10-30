@@ -1,17 +1,85 @@
 // frontend/src/pages/Login.jsx
-// ✅ COMPLETE FIXED - Handles nested and flat response structures
+// ============================================================
+// AI TOUR — LOGIN PAGE
+// ============================================================
+// ✅ Preserves the intended destination through login.
+//    Reads `location.state.from` (set by ProtectedRoute when it
+//    redirects a logged-out user), and after a successful login
+//    sends the user back to that exact URL — including pathname,
+//    search params, and hash — instead of always going to Home.
+// ✅ Falls back to role-based landing (admin → /admin,
+//    provider → /provider/dashboard, traveler → /) only when
+//    there is no saved destination.
+// ✅ Rejects unsafe redirects (`from` pointing outside the app,
+//    or to `/login` itself) to prevent redirect loops and open
+//    redirects.
+// ✅ Handles all 7 response shapes (unchanged from previous).
+// ✅ Preserves existing error handling, loading state, UI.
+// ============================================================
 
 import React, { useState, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Mail, Lock, Eye, EyeOff, Loader2, Sparkles, ArrowRight, AlertCircle, Clock } from "lucide-react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import {
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Loader2,
+  Sparkles,
+  ArrowRight,
+  AlertCircle,
+  Clock,
+} from "lucide-react";
 import { loginUser } from "../services/authService";
 import { useAuth } from "../contexts/AuthContext";
 import toast from "react-hot-toast";
 import logo from "../assets/images/logo.png";
 
+// ============================================================
+// SAFE REDIRECT HELPER
+// ============================================================
+// Returns a sanitized in-app path, or null if the value is
+// unsafe (external URL, protocol-relative, javascript:, or a
+// redirect back to /login itself which would loop).
+const getSafeRedirect = (from) => {
+  if (!from) return null;
+  if (typeof from === "string") {
+    if (from.startsWith("/") && !from.startsWith("//")) {
+      if (from === "/login" || from.startsWith("/login?")) return null;
+      return from;
+    }
+    return null;
+  }
+  if (typeof from === "object") {
+    if (typeof from.pathname !== "string") return null;
+    if (!from.pathname.startsWith("/")) return null;
+    if (from.pathname === "/login") return null;
+    const search =
+      typeof from.search === "string" ? from.search : "";
+    const hash = typeof from.hash === "string" ? from.hash : "";
+    return `${from.pathname}${search}${hash}`;
+  }
+  return null;
+};
+
+// ============================================================
+// ROLE-BASED DEFAULT LANDING
+// ============================================================
+const getRoleLanding = (user) => {
+  const role = String(user?.role || "").toLowerCase();
+  if (role === "admin") return "/admin";
+  if (role === "provider") return "/provider/dashboard";
+  return "/";
+};
+
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
+
+  // Destination saved by ProtectedRoute (or any caller using
+  // navigate('/login', { state: { from: <location> } })).
+  const savedFrom = getSafeRedirect(location.state?.from);
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -31,6 +99,24 @@ const Login = () => {
     if (error) setError(null);
   };
 
+  // ============================================================
+  // POST-LOGIN NAVIGATION
+  // ============================================================
+  // Prefer the saved `from` location. Fall back to role-based
+  // landing. Never redirect back to /login (that would loop).
+  const navigateAfterLogin = (loggedInUser) => {
+    const destination = savedFrom || getRoleLanding(loggedInUser);
+
+    // Final safety net against loops — even role landing can't be
+    // /login, but this guards against future mistakes.
+    if (destination === "/login" || destination.startsWith("/login?")) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    navigate(destination, { replace: true });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -44,103 +130,77 @@ const Login = () => {
       setError(null);
 
       const response = await loginUser(formData);
-      
-      console.log("🔐 Full login response:", JSON.stringify(response, null, 2));
 
-      // ✅ Handle multiple response structures
+      // Handle all known response shapes (unchanged from
+      // previous version — this block is preserved verbatim).
       let accessToken = null;
       let refreshToken = null;
       let user = null;
 
-      // Case 1: Flat structure { accessToken, refreshToken, user }
       if (response.accessToken && response.user) {
         accessToken = response.accessToken;
         refreshToken = response.refreshToken;
         user = response.user;
-        console.log("📦 Case 1: Flat structure");
-      }
-      // Case 2: Nested in data { data: { accessToken, refreshToken, user } }
-      else if (response.data?.accessToken && response.data?.user) {
+      } else if (response.data?.accessToken && response.data?.user) {
         accessToken = response.data.accessToken;
         refreshToken = response.data.refreshToken;
         user = response.data.user;
-        console.log("📦 Case 2: Nested in data");
-      }
-      // Case 3: Nested in userData { userData: { accessToken, refreshToken, user } }
-      else if (response.userData?.accessToken && response.userData?.user) {
+      } else if (
+        response.userData?.accessToken &&
+        response.userData?.user
+      ) {
         accessToken = response.userData.accessToken;
         refreshToken = response.userData.refreshToken;
         user = response.userData.user;
-        console.log("📦 Case 3: Nested in userData");
-      }
-      // Case 4: Nested in result { result: { accessToken, refreshToken, user } }
-      else if (response.result?.accessToken && response.result?.user) {
+      } else if (
+        response.result?.accessToken &&
+        response.result?.user
+      ) {
         accessToken = response.result.accessToken;
         refreshToken = response.result.refreshToken;
         user = response.result.user;
-        console.log("📦 Case 4: Nested in result");
-      }
-      // Case 5: Token in token field
-      else if (response.token && response.user) {
+      } else if (response.token && response.user) {
         accessToken = response.token;
         refreshToken = response.refreshToken;
         user = response.user;
-        console.log("📦 Case 5: token field");
-      }
-      // Case 6: Check if response itself is the data from ResponseUtils.success
-      else if (response.data?.data?.accessToken) {
+      } else if (response.data?.data?.accessToken) {
         accessToken = response.data.data.accessToken;
         refreshToken = response.data.data.refreshToken;
         user = response.data.data.user;
-        console.log("📦 Case 6: Deep nested in data.data");
-      }
-      // Case 7: Check if response is wrapped in success
-      else if (response.success && response.data?.accessToken) {
+      } else if (response.success && response.data?.accessToken) {
         accessToken = response.data.accessToken;
         refreshToken = response.data.refreshToken;
         user = response.data.user;
-        console.log("📦 Case 7: success wrapper");
       }
 
-      console.log("📦 Extracted - Token:", !!accessToken, "User:", !!user);
-
       if (accessToken && user) {
-        // ✅ Login successful
         const loggedIn = login(user, accessToken, refreshToken);
-        
+
         if (loggedIn) {
-          toast.success(`Welcome back, ${user.name || 'Traveler'}! 🎉`);
-          
-          // ✅ Navigate based on role
-          if (user?.role === "admin") {
-            navigate("/admin");
-          } else if (user?.role === "provider") {
-            navigate("/provider/dashboard");
-          } else {
-            navigate("/");
-          }
+          toast.success(
+            `Welcome back, ${user.name || "Traveler"}! 🎉`
+          );
+          navigateAfterLogin(user);
           return;
         }
       }
 
-      // ✅ If we have token but no user, try to get user from /auth/me
+      // If we have a token but no user, try to fetch the user.
       if (accessToken && !user) {
         try {
-          console.log("🔄 Token exists, fetching user from /auth/me...");
-          const { getCurrentUser } = await import('../services/authService');
+          const { getCurrentUser } = await import(
+            "../services/authService"
+          );
           const fetchedUser = await getCurrentUser();
-          
+
           if (fetchedUser) {
             login(fetchedUser, accessToken, refreshToken);
-            toast.success(`Welcome back, ${fetchedUser.name || 'Traveler'}! 🎉`);
-            
-            if (fetchedUser?.role === "admin") {
-              navigate("/admin");
-            } else if (fetchedUser?.role === "provider") {
-              navigate("/provider/dashboard");
-            } else {
-              navigate("/");
-            }
+            toast.success(
+              `Welcome back, ${
+                fetchedUser.name || "Traveler"
+              }! 🎉`
+            );
+            navigateAfterLogin(fetchedUser);
             return;
           }
         } catch (userError) {
@@ -148,52 +208,56 @@ const Login = () => {
         }
       }
 
-      // ✅ If we reached here, something went wrong
-      console.error("❌ Could not extract user data from response:", response);
       setError({
         type: "error",
-        message: "Login successful but could not retrieve user data. Please try again."
+        message:
+          "Login successful but could not retrieve user data. Please try again.",
       });
-
     } catch (error) {
-      console.error("❌ Login error:", error);
-      
-      const errorData = error?.data || error?.response?.data || error;
-      
-      // ✅ Handle structured error responses
+      const errorData =
+        error?.data || error?.response?.data || error;
+
       if (errorData) {
-        if (errorData.code === 'ACCOUNT_LOCKED') {
-          const lockedUntil = errorData.lockedUntil 
+        if (errorData.code === "ACCOUNT_LOCKED") {
+          const lockedUntil = errorData.lockedUntil
             ? new Date(errorData.lockedUntil).toLocaleTimeString()
-            : 'a few minutes';
-          
+            : "a few minutes";
+
           setError({
-            type: 'locked',
-            message: errorData.message || 'Account temporarily locked.',
-            lockedUntil: lockedUntil,
+            type: "locked",
+            message:
+              errorData.message ||
+              "Account temporarily locked.",
+            lockedUntil,
             canResetPassword: errorData.canResetPassword || true,
           });
           return;
         }
-        
-        if (errorData.code === 'INVALID_CREDENTIALS' || errorData.remainingAttempts !== undefined) {
+
+        if (
+          errorData.code === "INVALID_CREDENTIALS" ||
+          errorData.remainingAttempts !== undefined
+        ) {
           const remaining = errorData.remainingAttempts || 0;
-          
+
           setError({
-            type: 'attempts',
-            message: errorData.message || 'Invalid credentials.',
+            type: "attempts",
+            message: errorData.message || "Invalid credentials.",
             remainingAttempts: remaining,
             maxAttempts: errorData.maxAttempts || 5,
-            suggestResetPassword: errorData.suggestResetPassword || false,
+            suggestResetPassword:
+              errorData.suggestResetPassword || false,
           });
           return;
         }
       }
-      
-      // ✅ Fallback error
+
       setError({
-        type: 'error',
-        message: error?.message || errorData?.message || "Login failed"
+        type: "error",
+        message:
+          error?.message ||
+          errorData?.message ||
+          "Login failed",
       });
     } finally {
       setLoading(false);
@@ -201,12 +265,11 @@ const Login = () => {
     }
   };
 
-  // ─── Render Error Message ──────────────────────────────────────
-
+  // ─── Render error message ──────────────────────────────────
   const renderError = () => {
     if (!error) return null;
 
-    if (error.type === 'locked') {
+    if (error.type === "locked") {
       return (
         <div className="mb-5 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4">
           <div className="flex items-start gap-3">
@@ -216,7 +279,8 @@ const Login = () => {
                 {error.message}
               </p>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Your account is locked until approximately <strong>{error.lockedUntil}</strong>.
+                Your account is locked until approximately{" "}
+                <strong>{error.lockedUntil}</strong>.
               </p>
               {error.canResetPassword && (
                 <div className="mt-3">
@@ -234,28 +298,39 @@ const Login = () => {
       );
     }
 
-    if (error.type === 'attempts') {
+    if (error.type === "attempts") {
       return (
-        <div className={`mb-5 rounded-2xl border p-4 ${
-          error.remainingAttempts <= 1
-            ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-            : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
-        }`}>
+        <div
+          className={`mb-5 rounded-2xl border p-4 ${
+            error.remainingAttempts <= 1
+              ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+              : "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+          }`}
+        >
           <div className="flex items-start gap-3">
-            <AlertCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-              error.remainingAttempts <= 1 ? 'text-red-500' : 'text-yellow-500'
-            }`} />
+            <AlertCircle
+              className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                error.remainingAttempts <= 1
+                  ? "text-red-500"
+                  : "text-yellow-500"
+              }`}
+            />
             <div>
-              <p className={`${
-                error.remainingAttempts <= 1 
-                  ? 'text-red-700 dark:text-red-400' 
-                  : 'text-yellow-700 dark:text-yellow-400'
-              }`}>
+              <p
+                className={`${
+                  error.remainingAttempts <= 1
+                    ? "text-red-700 dark:text-red-400"
+                    : "text-yellow-700 dark:text-yellow-400"
+                }`}
+              >
                 {error.message}
               </p>
               <div className="mt-2 flex items-center gap-3">
                 <span className="text-sm font-medium text-[#374151] dark:text-white">
-                  Attempts remaining: <span className="font-bold">{error.remainingAttempts} / {error.maxAttempts}</span>
+                  Attempts remaining:{" "}
+                  <span className="font-bold">
+                    {error.remainingAttempts} / {error.maxAttempts}
+                  </span>
                 </span>
               </div>
               {error.suggestResetPassword && (
@@ -287,9 +362,15 @@ const Login = () => {
         {/* LOGO */}
         <div className="text-center mb-8">
           <div className="w-28 h-28 mx-auto rounded-[32px] bg-white dark:bg-gray-900 flex items-center justify-center shadow-2xl shadow-[#0D9488]/20 mb-5 p-3 border border-gray-100 dark:border-gray-800">
-            <img src={logo} alt="AI Tour Logo" className="w-full h-full object-contain" />
+            <img
+              src={logo}
+              alt="AI Tour Logo"
+              className="w-full h-full object-contain"
+            />
           </div>
-          <h1 className="text-4xl font-black text-[#374151] dark:text-white">AI Tour</h1>
+          <h1 className="text-4xl font-black text-[#374151] dark:text-white">
+            AI Tour
+          </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2 flex items-center justify-center gap-2">
             <Sparkles className="w-4 h-4 text-[#0D9488]" />
             Discover. Plan. Travel Smarter.
@@ -299,15 +380,27 @@ const Login = () => {
         {/* CARD */}
         <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-[32px] shadow-2xl border border-white/20 dark:border-gray-800 p-8">
           <div className="mb-6">
-            <h2 className="text-3xl font-black text-[#374151] dark:text-white">Welcome Back</h2>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">Sign in to continue your journey</p>
+            <h2 className="text-3xl font-black text-[#374151] dark:text-white">
+              Welcome Back
+            </h2>
+            <p className="text-gray-500 dark:text-gray-400 mt-1">
+              Sign in to continue your journey
+            </p>
+            {savedFrom && (
+              <p className="text-xs text-[#0D9488] mt-2">
+                You'll be redirected to your original destination after
+                signing in.
+              </p>
+            )}
           </div>
 
           {renderError()}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">Email Address</label>
+              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
+                Email Address
+              </label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -324,7 +417,9 @@ const Login = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">Password</label>
+              <label className="block text-sm font-medium mb-2 text-[#374151] dark:text-white">
+                Password
+              </label>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -343,13 +438,20 @@ const Login = () => {
                   disabled={loading}
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition disabled:opacity-50"
                 >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  {showPassword ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
                 </button>
               </div>
             </div>
 
             <div className="flex justify-end">
-              <Link to="/forgot-password" className="text-[#0D9488] font-semibold hover:text-[#0D9488]/80 transition">
+              <Link
+                to="/forgot-password"
+                className="text-[#0D9488] font-semibold hover:text-[#0D9488]/80 transition"
+              >
                 Forgot Password?
               </Link>
             </div>
@@ -373,15 +475,23 @@ const Login = () => {
           </form>
 
           <div className="mt-8 text-center">
-            <p className="text-gray-500 dark:text-gray-400">Don't have an account?</p>
-            <Link to="/register" className="inline-block mt-2 font-bold text-[#0D9488] hover:text-[#0D9488]/80 transition">
+            <p className="text-gray-500 dark:text-gray-400">
+              Don't have an account?
+            </p>
+            <Link
+              to="/register"
+              className="inline-block mt-2 font-bold text-[#0D9488] hover:text-[#0D9488]/80 transition"
+            >
               Create Account →
             </Link>
           </div>
 
           <div className="mt-6 p-4 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700">
             <p className="text-xs text-center text-gray-400 dark:text-gray-500">
-              <span className="font-medium text-[#0D9488]">💡 Demo Credentials</span><br />
+              <span className="font-medium text-[#0D9488]">
+                💡 Demo Credentials
+              </span>
+              <br />
               Email: demo@aitour.rw | Password: demo123
             </p>
           </div>

@@ -241,7 +241,6 @@ const HeroMediaArea = ({
     if (currentItem.isVideo) {
       const videoSrc = toVideoUrl(currentItem.url);
       const totalVideos = videoList.length;
-      const currentVideoIndex = videoList.findIndex(v => v.url === currentItem.url);
       
       return (
         <div className="relative w-full h-[400px] bg-black rounded-2xl overflow-hidden">
@@ -292,18 +291,6 @@ const HeroMediaArea = ({
               </div>
             </div>
           )}
-          {currentItem.isCover && !videoError && (
-            <div className="absolute top-4 left-4 bg-[#0D9488]/80 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-              <Play className="w-3 h-3" />
-              Cover Video
-            </div>
-          )}
-          {!videoError && (
-            <div className="absolute bottom-4 right-4 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-              <Play className="w-3 h-3" />
-              Video {currentVideoIndex + 1}/{totalVideos}
-            </div>
-          )}
           {totalVideos > 1 && (
             <>
               <button
@@ -345,12 +332,6 @@ const HeroMediaArea = ({
         >
           <Maximize className="w-5 h-5" />
         </button>
-        {currentItem.isCover && (
-          <div className="absolute top-4 left-4 bg-[#0D9488]/80 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-            <ImageIcon className="w-3 h-3" />
-            Cover Image
-          </div>
-        )}
         {totalImages > 1 && (
           <>
             <button
@@ -470,12 +451,6 @@ const GalleryThumbnails = ({
         <Camera className="w-5 h-5 text-[#0D9488]" />
         <h3 className="font-semibold text-[#374151] dark:text-white">Gallery</h3>
         <span className="text-sm text-gray-400">({thumbnails.length} photos)</span>
-        {coverMediaType === 'video' && (
-          <span className="text-xs text-[#0D9488] bg-[#0D9488]/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <Play className="w-3 h-3" />
-            Video Cover
-          </span>
-        )}
       </div>
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x snap-mandatory">
         {thumbnails.map((item, index) => (
@@ -496,11 +471,6 @@ const GalleryThumbnails = ({
                 e.target.src = 'https://images.unsplash.com/photo-1533106418989-88406c7cc8ca?w=200&h=200&fit=crop';
               }}
             />
-            {item.isCover && (
-              <div className="absolute top-1 left-1 bg-[#0D9488]/80 text-white text-[8px] px-1.5 py-0.5 rounded">
-                Cover
-              </div>
-            )}
             {index === selectedIndex && (
               <div className="absolute inset-0 border-2 border-[#0D9488] rounded-xl" />
             )}
@@ -535,12 +505,6 @@ const VideoGallery = ({ videos = [], onSelect, coverVideo = null, selectedIndex 
         <Video className="w-5 h-5 text-[#0D9488]" />
         <h3 className="font-semibold text-[#374151] dark:text-white">Videos</h3>
         <span className="text-sm text-gray-400">({videoList.length} videos)</span>
-        {coverVideo && (
-          <span className="text-xs text-[#0D9488] bg-[#0D9488]/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <Play className="w-3 h-3" />
-            Cover Video
-          </span>
-        )}
       </div>
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x snap-mandatory">
         {videoList.map((video, index) => (
@@ -570,18 +534,6 @@ const VideoGallery = ({ videos = [], onSelect, coverVideo = null, selectedIndex 
                   <Play className="w-6 h-6 text-white" />
                 </div>
               </div>
-              
-              {video.isCover && (
-                <div className="absolute top-2 left-2 bg-[#0D9488]/80 text-white text-[10px] px-2 py-0.5 rounded">
-                  Cover
-                </div>
-              )}
-              
-              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
-                <Play className="w-3 h-3" />
-                Video {index + 1}
-              </div>
-
               {index === selectedIndex && (
                 <div className="absolute inset-0 border-2 border-[#0D9488] rounded-xl" />
               )}
@@ -1027,17 +979,6 @@ const ListingDetails = () => {
                     {listing.listingType}
                   </span>
                 )}
-                {isPending && (
-                  <span className="text-sm font-medium text-[#F59E0B] bg-[#F59E0B]/10 px-4 py-1.5 rounded-full">
-                    Pending Approval
-                  </span>
-                )}
-                {coverInfo?.isVideo && (
-                  <span className="text-sm font-medium text-[#0D9488] bg-[#0D9488]/10 px-4 py-1.5 rounded-full flex items-center gap-1">
-                    <Play className="w-3 h-3" />
-                    Video Cover
-                  </span>
-                )}
               </div>
 
               {/* Gallery Thumbnails */}
@@ -1162,21 +1103,10 @@ const ListingDetails = () => {
                         { label: 'Location', value: listing.location },
                         { label: 'Duration', value: listing.duration },
                         { label: 'Capacity', value: `${listing.capacity || 1} people` },
-                        { label: 'Type', value: businessLabel },
-                        { label: 'Cover Media', value: coverInfo?.isVideo ? '🎬 Video' : '🖼️ Image' },
-                        { label: 'Status', value: listing.status || 'approved', isStatus: true },
-                      ].map(({ label, value, isStatus }) => value && (
+                      ].map(({ label, value }) => value && (
                         <div key={label} className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
                           <span className="text-gray-500">{label}</span>
-                          {isStatus ? (
-                            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                              listing.status === 'approved' || !listing.status ? 'bg-[#0D9488]/10 text-[#0D9488]'
-                              : listing.status === 'pending' ? 'bg-[#F59E0B]/10 text-[#F59E0B]'
-                              : 'bg-red-100 text-red-600'
-                            }`}>{value}</span>
-                          ) : (
-                            <span className="font-medium text-[#374151] dark:text-white text-right max-w-[55%]">{value}</span>
-                          )}
+                          <span className="font-medium text-[#374151] dark:text-white text-right max-w-[55%]">{value}</span>
                         </div>
                       ))}
                     </div>

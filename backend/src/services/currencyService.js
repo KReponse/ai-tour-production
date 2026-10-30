@@ -1,497 +1,226 @@
 // backend/src/services/currencyService.js
-// ✅ COMPLETE FIXED - All methods properly defined and exported
 
 import Currency from "../models/Currency.js";
 import ExchangeRate from "../models/ExchangeRate.js";
-import { currencyConfig, getCurrencyConfig, getPlatformFee } from "../config/currency.config.js";
+import exchangeRateService from "./exchangeRateService.js";
+import { currencyConfig } from "../config/currency.config.js";
 
-// Try to import logger, fallback to console if not available
-let logger;
-try {
-  const loggerModule = await import("../config/logger.js");
-  logger = loggerModule.default || loggerModule;
-} catch (error) {
-  logger = {
-    info: (...args) => console.log('ℹ️', ...args),
-    error: (...args) => console.error('❌', ...args),
-    warn: (...args) => console.warn('⚠️', ...args),
-    debug: (...args) => console.debug('🔍', ...args),
-  };
-}
+// ==========================================================
+// HELPERS
+// ==========================================================
 
-class CurrencyService {
-  constructor() {
-    this.cache = new Map();
-    this.cacheTTL = 3600000; // 1 hour in milliseconds
-    this.baseCurrency = currencyConfig.exchangeRate.baseCurrency || "RWF";
-    logger.info(`✅ Currency Service initialized with base currency: ${this.baseCurrency}`);
-  }
+const SAFE_NUMBER = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
 
-  // =========================
-  // ✅ GET ACTIVE CURRENCIES
-  // =========================
-
-  async getActiveCurrencies() {
-    const cacheKey = "active_currencies";
-    const cached = this.getFromCache(cacheKey);
-    if (cached) return cached;
-
-    try {
-      let currencies = await Currency.find({ isActive: true })
-        .sort({ isDefault: -1, code: 1 })
-        .lean();
-
-      // If no currencies in DB, seed defaults
-      if (currencies.length === 0) {
-        await Currency.seedDefaults();
-        currencies = await Currency.find({ isActive: true })
-          .sort({ isDefault: -1, code: 1 })
-          .lean();
-      }
-
-      this.setCache(cacheKey, currencies);
-      return currencies;
-    } catch (error) {
-      logger.error("Error fetching active currencies:", error);
-      // Fallback to config
-      return Object.values(currencyConfig.supportedCurrencies).filter(c => c.isActive !== false);
-    }
-  }
-
-  // =========================
-  // ✅ GET DEFAULT CURRENCY
-  // =========================
-
-  async getDefaultCurrency() {
-    const cacheKey = "default_currency";
-    const cached = this.getFromCache(cacheKey);
-    if (cached) return cached;
-
-    try {
-      let currency = await Currency.findOne({ isDefault: true, isActive: true }).lean();
-      
-      if (!currency) {
-        currency = await Currency.findOne({ isBaseCurrency: true, isActive: true }).lean();
-      }
-      
-      if (!currency) {
-        currency = await Currency.findOne({ isActive: true }).lean();
-      }
-
-      if (!currency) {
-        const defaultCode = currencyConfig.payment.defaultCurrency || "RWF";
-        currency = this.getCurrencyByCode(defaultCode);
-      }
-
-      this.setCache(cacheKey, currency);
-      return currency;
-    } catch (error) {
-      logger.error("Error fetching default currency:", error);
-      const defaultCode = currencyConfig.payment.defaultCurrency || "RWF";
-      return this.getCurrencyByCode(defaultCode);
-    }
-  }
-
-  // =========================
-  // ✅ GET CURRENCY BY CODE
-  // =========================
-
-  async getCurrencyByCode(code) {
-    if (!code) return null;
-
-    const upperCode = code.toUpperCase();
-    const cacheKey = `currency_${upperCode}`;
-    const cached = this.getFromCache(cacheKey);
-    if (cached) return cached;
-
-    try {
-      let currency = await Currency.findOne({ code: upperCode, isActive: true }).lean();
-      
-      if (!currency) {
-        const configCurrency = getCurrencyConfig(upperCode);
-        if (configCurrency) {
-          currency = {
-            code: upperCode,
-            symbol: configCurrency.symbol,
-            name: configCurrency.name,
-            decimalPlaces: configCurrency.decimalPlaces,
-            isDefault: configCurrency.isDefault || false,
-            isBaseCurrency: configCurrency.isBase || false,
-            isActive: true,
-            exchangeRate: 1,
-            platformFeePercentage: getPlatformFee(upperCode),
-            paymentMethods: configCurrency.paymentMethods || [],
-            settlementAllowed: configCurrency.settlementAllowed !== false,
-            format: {
-              locale: currencyConfig.display.format[upperCode]?.locale || "en-US",
-              currencyDisplay: "symbol",
-            },
-          };
-        }
-      }
-
-      if (currency) {
-        this.setCache(cacheKey, currency);
-      }
-      return currency;
-    } catch (error) {
-      logger.error(`Error fetching currency ${code}:`, error);
-      const configCurrency = getCurrencyConfig(upperCode);
-      return configCurrency ? {
-        code: upperCode,
-        symbol: configCurrency.symbol,
-        name: configCurrency.name,
-        decimalPlaces: configCurrency.decimalPlaces,
-        isDefault: configCurrency.isDefault || false,
-        isBaseCurrency: configCurrency.isBase || false,
-        isActive: true,
-        exchangeRate: 1,
-        platformFeePercentage: getPlatformFee(upperCode),
-        paymentMethods: configCurrency.paymentMethods || [],
-        settlementAllowed: configCurrency.settlementAllowed !== false,
-      } : null;
-    }
-  }
-
-  // =========================
-  // ✅ CHECK IF CURRENCY IS ACTIVE
-  // =========================
-
-  async isCurrencyActive(code) {
-    if (!code) return false;
-    
-    const upperCode = code.toUpperCase();
-    try {
-      const currency = await Currency.findOne({ code: upperCode, isActive: true });
-      return !!currency;
-    } catch (error) {
-      return !!currencyConfig.supportedCurrencies[upperCode];
-    }
-  }
-
-  // =========================
-  // ✅ GET EXCHANGE RATE
-  // =========================
-
-  async getExchangeRate(fromCurrency, toCurrency) {
-    if (fromCurrency === toCurrency) return 1;
-
-    const from = fromCurrency.toUpperCase();
-    const to = toCurrency.toUpperCase();
-    const cacheKey = `rate_${from}_${to}`;
-
-    const cached = this.getFromCache(cacheKey);
-    if (cached) return cached;
-
-    try {
-      const rate = await ExchangeRate.getLatest(from, to);
-      
-      if (rate) {
-        this.setCache(cacheKey, rate);
-        return rate;
-      }
-
-      const inverseRate = await ExchangeRate.getLatest(to, from);
-      if (inverseRate) {
-        const rateObj = {
-          _id: inverseRate._id,
-          fromCurrency: from,
-          toCurrency: to,
-          rate: 1 / inverseRate.rate,
-          inverseRate: inverseRate.rate,
-          effectiveDate: inverseRate.effectiveDate,
-          source: inverseRate.source,
-          isInverse: true,
-        };
-        this.setCache(cacheKey, rateObj);
-        return rateObj;
-      }
-
-      const fallbackRate = this.getFallbackRate(from, to);
-      if (fallbackRate) {
-        const rateObj = {
-          fromCurrency: from,
-          toCurrency: to,
-          rate: fallbackRate,
-          effectiveDate: new Date(),
-          source: "fallback",
-          isFallback: true,
-        };
-        this.setCache(cacheKey, rateObj);
-        return rateObj;
-      }
-
-      return null;
-    } catch (error) {
-      logger.error(`Error getting exchange rate ${from}/${to}:`, error);
-      return null;
-    }
-  }
-
-  // =========================
-  // ✅ CONVERT AMOUNT
-  // =========================
-
-  async convertAmount(amount, fromCurrency, toCurrency, options = {}) {
-    if (!amount || amount === 0) return { amount: 0, rate: 1 };
-
-    const {
-      useInverse = false,
-      round = true,
-      decimalPlaces = null,
-    } = options;
-
-    if (fromCurrency === toCurrency) {
-      return {
-        amount: amount,
-        rate: 1,
-        fromCurrency,
-        toCurrency,
-        convertedAmount: amount,
-      };
-    }
-
-    try {
-      const rate = await this.getExchangeRate(fromCurrency, toCurrency);
-      
-      if (!rate) {
-        const inverseRate = await this.getExchangeRate(toCurrency, fromCurrency);
-        if (inverseRate) {
-          const converted = useInverse 
-            ? amount * inverseRate 
-            : amount / inverseRate;
-          
-          return {
-            amount: amount,
-            rate: inverseRate,
-            fromCurrency,
-            toCurrency,
-            convertedAmount: this.roundAmount(converted, decimalPlaces),
-            isInverse: true,
-          };
-        }
-        
-        const fallbackRate = this.getFallbackRate(fromCurrency, toCurrency);
-        if (fallbackRate) {
-          const converted = amount * fallbackRate;
-          return {
-            amount: amount,
-            rate: fallbackRate,
-            fromCurrency,
-            toCurrency,
-            convertedAmount: this.roundAmount(converted, decimalPlaces),
-            isFallback: true,
-          };
-        }
-
-        return {
-          amount: amount,
-          rate: 1,
-          fromCurrency,
-          toCurrency,
-          convertedAmount: amount,
-          isFallback: true,
-          error: "No exchange rate found",
-        };
-      }
-
-      const converted = useInverse 
-        ? amount / rate 
-        : amount * rate;
-
-      const result = {
-        amount: amount,
-        rate: rate,
-        fromCurrency,
-        toCurrency,
-        convertedAmount: this.roundAmount(converted, decimalPlaces),
-        rateId: rate._id,
-        effectiveDate: rate.effectiveDate,
-        source: rate.source,
-      };
-
-      if (rate.markUsed) {
-        await rate.markUsed().catch(() => {});
-      }
-
-      return result;
-    } catch (error) {
-      logger.error("Currency conversion error:", error);
-      return {
-        amount: amount,
-        rate: 1,
-        fromCurrency,
-        toCurrency,
-        convertedAmount: amount,
-        error: error.message,
-      };
-    }
-  }
-
-  // =========================
-  // ✅ FORMAT AMOUNT
-  // =========================
-
-  formatAmount(amount, currency, options = {}) {
-    if (!amount && amount !== 0) return "N/A";
-    if (!currency) return amount?.toString() || "0";
-
-    const {
-      locale = null,
-      currencyDisplay = "symbol",
-      minimumFractionDigits = null,
-      maximumFractionDigits = null,
-    } = options;
-
-    const currencyObj = typeof currency === "string" 
-      ? this.getCurrencyByCode(currency) 
-      : currency;
-
-    if (!currencyObj) return amount.toString();
-
-    const code = currencyObj.code || currency;
-    const decimalPlaces = currencyObj.decimalPlaces || 2;
-    const formatConfig = currencyConfig.display.format[code] || currencyConfig.display.format.RWF;
-
-    try {
-      const formatter = new Intl.NumberFormat(locale || formatConfig.locale || "en-US", {
-        style: "currency",
-        currency: code,
-        currencyDisplay: currencyDisplay || formatConfig.currencyDisplay || "symbol",
-        minimumFractionDigits: minimumFractionDigits !== null ? minimumFractionDigits : decimalPlaces,
-        maximumFractionDigits: maximumFractionDigits !== null ? maximumFractionDigits : decimalPlaces,
-      });
-
-      return formatter.format(amount);
-    } catch (error) {
-      const symbol = currencyObj.symbol || code;
-      const position = currencyConfig.display.symbolPosition[code] || "before";
-      const formatted = amount.toFixed(decimalPlaces);
-      
-      if (position === "after") {
-        return `${formatted} ${symbol}`;
-      }
-      return `${symbol}${formatted}`;
-    }
-  }
-
-  // =========================
-  // ✅ GET FALLBACK RATE
-  // =========================
-
-  getFallbackRate(fromCurrency, toCurrency) {
-    const from = fromCurrency.toUpperCase();
-    const to = toCurrency.toUpperCase();
-
-    if (from === this.baseCurrency) {
-      return currencyConfig.exchangeRate.fallbackRates[to] || null;
-    }
-
-    if (to === this.baseCurrency) {
-      const rate = currencyConfig.exchangeRate.fallbackRates[from];
-      return rate ? 1 / rate : null;
-    }
-
-    const fromRate = currencyConfig.exchangeRate.fallbackRates[from];
-    const toRate = currencyConfig.exchangeRate.fallbackRates[to];
-    
-    if (fromRate && toRate) {
-      return toRate / fromRate;
-    }
-
+const normalizeCode = (currency) => {
+  if (currency === null || currency === undefined) {
     return null;
   }
 
-  // =========================
-  // ✅ GET CURRENCY SYMBOL
-  // =========================
+  const code = String(currency).trim().toUpperCase();
 
-  getCurrencySymbol(code) {
-    if (!code) return "$";
-    
-    const upperCode = code.toUpperCase();
-    const currency = this.getCurrencyByCode(upperCode);
-    return currency?.symbol || code;
+  return code || null;
+};
+
+const getNestedValue = (object, paths = []) => {
+  for (const path of paths) {
+    let current = object;
+
+    for (const key of path.split(".")) {
+      if (current === null || current === undefined) {
+        current = undefined;
+        break;
+      }
+
+      current = current[key];
+    }
+
+    if (current !== undefined && current !== null) {
+      return current;
+    }
   }
 
-  // =========================
-  // ✅ GET DECIMAL PLACES
-  // =========================
+  return undefined;
+};
 
-  getDecimalPlaces(code) {
-    if (!code) return 2;
-    
-    const upperCode = code.toUpperCase();
-    const currency = this.getCurrencyByCode(upperCode);
-    return currency?.decimalPlaces || 2;
+const getConfiguredCurrency = (code) => {
+  const normalizedCode = normalizeCode(code);
+
+  if (!normalizedCode || !currencyConfig) {
+    return null;
   }
 
-  // =========================
-  // ✅ ROUND AMOUNT
-  // =========================
-
-  roundAmount(amount, decimalPlaces = null) {
-    if (!amount && amount !== 0) return 0;
-    
-    const places = decimalPlaces !== null ? decimalPlaces : 2;
-    const factor = Math.pow(10, places);
-    return Math.round(amount * factor) / factor;
+  if (Array.isArray(currencyConfig)) {
+    return (
+      currencyConfig.find(
+        (item) =>
+          normalizeCode(
+            item?.code ||
+              item?.currency ||
+              item?.currencyCode
+          ) === normalizedCode
+      ) || null
+    );
   }
 
-  // =========================
-  // ✅ CALCULATE PLATFORM FEE
-  // =========================
+  if (currencyConfig.currencies) {
+    if (Array.isArray(currencyConfig.currencies)) {
+      return (
+        currencyConfig.currencies.find(
+          (item) =>
+            normalizeCode(
+              item?.code ||
+                item?.currency ||
+                item?.currencyCode
+            ) === normalizedCode
+        ) || null
+      );
+    }
 
-  async calculatePlatformFee(amount, currency) {
-    const currencyObj = typeof currency === "string" 
-      ? await this.getCurrencyByCode(currency) 
-      : currency;
+    if (currencyConfig.currencies[normalizedCode]) {
+      return currencyConfig.currencies[normalizedCode];
+    }
+  }
 
-    const feePercentage = currencyObj?.platformFeePercentage || getPlatformFee(currency) || 10;
-    const fee = (amount * feePercentage) / 100;
-    
-    return {
-      percentage: feePercentage,
-      amount: this.roundAmount(fee, currencyObj?.decimalPlaces),
-      currency: currencyObj?.code || currency,
+  if (currencyConfig[normalizedCode]) {
+    return currencyConfig[normalizedCode];
+  }
+
+  return null;
+};
+
+const getConfiguredDefaultCurrency = () => {
+  const configured = getNestedValue(currencyConfig, [
+    "defaultCurrency",
+    "defaultCurrencyCode",
+    "baseCurrency",
+    "primaryCurrency",
+  ]);
+
+  return normalizeCode(configured) || "RWF";
+};
+
+// ==========================================================
+// SERVICE
+// ==========================================================
+
+class CurrencyService {
+  constructor() {
+    this.baseCurrency = "RWF";
+
+    this.cache = new Map();
+
+    // 5 minutes
+    this.cacheDuration = 5 * 60 * 1000;
+
+    // Fallback rates used only when DB/provider
+    // exchange-rate data is unavailable.
+    this.defaultRates = {
+      RWF: 1,
+      USD: 1450,
+      EUR: 1550,
+      GBP: 1800,
+      KES: 11.2,
+      UGX: 0.39,
+      TZS: 0.39,
+      BIF: 0.42,
+      CDF: 0.52,
+      ZAR: 82,
+      AED: 395,
+      CHF: 1750,
+      CAD: 1050,
+      AUD: 950,
+      JPY: 9.8,
+      CNY: 200,
+      INR: 17.2,
+      NGN: 0.95,
+      GHS: 85,
+      XAF: 2.35,
     };
+
+    console.log("💱 CurrencyService initialized");
+    console.log(`💱 Base currency: ${this.baseCurrency}`);
   }
 
-  // =========================
-  // ✅ VALIDATE CURRENCY
-  // =========================
+  // ========================================================
+  // NORMALIZATION
+  // ========================================================
 
-  isValidCurrency(code) {
-    if (!code) return false;
-    const upperCode = code.toUpperCase();
-    return !!currencyConfig.supportedCurrencies[upperCode];
+  normalizeCurrency(currency) {
+    return normalizeCode(currency);
   }
 
-  // =========================
-  // ✅ GET SUPPORTED CURRENCY CODES
-  // =========================
-
-  getSupportedCurrencyCodes() {
-    return Object.keys(currencyConfig.supportedCurrencies);
+  isSameCurrency(currencyA, currencyB) {
+    return (
+      this.normalizeCurrency(currencyA) ===
+      this.normalizeCurrency(currencyB)
+    );
   }
 
-  // =========================
-  // ✅ CACHE HELPERS
-  // =========================
+  roundAmount(amount, decimals = 2) {
+    const numericAmount = SAFE_NUMBER(amount, 0);
+    const factor = 10 ** decimals;
 
-  getFromCache(key) {
-    if (!this.cache.has(key)) return null;
-    
-    const cached = this.cache.get(key);
-    if (Date.now() - cached.timestamp > this.cacheTTL) {
+    return (
+      Math.round(
+        (numericAmount + Number.EPSILON) * factor
+      ) / factor
+    );
+  }
+
+  isValidPositiveRate(rate) {
+    return (
+      Number.isFinite(Number(rate)) &&
+      Number(rate) > 0
+    );
+  }
+
+  // ========================================================
+  // CACHE
+  // ========================================================
+
+  getCacheKey(fromCurrency, toCurrency) {
+    const from = this.normalizeCurrency(fromCurrency);
+    const to = this.normalizeCurrency(toCurrency);
+
+    return `${from}:${to}`;
+  }
+
+  getCachedRate(fromCurrency, toCurrency) {
+    const key = this.getCacheKey(
+      fromCurrency,
+      toCurrency
+    );
+
+    const entry = this.cache.get(key);
+
+    if (!entry) {
+      return null;
+    }
+
+    if (
+      Date.now() - entry.timestamp >
+      this.cacheDuration
+    ) {
       this.cache.delete(key);
       return null;
     }
-    
-    return cached.value;
+
+    return entry.value;
   }
 
-  setCache(key, value) {
+  setCachedRate(
+    fromCurrency,
+    toCurrency,
+    value
+  ) {
+    const key = this.getCacheKey(
+      fromCurrency,
+      toCurrency
+    );
+
     this.cache.set(key, {
       value,
       timestamp: Date.now(),
@@ -502,92 +231,1086 @@ class CurrencyService {
     this.cache.clear();
   }
 
-  clearCacheKey(key) {
-    this.cache.delete(key);
-  }
+  // ========================================================
+  // CURRENCY DATABASE
+  // ========================================================
 
-  // =========================
-  // ✅ ADMIN METHODS
-  // =========================
+  async getCurrency(code) {
+    const normalizedCode =
+      this.normalizeCurrency(code);
 
-  async createOrUpdateCurrency(data) {
-    const { code, ...updateData } = data;
-    const upperCode = code.toUpperCase();
-
-    let currency = await Currency.findOne({ code: upperCode });
-    
-    if (currency) {
-      Object.assign(currency, updateData);
-      await currency.save();
-    } else {
-      currency = new Currency({
-        code: upperCode,
-        ...updateData,
-      });
-      await currency.save();
+    if (!normalizedCode) {
+      return null;
     }
 
-    this.clearCacheKey(`currency_${upperCode}`);
-    this.clearCacheKey("active_currencies");
-    this.clearCacheKey("default_currency");
+    try {
+      const currency = await Currency.findOne({
+        code: normalizedCode,
+      }).lean();
 
-    return currency;
-  }
-
-  async updateExchangeRate(code, rate, source = "admin") {
-    const upperCode = code.toUpperCase();
-    
-    const currency = await Currency.findOne({ code: upperCode });
-    if (!currency) {
-      throw new Error(`Currency ${upperCode} not found`);
-    }
-
-    currency.exchangeRate = rate;
-    currency.exchangeRateUpdatedAt = new Date();
-    currency.exchangeRateSource = source;
-    await currency.save();
-
-    await ExchangeRate.setRate(
-      this.baseCurrency,
-      upperCode,
-      rate,
-      {
-        source,
-        sourceProvider: source,
-        metadata: { updatedBy: "admin" },
+      if (currency) {
+        return currency;
       }
+    } catch (error) {
+      console.error(
+        `❌ Failed to load currency ${normalizedCode}:`,
+        error.message
+      );
+    }
+
+    // Fallback to configured currency.
+    const configured =
+      getConfiguredCurrency(normalizedCode);
+
+    if (configured) {
+      return {
+        code: normalizedCode,
+        ...configured,
+      };
+    }
+
+    // Fallback currency is considered active
+    // only when we explicitly know its rate.
+    if (
+      Object.prototype.hasOwnProperty.call(
+        this.defaultRates,
+        normalizedCode
+      )
+    ) {
+      return {
+        code: normalizedCode,
+        name: normalizedCode,
+        symbol: normalizedCode,
+        isActive: true,
+      };
+    }
+
+    return null;
+  }
+
+  async getCurrencyByCode(code) {
+    return this.getCurrency(code);
+  }
+
+  // ========================================================
+  // FIX:
+  // currencyController.js expects this method.
+  // ========================================================
+
+  async isCurrencyActive(currencyCode) {
+    const code =
+      this.normalizeCurrency(currencyCode);
+
+    if (!code) {
+      return false;
+    }
+
+    try {
+      // If currency exists in DB, DB status is authoritative.
+      const currency = await Currency.findOne({
+        code,
+      }).lean();
+
+      if (currency) {
+        return currency.isActive !== false;
+      }
+    } catch (error) {
+      console.warn(
+        `⚠️ Failed checking currency status for ${code}:`,
+        error.message
+      );
+    }
+
+    // Configured currency fallback.
+    const configured =
+      getConfiguredCurrency(code);
+
+    if (configured) {
+      return configured.isActive !== false;
+    }
+
+    // Fallback currency list.
+    if (
+      Object.prototype.hasOwnProperty.call(
+        this.defaultRates,
+        code
+      )
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  async getActiveCurrencies() {
+    try {
+      const currencies =
+        await Currency.find({
+          isActive: true,
+        })
+          .sort({
+            code: 1,
+          })
+          .lean();
+
+      if (currencies?.length) {
+        return currencies;
+      }
+    } catch (error) {
+      console.error(
+        "❌ Failed to load active currencies:",
+        error.message
+      );
+    }
+
+    // DB can be empty during initial setup.
+    const configuredCodes =
+      Object.keys(this.defaultRates);
+
+    return configuredCodes.map((code) => {
+      const configured =
+        getConfiguredCurrency(code);
+
+      return {
+        code,
+        name:
+          configured?.name ||
+          configured?.displayName ||
+          code,
+        symbol:
+          configured?.symbol ||
+          code,
+        isActive: true,
+        decimalDigits:
+          configured?.decimalDigits ??
+          configured?.decimals ??
+          2,
+      };
+    });
+  }
+
+  async getSupportedCurrencies() {
+    return this.getActiveCurrencies();
+  }
+
+  // ========================================================
+  // DEFAULT CURRENCY
+  // ========================================================
+
+  async getDefaultCurrencyCode() {
+    const configuredDefault =
+      getConfiguredDefaultCurrency();
+
+    try {
+      const configuredCurrency =
+        await Currency.findOne({
+          code: configuredDefault,
+          isActive: true,
+        }).lean();
+
+      if (configuredCurrency?.code) {
+        return this.normalizeCurrency(
+          configuredCurrency.code
+        );
+      }
+    } catch (error) {
+      console.error(
+        "❌ Failed to read default currency from database:",
+        error.message
+      );
+    }
+
+    return (
+      configuredDefault ||
+      this.baseCurrency
     );
-
-    this.clearCacheKey(`currency_${upperCode}`);
-    this.clearCacheKey(`rate_${this.baseCurrency}_${upperCode}`);
-
-    return currency;
   }
 
-  async getRateHistory(code, options = {}) {
-    const upperCode = code.toUpperCase();
-    return ExchangeRate.getHistory(this.baseCurrency, upperCode, options);
+  // Backward-compatible API expected by controller.
+  async getDefaultCurrency() {
+    return this.getDefaultCurrencyCode();
   }
 
-  async getCurrencyStats() {
-    const total = await Currency.countDocuments();
-    const active = await Currency.countDocuments({ isActive: true });
-    const defaultCurrency = await this.getDefaultCurrency();
-    const baseCurrency = await Currency.findOne({ isBaseCurrency: true });
+  // ========================================================
+  // FALLBACK RATES
+  // ========================================================
+
+  getFallbackRate(currency) {
+    const normalizedCurrency =
+      this.normalizeCurrency(currency);
+
+    if (!normalizedCurrency) {
+      return null;
+    }
+
+    if (
+      normalizedCurrency ===
+      this.baseCurrency
+    ) {
+      return 1;
+    }
+
+    const configuredCurrency =
+      getConfiguredCurrency(
+        normalizedCurrency
+      );
+
+    const configuredRate =
+      getNestedValue(
+        configuredCurrency,
+        [
+          "rate",
+          "exchangeRate",
+          "rateToRwf",
+          "rwfRate",
+          "value",
+        ]
+      );
+
+    if (
+      this.isValidPositiveRate(
+        configuredRate
+      )
+    ) {
+      return SAFE_NUMBER(configuredRate);
+    }
+
+    const fallback =
+      this.defaultRates[
+        normalizedCurrency
+      ];
+
+    if (
+      this.isValidPositiveRate(fallback)
+    ) {
+      return fallback;
+    }
+
+    return null;
+  }
+
+  // ========================================================
+  // EXCHANGE RATE
+  // ========================================================
+
+  async getExchangeRate(
+    fromCurrency,
+    toCurrency
+  ) {
+    const from =
+      this.normalizeCurrency(fromCurrency);
+    const to =
+      this.normalizeCurrency(toCurrency);
+
+    if (!from || !to) {
+      throw new Error(
+        "Both source and target currencies are required"
+      );
+    }
+
+    if (from === to) {
+      return 1;
+    }
+
+    const cached =
+      this.getCachedRate(from, to);
+
+    if (cached !== null) {
+      return cached;
+    }
+
+    // ------------------------------------------------------
+    // 1. ExchangeRateService
+    // ------------------------------------------------------
+
+    try {
+      if (
+        exchangeRateService &&
+        typeof exchangeRateService.getRate ===
+          "function"
+      ) {
+        const serviceRate =
+          await exchangeRateService.getRate(
+            from,
+            to
+          );
+
+        const numericRate =
+          typeof serviceRate === "object"
+            ? getNestedValue(
+                serviceRate,
+                [
+                  "rate",
+                  "exchangeRate",
+                  "value",
+                ]
+              )
+            : serviceRate;
+
+        if (
+          this.isValidPositiveRate(
+            numericRate
+          )
+        ) {
+          const rate =
+            SAFE_NUMBER(numericRate);
+
+          this.setCachedRate(
+            from,
+            to,
+            rate
+          );
+
+          return rate;
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `⚠️ ExchangeRateService.getRate failed (${from} → ${to}):`,
+        error.message
+      );
+    }
+
+    // ------------------------------------------------------
+    // 2. Direct ExchangeRate DB
+    // ------------------------------------------------------
+
+    try {
+      const directRate =
+        await ExchangeRate.findOne({
+          baseCurrency: from,
+          quoteCurrency: to,
+          isActive: {
+            $ne: false,
+          },
+        })
+          .sort({
+            effectiveAt: -1,
+            updatedAt: -1,
+          })
+          .lean();
+
+      const numericRate =
+        getNestedValue(
+          directRate,
+          [
+            "rate",
+            "exchangeRate",
+            "value",
+          ]
+        );
+
+      if (
+        this.isValidPositiveRate(
+          numericRate
+        )
+      ) {
+        const rate =
+          SAFE_NUMBER(numericRate);
+
+        this.setCachedRate(
+          from,
+          to,
+          rate
+        );
+
+        return rate;
+      }
+    } catch (error) {
+      console.warn(
+        `⚠️ Direct ExchangeRate lookup failed (${from} → ${to}):`,
+        error.message
+      );
+    }
+
+    // ------------------------------------------------------
+    // 3. Fallback via RWF
+    // ------------------------------------------------------
+
+    const fromToBase =
+      this.getFallbackRate(from);
+
+    const toToBase =
+      this.getFallbackRate(to);
+
+    if (
+      this.isValidPositiveRate(
+        fromToBase
+      ) &&
+      this.isValidPositiveRate(
+        toToBase
+      )
+    ) {
+      const rate =
+        fromToBase / toToBase;
+
+      if (
+        this.isValidPositiveRate(rate)
+      ) {
+        this.setCachedRate(
+          from,
+          to,
+          rate
+        );
+
+        return rate;
+      }
+    }
+
+    throw new Error(
+      `Exchange rate unavailable for ${from} → ${to}`
+    );
+  }
+
+  // ========================================================
+  // CONVERSION
+  // ========================================================
+
+  async convertAmount(
+    amount,
+    fromCurrency,
+    toCurrency,
+    options = {}
+  ) {
+    const numericAmount =
+      SAFE_NUMBER(amount, 0);
+
+    if (numericAmount < 0) {
+      throw new Error(
+        "Amount cannot be negative"
+      );
+    }
+
+    const from =
+      this.normalizeCurrency(fromCurrency);
+
+    const to =
+      this.normalizeCurrency(toCurrency);
+
+    if (!from || !to) {
+      throw new Error(
+        "Both source and target currencies are required"
+      );
+    }
+
+    if (from === to) {
+      return this.roundAmount(
+        numericAmount,
+        Number.isInteger(options.decimals)
+          ? options.decimals
+          : 2
+      );
+    }
+
+    const rate =
+      await this.getExchangeRate(
+        from,
+        to
+      );
+
+    const converted =
+      numericAmount * rate;
+
+    const decimals =
+      Number.isInteger(options.decimals)
+        ? options.decimals
+        : 2;
+
+    return this.roundAmount(
+      converted,
+      decimals
+    );
+  }
+
+  async convertCurrency(
+    amount,
+    fromCurrency,
+    toCurrency,
+    options = {}
+  ) {
+    return this.convertAmount(
+      amount,
+      fromCurrency,
+      toCurrency,
+      options
+    );
+  }
+
+  async getRateWithConversion(
+    amount,
+    fromCurrency,
+    toCurrency,
+    options = {}
+  ) {
+    const rate =
+      await this.getExchangeRate(
+        fromCurrency,
+        toCurrency
+      );
+
+    const decimals =
+      Number.isInteger(options.decimals)
+        ? options.decimals
+        : 2;
+
+    const convertedAmount =
+      this.roundAmount(
+        SAFE_NUMBER(amount, 0) *
+          rate,
+        decimals
+      );
 
     return {
-      total,
-      active,
-      defaultCurrency: defaultCurrency?.code || null,
-      baseCurrency: baseCurrency?.code || this.baseCurrency,
-      supportedCurrencies: await this.getActiveCurrencies(),
+      amount:
+        SAFE_NUMBER(amount, 0),
+
+      fromCurrency:
+        this.normalizeCurrency(
+          fromCurrency
+        ),
+
+      toCurrency:
+        this.normalizeCurrency(
+          toCurrency
+        ),
+
+      rate,
+
+      convertedAmount,
     };
+  }
+
+  // ========================================================
+  // FORMATTING
+  // ========================================================
+
+  async formatAmount(
+    amount,
+    currency,
+    options = {}
+  ) {
+    const code =
+      this.normalizeCurrency(currency);
+
+    if (!code) {
+      return String(amount);
+    }
+
+    const configuredCurrency =
+      await this.getCurrency(code);
+
+    const decimals =
+      options.decimals ??
+      configuredCurrency?.decimalDigits ??
+      configuredCurrency?.decimals ??
+      2;
+
+    const symbol =
+      options.symbol ||
+      configuredCurrency?.symbol ||
+      code;
+
+    const roundedAmount =
+      this.roundAmount(
+        amount,
+        Number(decimals)
+      );
+
+    if (options.numberOnly) {
+      return roundedAmount.toFixed(
+        Number(decimals)
+      );
+    }
+
+    return `${symbol} ${roundedAmount.toFixed(
+      Number(decimals)
+    )}`;
+  }
+
+  // ========================================================
+  // PLATFORM COMMISSION
+  // ========================================================
+
+  calculatePlatformFee(amount) {
+    const numericAmount =
+      SAFE_NUMBER(amount, 0);
+
+    // AI Tour MVP:
+    // Platform commission = 0%.
+    // Provider receives 100%.
+    return {
+      percentage: 0,
+      fee: 0,
+      grossAmount:
+        this.roundAmount(
+          numericAmount
+        ),
+      providerAmount:
+        this.roundAmount(
+          numericAmount
+        ),
+    };
+  }
+
+  calculateProviderAmount(amount) {
+    const numericAmount =
+      SAFE_NUMBER(amount, 0);
+
+    // 0% platform commission.
+    return this.roundAmount(
+      numericAmount
+    );
+  }
+
+  // ========================================================
+  // VALIDATION
+  // ========================================================
+
+  validateAmount(amount) {
+    const numericAmount =
+      Number(amount);
+
+    return (
+      Number.isFinite(
+        numericAmount
+      ) &&
+      numericAmount >= 0
+    );
+  }
+
+  validateCurrency(currency) {
+    const normalized =
+      this.normalizeCurrency(currency);
+
+    return Boolean(
+      normalized &&
+        /^[A-Z]{3}$/.test(normalized)
+    );
+  }
+
+  async validateCurrencyPair(
+    fromCurrency,
+    toCurrency
+  ) {
+    const from =
+      this.normalizeCurrency(
+        fromCurrency
+      );
+
+    const to =
+      this.normalizeCurrency(
+        toCurrency
+      );
+
+    if (!this.validateCurrency(from)) {
+      return {
+        valid: false,
+        reason:
+          `Invalid source currency: ${fromCurrency}`,
+      };
+    }
+
+    if (!this.validateCurrency(to)) {
+      return {
+        valid: false,
+        reason:
+          `Invalid target currency: ${toCurrency}`,
+      };
+    }
+
+    const fromActive =
+      await this.isCurrencyActive(
+        from
+      );
+
+    const toActive =
+      await this.isCurrencyActive(
+        to
+      );
+
+    if (!fromActive) {
+      return {
+        valid: false,
+        reason:
+          `Source currency ${from} is not active`,
+      };
+    }
+
+    if (!toActive) {
+      return {
+        valid: false,
+        reason:
+          `Target currency ${to} is not active`,
+      };
+    }
+
+    if (from === to) {
+      return {
+        valid: true,
+        rate: 1,
+      };
+    }
+
+    try {
+      const rate =
+        await this.getExchangeRate(
+          from,
+          to
+        );
+
+      return {
+        valid: true,
+        rate,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        reason: error.message,
+      };
+    }
+  }
+
+  // ========================================================
+  // CURRENCY ADMINISTRATION
+  // ========================================================
+
+  async createCurrency(data) {
+    const code =
+      this.normalizeCurrency(
+        data?.code
+      );
+
+    if (!code) {
+      throw new Error(
+        "Currency code is required"
+      );
+    }
+
+    if (!this.validateCurrency(code)) {
+      throw new Error(
+        `Invalid currency code: ${code}`
+      );
+    }
+
+    const existing =
+      await Currency.findOne({
+        code,
+      });
+
+    if (existing) {
+      return existing;
+    }
+
+    return Currency.create({
+      ...data,
+      code,
+      isActive:
+        data?.isActive !== undefined
+          ? Boolean(data.isActive)
+          : true,
+    });
+  }
+
+  async updateCurrency(
+    code,
+    updates = {}
+  ) {
+    const normalizedCode =
+      this.normalizeCurrency(code);
+
+    if (!normalizedCode) {
+      throw new Error(
+        "Currency code is required"
+      );
+    }
+
+    const sanitizedUpdates = {
+      ...updates,
+      code: normalizedCode,
+    };
+
+    const result =
+      await Currency.findOneAndUpdate(
+        {
+          code: normalizedCode,
+        },
+        sanitizedUpdates,
+        {
+          new: true,
+          runValidators: true,
+        }
+      );
+
+    this.clearCache();
+
+    return result;
+  }
+
+  async activateCurrency(code) {
+    return this.updateCurrency(code, {
+      isActive: true,
+    });
+  }
+
+  async deactivateCurrency(code) {
+    return this.updateCurrency(code, {
+      isActive: false,
+    });
+  }
+
+  async deleteCurrency(code) {
+    const normalizedCode =
+      this.normalizeCurrency(code);
+
+    if (
+      normalizedCode ===
+      this.baseCurrency
+    ) {
+      throw new Error(
+        "Base currency cannot be deleted"
+      );
+    }
+
+    const result =
+      await Currency.findOneAndDelete({
+        code: normalizedCode,
+      });
+
+    this.clearCache();
+
+    return result;
+  }
+
+  // ========================================================
+  // EXCHANGE RATE ADMINISTRATION
+  // ========================================================
+
+  async createExchangeRate(data) {
+    const baseCurrency =
+      this.normalizeCurrency(
+        data?.baseCurrency ||
+          data?.fromCurrency
+      );
+
+    const quoteCurrency =
+      this.normalizeCurrency(
+        data?.quoteCurrency ||
+          data?.toCurrency
+      );
+
+    const rate =
+      SAFE_NUMBER(
+        data?.rate ??
+          data?.exchangeRate ??
+          data?.value,
+        0
+      );
+
+    if (
+      !baseCurrency ||
+      !quoteCurrency
+    ) {
+      throw new Error(
+        "baseCurrency and quoteCurrency are required"
+      );
+    }
+
+    if (
+      !this.isValidPositiveRate(rate)
+    ) {
+      throw new Error(
+        "Exchange rate must be greater than zero"
+      );
+    }
+
+    const result =
+      await ExchangeRate.create({
+        ...data,
+        baseCurrency,
+        quoteCurrency,
+        rate,
+      });
+
+    this.clearCache();
+
+    return result;
+  }
+
+  async updateExchangeRate(
+    id,
+    updates = {}
+  ) {
+    const sanitizedUpdates = {
+      ...updates,
+    };
+
+    if (updates.baseCurrency) {
+      sanitizedUpdates.baseCurrency =
+        this.normalizeCurrency(
+          updates.baseCurrency
+        );
+    }
+
+    if (updates.quoteCurrency) {
+      sanitizedUpdates.quoteCurrency =
+        this.normalizeCurrency(
+          updates.quoteCurrency
+        );
+    }
+
+    if (
+      updates.rate !== undefined ||
+      updates.exchangeRate !==
+        undefined
+    ) {
+      sanitizedUpdates.rate =
+        SAFE_NUMBER(
+          updates.rate ??
+            updates.exchangeRate,
+          0
+        );
+    }
+
+    const result =
+      await ExchangeRate.findByIdAndUpdate(
+        id,
+        sanitizedUpdates,
+        {
+          new: true,
+          runValidators: true,
+        }
+      );
+
+    this.clearCache();
+
+    return result;
+  }
+
+  async getExchangeRates(
+    filters = {}
+  ) {
+    const query = {};
+
+    if (filters.baseCurrency) {
+      query.baseCurrency =
+        this.normalizeCurrency(
+          filters.baseCurrency
+        );
+    }
+
+    if (filters.quoteCurrency) {
+      query.quoteCurrency =
+        this.normalizeCurrency(
+          filters.quoteCurrency
+        );
+    }
+
+    if (
+      filters.isActive !== undefined
+    ) {
+      query.isActive = Boolean(
+        filters.isActive
+      );
+    }
+
+    return ExchangeRate.find(query)
+      .sort({
+        updatedAt: -1,
+      })
+      .lean();
+  }
+
+  // ========================================================
+  // PREVIEW
+  // ========================================================
+
+  async previewConversion(
+    amount,
+    fromCurrency,
+    toCurrency
+  ) {
+    const result =
+      await this.getRateWithConversion(
+        amount,
+        fromCurrency,
+        toCurrency
+      );
+
+    return {
+      ...result,
+
+      // AI Tour MVP commission = 0%.
+      platformFee: 0,
+
+      providerAmount:
+        result.convertedAmount,
+    };
+  }
+
+  // ========================================================
+  // HEALTH
+  // ========================================================
+
+  async healthCheck() {
+    const result = {
+      service: "CurrencyService",
+      healthy: true,
+      baseCurrency:
+        this.baseCurrency,
+      cacheEntries:
+        this.cache.size,
+      timestamp:
+        new Date().toISOString(),
+    };
+
+    try {
+      await this.getActiveCurrencies();
+
+      result.database =
+        "available";
+    } catch (error) {
+      result.database =
+        "unavailable";
+
+      result.healthy = false;
+
+      result.error =
+        error.message;
+    }
+
+    return result;
+  }
+
+  // ========================================================
+  // CLEANUP
+  // ========================================================
+
+  cleanupCache() {
+    const now = Date.now();
+
+    for (const [
+      key,
+      entry,
+    ] of this.cache.entries()) {
+      if (
+        now - entry.timestamp >
+        this.cacheDuration
+      ) {
+        this.cache.delete(key);
+      }
+    }
   }
 }
 
-// =========================
-// ✅ CREATE AND EXPORT SINGLETON
-// =========================
+// ==========================================================
+// SINGLETON
+// ==========================================================
 
-const currencyService = new CurrencyService();
+const currencyService =
+  new CurrencyService();
+
+// Default import compatibility.
 export default currencyService;
+
+// Named import compatibility.
+export { currencyService };
