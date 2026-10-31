@@ -1,6 +1,7 @@
-// src/pages/ProviderStatus.jsx
-// ✅ Complete: waiting page subscribes to live status updates from admin approvals
-// ✅ Fixed: auto-redirect now fires on live status change (was blocked by stale localStorage)
+// src/pages/provider/ProviderStatus.jsx
+// ✅ COMPLETE FIXED — corrected useRefreshOn import path for provider/ subfolder
+// ✅ Full: waiting page subscribes to live status updates from admin approvals
+// ✅ Fixed: auto-redirect now fires on live status change
 
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
@@ -16,7 +17,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import useRefreshOn from '../hooks/useRefreshOn';
+import useRefreshOn from "../../hooks/useRefreshOn";
 
 // ===============================
 // AI TOUR COLORS

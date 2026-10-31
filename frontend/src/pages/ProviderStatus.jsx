@@ -1,5 +1,6 @@
-// src/pages/ProviderStatus.jsx
-// ✅ COMPLETE FIXED - Uses getMyProviderRequest service with proper error handling
+// src/pages/provider/ProviderStatus.jsx
+// ✅ COMPLETE FIXED — corrected import paths for nested provider/ folder
+// ✅ Uses getMyProviderRequest service with proper error handling
 
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -14,8 +15,8 @@ import {
   ShieldCheck,
   User,
 } from "lucide-react";
-import { getMyProviderRequest } from "../services/providerService";
-import { useAuth } from "../contexts/AuthContext";
+import { getMyProviderRequest } from "../../services/providerService";
+import { useAuth } from "../../contexts/AuthContext";
 
 // ===============================
 // AI TOUR COLORS
@@ -49,11 +50,9 @@ const ProviderStatus = () => {
     try {
       setLoading(true);
       setError(null);
-      
-      console.log('📌 Fetching provider request...');
+
       const data = await getMyProviderRequest();
-      console.log("✅ Provider request:", data);
-      
+
       if (data && data.request) {
         setRequest(data.request);
         // ✅ Refresh user to update role/status
@@ -68,7 +67,7 @@ const ProviderStatus = () => {
       console.error("❌ Provider status error:", error);
       console.error("❌ Response status:", error.response?.status);
       console.error("❌ Response data:", error.response?.data);
-      
+
       if (error.response?.status === 401) {
         setError("Your session has expired. Please login again.");
         localStorage.removeItem('token');
@@ -93,7 +92,6 @@ const ProviderStatus = () => {
       user?.verificationStatus === "approved"
     ) {
       hasRedirectedRef.current = true;
-      console.log('✅ Provider approved, redirecting to dashboard...');
       navigate("/provider/dashboard");
     }
   }, [user, navigate]);
