@@ -1,10 +1,7 @@
 // frontend/src/pages/admin/HeroMedia.jsx
-// ✅ COMPLETE FIXED - Backend upload with progress
-// ✅ No direct Cloudinary upload
-// ✅ Shows upload progress bar
-// ✅ Supports large video files (up to 500MB)
-// ✅ Removed required validation for Title, Description, Listing
-// ✅ RESPONSIVE: Mobile-optimized with proper touch targets
+// ✅ Backend upload with progress
+// ✅ Refresh bus wired — cross-tab sync for hero videos + listings
+// ✅ Mobile-optimized with 44px+ touch targets
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -42,20 +39,22 @@ import {
   updateHeroVideoPriority,
 } from "../../services/heroService";
 import { getListings } from "../../services/listingService";
+import useRefreshOn from "../../hooks/useRefreshOn";
+import { refreshMany } from "../../utils/dataRefresh";
 
 // ─── STATUS BADGE ──────────────────────────────────────────────
 const StatusBadge = ({ enabled }) => {
   if (enabled) {
     return (
       <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[8px] sm:text-xs font-semibold bg-[#0D9488]/10 text-[#0D9488]">
-        <Eye className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> 
+        <Eye className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
         <span className="hidden xs:inline">Active</span>
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[8px] sm:text-xs font-semibold bg-gray-100 text-gray-500">
-      <EyeOff className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> 
+      <EyeOff className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
       <span className="hidden xs:inline">Hidden</span>
     </span>
   );
@@ -64,10 +63,10 @@ const StatusBadge = ({ enabled }) => {
 // ─── PROGRESS BAR ──────────────────────────────────────────────
 const UploadProgress = ({ progress }) => {
   if (progress === null || progress === undefined) return null;
-  
+
   const isComplete = progress >= 100;
   const isError = progress < 0;
-  
+
   return (
     <div className="mt-2 sm:mt-3">
       <div className="flex items-center justify-between text-[10px] sm:text-xs text-gray-500 mb-0.5 sm:mb-1">
@@ -169,6 +168,9 @@ const HeroMedia = () => {
     fetchListings();
   }, []);
 
+  // 🔄 Cross-page sync: another admin tab's hero changes flip this page live
+  useRefreshOn(["hero", "listings"], fetchItems);
+
   // ── Handle Create ─────────────────────────────────────────────
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -178,7 +180,6 @@ const HeroMedia = () => {
       return;
     }
 
-    // File size validation
     const MAX_SIZE = 500 * 1024 * 1024; // 500MB
     const WARNING_SIZE = 200 * 1024 * 1024; // 200MB
 
@@ -212,9 +213,12 @@ const HeroMedia = () => {
 
       if (response.success) {
         toast.success("Hero video created! 🎉", { id: 'hero-upload' });
+
+        // 🔄 Broadcast: hero videos changed → other admin tabs + Home page refresh
+        refreshMany("hero", "dashboard");
+
         setShowCreateModal(false);
         resetForm();
-        // ✅ Update list without page refresh
         await fetchItems();
       } else {
         toast.error(response.message || "Failed to create", { id: 'hero-upload' });
@@ -234,6 +238,10 @@ const HeroMedia = () => {
     try {
       setFormLoading(true);
       await updateHeroVideo(selectedItem._id, form);
+
+      // 🔄 Broadcast
+      refreshMany("hero", "dashboard");
+
       toast.success("Updated successfully! ✅");
       setShowEditModal(false);
       setSelectedItem(null);
@@ -252,6 +260,10 @@ const HeroMedia = () => {
     try {
       setUploadingVideo(true);
       await uploadHeroVideoFile(selectedItem._id, videoFile);
+
+      // 🔄 Broadcast
+      refreshMany("hero", "dashboard");
+
       toast.success("Video uploaded! 🎬");
       setVideoFile(null);
       setVideoPreview(null);
@@ -267,6 +279,10 @@ const HeroMedia = () => {
   const handleToggle = async (id, isActive) => {
     try {
       await toggleHeroVideo(id, isActive);
+
+      // 🔄 Broadcast
+      refreshMany("hero", "dashboard");
+
       toast.success(`Video ${isActive ? "activated" : "hidden"}`);
       await fetchItems();
     } catch (err) {
@@ -279,6 +295,10 @@ const HeroMedia = () => {
     if (!window.confirm("Delete this hero video?")) return;
     try {
       await deleteHeroVideo(id);
+
+      // 🔄 Broadcast
+      refreshMany("hero", "dashboard");
+
       toast.success("Deleted");
       await fetchItems();
     } catch (err) {
@@ -300,6 +320,10 @@ const HeroMedia = () => {
     try {
       await updateHeroVideoPriority(currentItem._id, targetItem.priority || 0);
       await updateHeroVideoPriority(targetItem._id, currentItem.priority || 0);
+
+      // 🔄 Broadcast
+      refreshMany("hero", "dashboard");
+
       await fetchItems();
       toast.success("Priority updated");
     } catch (err) {
@@ -654,7 +678,8 @@ const HeroMedia = () => {
 
               {/* Title - OPTIONAL */}
               <div>
-                <label className="block text-xs sm:text-sm font-semibold text-[#374151] dark:text-white mb-1 sm:mb-1.5">
+                <label                   className="block text-xs sm:text-sm font-semibold text-[#374151] dark:text-white mb-1 sm:mb-1.5"
+                >
                   Title <span className="text-[10px] sm:text-xs text-gray-400">(Optional)</span>
                 </label>
                 <input
